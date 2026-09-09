@@ -1,5 +1,7 @@
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+
+from dashboard.ingestion.secrets import redact
 
 
 class EdgarClientError(Exception):
@@ -14,12 +16,14 @@ class EdgarClient:
         now: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         min_interval: float = 0.1,
+        secrets: Iterable[str] = (),
     ) -> None:
         self._user_agent = user_agent
         self._transport = transport
         self._now = now
         self._sleep = sleep
         self._min_interval = min_interval
+        self._secrets = tuple(secrets)
         self._last_call: float | None = None
 
     def get_json(self, url: str) -> dict | list:
@@ -33,4 +37,5 @@ class EdgarClient:
         try:
             return self._transport(url, {"User-Agent": self._user_agent})
         except Exception as exc:
-            raise EdgarClientError(str(exc)) from exc
+            message = redact(str(exc), self._secrets)
+            raise EdgarClientError(message) from None

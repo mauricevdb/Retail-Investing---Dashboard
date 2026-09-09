@@ -1,5 +1,7 @@
 from collections.abc import Callable
 
+from dashboard.ingestion.secrets import redact
+
 
 class EodhdClientError(Exception):
     pass
@@ -18,4 +20,5 @@ class EodhdClient:
         try:
             return self._transport(url, {"api_token": self._api_key})
         except Exception as exc:
-            raise EodhdClientError(str(exc)) from exc
+            message = redact(str(exc), [self._api_key])
+            raise EodhdClientError(message) from None
