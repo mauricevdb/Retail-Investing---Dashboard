@@ -44,3 +44,16 @@ def parse_company_facts(raw: dict) -> pl.DataFrame:
         for entry in entries
     ]
     return pl.DataFrame(rows, schema=_SCHEMA)
+
+
+def count_rejected_taxonomies(raw: dict) -> dict[str, int]:
+    counts = {}
+    for taxonomy, concepts in raw["facts"].items():
+        if taxonomy in _ALLOWED_TAXONOMIES:
+            continue
+        counts[taxonomy] = sum(
+            len(entries)
+            for concept_data in concepts.values()
+            for entries in concept_data["units"].values()
+        )
+    return counts
