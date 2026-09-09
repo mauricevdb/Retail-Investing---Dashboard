@@ -17,15 +17,18 @@ _SCHEMA = {
 }
 
 
+_ALLOWED_TAXONOMIES = ("us-gaap", "dei")
+
+
 def parse_company_facts(raw: dict) -> pl.DataFrame:
     cik = str(raw["cik"]).zfill(10)
-    us_gaap = raw["facts"].get("us-gaap", {})
+    all_taxonomies = raw["facts"]
 
     rows = [
         {
             "cik": cik,
             "concept": concept,
-            "taxonomy": "us-gaap",
+            "taxonomy": taxonomy,
             "unit": unit,
             "end": date.fromisoformat(entry["end"]),
             "start": date.fromisoformat(entry["start"]) if "start" in entry else None,
@@ -35,7 +38,8 @@ def parse_company_facts(raw: dict) -> pl.DataFrame:
             "fiscal_period": entry["fp"],
             "fiscal_year": entry["fy"],
         }
-        for concept, concept_data in us_gaap.items()
+        for taxonomy in _ALLOWED_TAXONOMIES
+        for concept, concept_data in all_taxonomies.get(taxonomy, {}).items()
         for unit, entries in concept_data["units"].items()
         for entry in entries
     ]

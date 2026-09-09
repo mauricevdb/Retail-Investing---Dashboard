@@ -58,8 +58,10 @@ suivi régulier d'un univers de cette taille.
 
 - Temps réel et flux en direct : l'écran travaille sur cotations différées
   et sur un traitement quotidien (décision D5).
-- Émetteurs déposant en IFRS et émetteurs étrangers : la taxonomie retenue
-  est `us-gaap` seule (décision D2).
+- Les émetteurs étrangers publiant en IFRS sont exclus de la tranche 0001
+  (voir décision D2 de research.md). L'exclusion porte sur la catégorie
+  d'émetteurs, non sur une taxonomie : les faits de la taxonomie `dei`,
+  présents dans tous les dépôts américains normaux, sont retenus.
 - Petites capitalisations hors de l'univers défini par règle, environ 900
   sociétés (décision D4, ADR 0002).
 - L'appartenance à un indice publié (S&P 500, S&P 400 ou autre) comme

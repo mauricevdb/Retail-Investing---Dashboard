@@ -18,7 +18,7 @@ def test_ifrs_taxonomy_excluded() -> None:
 
     alpha_df = parse_company_facts(_load("0000000001"))
     assert alpha_df.height > 0
-    assert set(alpha_df["taxonomy"]) == {"us-gaap"}
+    assert set(alpha_df["taxonomy"]) == {"us-gaap", "dei"}
     assert set(alpha_df.columns) == {
         "cik",
         "concept",
@@ -45,3 +45,11 @@ def test_ifrs_taxonomy_excluded() -> None:
     assert operating_income["accn"] == "0000000001-24-000010"
     assert operating_income["fiscal_period"] == "FY"
     assert operating_income["fiscal_year"] == 2023
+
+    shares_outstanding = alpha_df.filter(
+        alpha_df["concept"] == "EntityCommonStockSharesOutstanding"
+    ).row(0, named=True)
+    assert shares_outstanding["taxonomy"] == "dei"
+    assert shares_outstanding["unit"] == "shares"
+    assert shares_outstanding["value"] == 100000000
+    assert shares_outstanding["start"] is None

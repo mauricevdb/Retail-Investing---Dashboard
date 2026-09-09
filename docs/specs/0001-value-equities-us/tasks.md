@@ -45,7 +45,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Test** : `test_edgar_submissions_parses_filing_history` — chaque dépôt
   de la fixture apparaît avec son `accn` et sa date `filed`.
 - **Critères de la spec couverts** : aucun directement (prérequis du
-  critère 9, prouvé en T53).
+  critère 9, prouvé en T54).
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
 
@@ -58,17 +58,23 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   SIC et `entity_type` de chaque émetteur de la fixture (y compris le cas
   SIC 6000–6799 et le cas fonds/ETF) sont correctement extraits.
 - **Critères de la spec couverts** : aucun directement (prérequis des
-  critères 14, 23, prouvés en T26).
+  critères 14, 23, prouvés en T27).
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
 
-### T5 — Ingérer les fondamentaux `us-gaap`, rejeter l'IFRS
+### T5 — Ingérer les fondamentaux, rejeter les émetteurs IFRS
 - **Objectif** : produire `fundamentals_raw.parquet` à partir de
-  `companyfacts`, en ne retenant que la taxonomie `us-gaap`.
+  `companyfacts`, en ne retenant que les taxonomies `us-gaap` et `dei`
+  (liste blanche) — un émetteur `ifrs-full` produit alors zéro ligne,
+  faute de fait dans l'une ou l'autre.
 - **Fichiers** : `src/dashboard/ingestion/edgar_facts.py`,
   `tests/unit/test_edgar_facts_taxonomy.py`.
 - **Test** : `test_ifrs_taxonomy_excluded` — un émetteur `ifrs-full` de la
-  fixture n'apparaît dans aucune ligne de `fundamentals_raw.parquet`.
+  fixture n'apparaît dans aucune ligne de `fundamentals_raw.parquet` ;
+  un émetteur `us-gaap` conserve à la fois ses faits `us-gaap` et `dei`
+  (amendement : `dei:EntityCommonStockSharesOutstanding`, nécessaire à
+  T18, appartient à la taxonomie `dei`, distincte de `us-gaap` — un filtre
+  à `us-gaap` seul l'aurait aussi exclu par erreur).
 - **Critères de la spec couverts** : #5.
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
@@ -85,7 +91,25 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T5.
 
-### T7 — Ingérer les prix bruts et ajustés séparément
+### T7 — Compter les faits rejetés par taxonomie
+- **Objectif** : `ingestion.edgar_facts` compte, par taxonomie hors liste
+  blanche `{us-gaap, dei}`, le nombre de faits rejetés — jamais un rejet
+  silencieux et non comptabilisé (amendement de T5 : liste blanche plutôt
+  que liste noire, R1/invariant 7).
+- **Fichiers** : `src/dashboard/ingestion/edgar_facts.py`,
+  `tests/unit/test_edgar_facts_rejected_taxonomies.py`.
+- **Test** : `test_edgar_facts_counts_rejected_taxonomies` — l'émetteur
+  `ifrs-full` de la fixture donne `{"ifrs-full": 1}` ; l'émetteur `us-gaap`
+  (dont les faits sont tous dans la liste blanche) donne `{}`, explicitement
+  vide plutôt qu'absent.
+- **Critères de la spec couverts** : aucun directement (prérequis du
+  critère 11 et de l'invariant 7 ; le report effectif dans l'écran
+  quotidien reste à câbler dans `pipeline.daily_run`, hors périmètre de
+  cette tâche).
+- **Terminée quand** : le test passe.
+- **Dépend de** : T5.
+
+### T8 — Ingérer les prix bruts et ajustés séparément
 - **Objectif** : produire `prices_raw.parquet` et `prices_adjusted.parquet`
   comme deux tables distinctes à partir du bulk EODHD.
 - **Fichiers** : `src/dashboard/ingestion/eodhd_prices.py`,
@@ -97,7 +121,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
 
-### T8 — Ingérer les opérations sur titres
+### T9 — Ingérer les opérations sur titres
 - **Objectif** : produire `corporate_actions.parquet` (splits, dividendes)
   à partir du bulk EODHD.
 - **Fichiers** : `src/dashboard/ingestion/eodhd_actions.py`,
@@ -105,11 +129,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Test** : `test_corporate_actions_parsed` — le fractionnement de la
   fixture apparaît avec son ratio et sa date d'effet.
 - **Critères de la spec couverts** : aucun directement (prérequis du
-  critère 4, prouvé en T39).
+  critère 4, prouvé en T40).
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
 
-### T9 — Masquer les secrets dans un texte
+### T10 — Masquer les secrets dans un texte
 - **Objectif** : `ingestion.secrets.redact` remplace, dans un texte, toute
   occurrence d'un secret configuré par un marqueur non exploitable.
 - **Fichiers** : `src/dashboard/ingestion/secrets.py`,
@@ -118,11 +142,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   clé factice fournie en paramètre ne la contient plus après `redact` ; un
   texte sans cette clé reste inchangé caractère pour caractère.
 - **Critères de la spec couverts** : aucun directement (prérequis
-  Invariant 10, prouvé en T12).
+  Invariant 10, prouvé en T13).
 - **Terminée quand** : le test passe.
 - **Dépend de** : aucune.
 
-### T10 — Client EDGAR : User-Agent, débit limité, échec explicite
+### T11 — Client EDGAR : User-Agent, débit limité, échec explicite
 - **Objectif** : `ingestion.edgar_client.get_json` envoie le User-Agent
   configuré, respace les appels d'au moins 100 ms (10 req/s), et lève une
   exception explicite si le transport échoue — jamais un résultat vide ou
@@ -135,11 +159,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   déclenche une attente calculée par le limiteur ; un transport qui échoue
   fait lever une exception, jamais un `dict` vide.
 - **Critères de la spec couverts** : aucun directement (prérequis
-  Invariant 10 ; base réseau pour T49 et suivants).
+  Invariant 10 ; base réseau pour T50 et suivants).
 - **Terminée quand** : le test passe.
 - **Dépend de** : aucune.
 
-### T11 — Client EODHD : authentification par clé, échec explicite
+### T12 — Client EODHD : authentification par clé, échec explicite
 - **Objectif** : `ingestion.eodhd_client.get_json` authentifie chaque
   requête par la clé configurée et lève une exception explicite si le
   transport échoue.
@@ -150,11 +174,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   envoyée (paramètre d'authentification) ; un transport qui échoue fait
   lever une exception, jamais un résultat vide.
 - **Critères de la spec couverts** : aucun directement (prérequis
-  Invariant 10 ; base réseau pour T49 et suivants).
+  Invariant 10 ; base réseau pour T50 et suivants).
 - **Terminée quand** : le test passe.
 - **Dépend de** : aucune.
 
-### T12 — Ne jamais exposer une clé d'API dans une erreur réseau réelle
+### T13 — Ne jamais exposer une clé d'API dans une erreur réseau réelle
 - **Objectif** : un échec réel du transport HTTP dans l'un ou l'autre
   client ne laisse la clé apparaître ni dans le message d'exception, ni
   dans sa trace, ni dans un journal.
@@ -169,9 +193,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   `secrets.redact` est retiré du chemin d'erreur des clients.
 - **Critères de la spec couverts** : Invariant 10.
 - **Terminée quand** : le test passe pour les deux clients.
-- **Dépend de** : T9, T10, T11.
+- **Dépend de** : T10, T11, T12.
 
-### T13 — Fournir l'heure système en UTC, en un point unique
+### T14 — Fournir l'heure système en UTC, en un point unique
 - **Objectif** : `ingestion.clock.now` est l'unique point d'accès à l'heure
   système du projet, et renvoie toujours un instant explicitement en UTC
   (invariant 5).
@@ -182,7 +206,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   local), et sa valeur est à quelques secondes de l'heure réelle au moment
   de l'appel — pas une valeur figée ou incohérente.
 - **Critères de la spec couverts** : aucun directement (support invariant
-  5 ; `calc.market_calendar`, T16, reçoit déjà l'instant en paramètre et ne
+  5 ; `calc.market_calendar`, T17, reçoit déjà l'instant en paramètre et ne
   lit jamais l'horloge lui-même — c'est `ingestion.clock` qui la lui
   fournira depuis `pipeline.daily_run`).
 - **Terminée quand** : le test passe.
@@ -190,7 +214,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 
 ## Calcul — fondations point-in-time et calendrier
 
-### T14 — Refuser tout look-ahead
+### T15 — Refuser tout look-ahead
 - **Objectif** : `calc.point_in_time` ne renvoie jamais une valeur dont
   `filed > t`.
 - **Fichiers** : `src/dashboard/calc/point_in_time.py`,
@@ -202,7 +226,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T5.
 
-### T15 — Résoudre la dernière valeur connue malgré un retraitement
+### T16 — Résoudre la dernière valeur connue malgré un retraitement
 - **Objectif** : `calc.point_in_time` retourne la valeur du dépôt le plus
   récent avec `filed ≤ t`, sans que le dépôt antérieur ne disparaisse du
   stockage.
@@ -216,7 +240,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe.
 - **Dépend de** : T6.
 
-### T16 — Résoudre la dernière séance de bourse effective
+### T17 — Résoudre la dernière séance de bourse effective
 - **Objectif** : `calc.market_calendar.last_session` ne lit jamais
   l'horloge système et résout correctement un jour non ouvré.
 - **Fichiers** : `src/dashboard/calc/market_calendar.py`,
@@ -231,7 +255,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 
 ## Calcul — grandeurs dérivées (bridges)
 
-### T17 — Chaîne de repli des actions en circulation
+### T18 — Chaîne de repli des actions en circulation
 - **Objectif** : `calc.shares_bridge` applique la chaîne de tags définie
   dans le plan et signale le statut calculable/non calculable.
 - **Fichiers** : `src/dashboard/calc/shares_bridge.py`,
@@ -240,11 +264,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   fixture, un par niveau de repli, plus un cas sans aucun tag disponible
   (non calculable).
 - **Critères de la spec couverts** : aucun directement (prérequis du
-  critère 11, prouvé en T38).
+  critère 11, prouvé en T39).
 - **Terminée quand** : le test passe.
 - **Dépend de** : T5.
 
-### T18 — Chaîne de repli de l'EBIT
+### T19 — Chaîne de repli de l'EBIT
 - **Objectif** : `calc.ebit_bridge` (et `calc.interest_bridge` pour son
   repli) applique la chaîne définie dans le plan.
 - **Fichiers** : `src/dashboard/calc/ebit_bridge.py`,
@@ -258,7 +282,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe.
 - **Dépend de** : T5.
 
-### T19 — D&A et EBITDA
+### T20 — D&A et EBITDA
 - **Objectif** : `calc.dna_bridge` applique sa chaîne de repli ;
   `calc.ebitda` compose EBIT + D&A.
 - **Fichiers** : `src/dashboard/calc/dna_bridge.py`,
@@ -268,9 +292,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Critères de la spec couverts** : aucun directement (prérequis du
   critère 11).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T18.
+- **Dépend de** : T19.
 
-### T20 — Chaîne de repli du free cash flow
+### T21 — Chaîne de repli du free cash flow
 - **Objectif** : `calc.fcf_bridge` applique la chaîne CFO − CapEx définie
   dans le plan, avec ses replis.
 - **Fichiers** : `src/dashboard/calc/fcf_bridge.py`,
@@ -282,7 +306,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe.
 - **Dépend de** : T5.
 
-### T21 — Chaîne de repli de la dette totale
+### T22 — Chaîne de repli de la dette totale
 - **Objectif** : `calc.debt_bridge` somme les composantes trouvées, sans
   repli à zéro en cas d'absence totale.
 - **Fichiers** : `src/dashboard/calc/debt_bridge.py`,
@@ -295,7 +319,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe.
 - **Dépend de** : T5.
 
-### T22 — Chaîne de repli de la trésorerie
+### T23 — Chaîne de repli de la trésorerie
 - **Objectif** : `calc.cash_bridge` applique sa chaîne de repli, sans
   inclure les placements à court terme.
 - **Fichiers** : `src/dashboard/calc/cash_bridge.py`,
@@ -307,7 +331,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe.
 - **Dépend de** : T5.
 
-### T23 — Chaîne de repli des capitaux propres
+### T24 — Chaîne de repli des capitaux propres
 - **Objectif** : `calc.equity_bridge` applique sa chaîne de repli.
 - **Fichiers** : `src/dashboard/calc/equity_bridge.py`,
   `tests/calc/test_equity_bridge.py`.
@@ -318,18 +342,18 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe.
 - **Dépend de** : T5.
 
-### T24 — Dette nette
+### T25 — Dette nette
 - **Objectif** : `calc.net_debt` calcule dette totale − trésorerie.
 - **Fichiers** : `src/dashboard/calc/net_debt.py`,
   `tests/calc/test_net_debt.py`.
 - **Test** : `test_net_debt_formula` — valeur correcte quand les deux
   composantes sont calculables, non calculable sinon.
 - **Critères de la spec couverts** : aucun directement (prérequis du
-  critère 11 ; utilisé par T34, dette nette/EBITDA).
+  critère 11 ; utilisé par T35, dette nette/EBITDA).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T21, T22.
+- **Dépend de** : T22, T23.
 
-### T25 — Capital investi
+### T26 — Capital investi
 - **Objectif** : `calc.invested_capital` calcule dette totale + capitaux
   propres − trésorerie, non calculable pour le ROIC si le résultat est ≤ 0.
 - **Fichiers** : `src/dashboard/calc/invested_capital.py`,
@@ -339,11 +363,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Critères de la spec couverts** : aucun directement (prérequis du
   critère 11).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T21, T22, T23.
+- **Dépend de** : T22, T23, T24.
 
 ## Calcul — univers défini par règle
 
-### T26 — Exclure SIC 6000–6799 et les fonds/ETF
+### T27 — Exclure SIC 6000–6799 et les fonds/ETF
 - **Objectif** : `calc.universe` applique sa règle d'exclusion (étape 1)
   avant tout classement.
 - **Fichiers** : `src/dashboard/calc/universe.py`,
@@ -355,7 +379,7 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Terminée quand** : le test passe.
 - **Dépend de** : T4.
 
-### T27 — Classer par capitalisation lissée sur 20 séances
+### T28 — Classer par capitalisation lissée sur 20 séances
 - **Objectif** : `calc.universe` calcule la capitalisation à partir des
   actions en circulation point-in-time et de la moyenne du cours ajusté sur
   20 séances, puis classe les titres.
@@ -368,9 +392,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Critères de la spec couverts** : aucun directement (prérequis des
   critères 24, 25).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T17, T7, T26.
+- **Dépend de** : T18, T8, T27.
 
-### T28 — Appliquer l'hystérésis au rang de coupure
+### T29 — Appliquer l'hystérésis au rang de coupure
 - **Objectif** : un titre déjà dans l'univers reste jusqu'au rang N+buffer,
   un titre absent n'entre qu'au rang N−buffer.
 - **Fichiers** : `src/dashboard/calc/universe.py`,
@@ -380,9 +404,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   statut d'appartenance sur toute la séquence.
 - **Critères de la spec couverts** : #24.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T27.
+- **Dépend de** : T28.
 
-### T29 — Échouer bruyamment si la taille de l'univers est implausible
+### T30 — Échouer bruyamment si la taille de l'univers est implausible
 - **Objectif** : `calc.universe` renvoie un échec explicite si le nombre
   de titres résultant sort de la plage configurée, plutôt qu'un univers
   tronqué.
@@ -393,11 +417,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   explicite, pas un univers de quelques titres affiché comme normal.
 - **Critères de la spec couverts** : #25 (volet calcul).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T26, T27, T28.
+- **Dépend de** : T27, T28, T29.
 
 ## Calcul — indicateurs et ratios
 
-### T30 — Valeur d'entreprise
+### T31 — Valeur d'entreprise
 - **Objectif** : `calc.ev` calcule capitalisation + dette nette.
 - **Fichiers** : `src/dashboard/calc/ev.py`, `tests/calc/test_ev.py`.
 - **Test** : `test_ev_formula` — valeur correcte, non calculable si la
@@ -405,9 +429,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Critères de la spec couverts** : aucun directement (prérequis du
   critère 11).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T24, T27.
+- **Dépend de** : T25, T28.
 
-### T31 — NOPAT avec taux d'imposition plafonné
+### T32 — NOPAT avec taux d'imposition plafonné
 - **Objectif** : calculer le taux d'imposition effectif borné à [0 %,
   50 %], avec repli à 21 % si le résultat avant impôt n'est pas
   strictement positif.
@@ -418,9 +442,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Critères de la spec couverts** : aucun directement (prérequis du
   critère 11).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T18, T14.
+- **Dépend de** : T19, T15.
 
-### T32 — ROIC
+### T33 — ROIC
 - **Objectif** : `calc.roic` = NOPAT / capital investi, non calculable si
   le capital investi est ≤ 0.
 - **Fichiers** : `src/dashboard/calc/roic.py`, `tests/calc/test_roic.py`.
@@ -429,9 +453,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Critères de la spec couverts** : aucun directement (prérequis du
   critère 11).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T31, T25.
+- **Dépend de** : T32, T26.
 
-### T33 — EV/EBIT non calculable sur EBIT non positif
+### T34 — EV/EBIT non calculable sur EBIT non positif
 - **Objectif** : l'indicateur EV/EBIT est signalé non calculable quand
   l'EBIT (TTM) est ≤ 0.
 - **Fichiers** : `src/dashboard/calc/ratios.py`,
@@ -442,19 +466,19 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
 - **Critères de la spec couverts** : aucun directement (prérequis du
   critère 11).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T18, T30.
+- **Dépend de** : T19, T31.
 
-### T34 — Dette nette/EBITDA non calculable sur EBITDA non positif
-- **Objectif** : même règle que T33 pour l'indicateur de solvabilité.
+### T35 — Dette nette/EBITDA non calculable sur EBITDA non positif
+- **Objectif** : même règle que T34 pour l'indicateur de solvabilité.
 - **Fichiers** : `src/dashboard/calc/ratios.py`,
   `tests/calc/test_net_debt_ebitda_non_positive.py`.
 - **Test** : `test_net_debt_ebitda_non_calculable_on_non_positive_ebitda`.
 - **Critères de la spec couverts** : aucun directement (prérequis du
   critère 11).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T19, T24.
+- **Dépend de** : T20, T25.
 
-### T35 — TTM primaire et médiane 5 ans secondaire
+### T36 — TTM primaire et médiane 5 ans secondaire
 - **Objectif** : `calc.ttm` agrège quatre trimestres glissants,
   `calc.normalized_5y` calcule la médiane sur cinq exercices.
 - **Fichiers** : `src/dashboard/calc/ttm.py`,
@@ -463,9 +487,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   produites et diffèrent sur un cas de fixture conçu pour cela.
 - **Critères de la spec couverts** : #12.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T14.
+- **Dépend de** : T15.
 
-### T36 — Signaler la divergence TTM / normalisé
+### T37 — Signaler la divergence TTM / normalisé
 - **Objectif** : `calc.divergence` signale un titre quand l'écart entre
   percentile TTM et percentile normalisé dépasse le seuil configuré.
 - **Fichiers** : `src/dashboard/calc/divergence.py`,
@@ -474,9 +498,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   seuil (signalé), cas en dessous (non signalé).
 - **Critères de la spec couverts** : #13.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T35.
+- **Dépend de** : T36.
 
-### T37 — Signaler un indicateur non calculable, jamais de valeur par défaut
+### T38 — Signaler un indicateur non calculable, jamais de valeur par défaut
 - **Objectif** : `calc.ratios` porte un statut calculable/non calculable
   par indicateur et par titre, sans jamais inventer de valeur.
 - **Fichiers** : `src/dashboard/calc/ratios.py`,
@@ -486,9 +510,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   non calculable, les cinq autres restent produits normalement.
 - **Critères de la spec couverts** : #6.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T33, T34, T32.
+- **Dépend de** : T34, T35, T33.
 
-### T38 — Rapporter le taux de couverture par indicateur
+### T39 — Rapporter le taux de couverture par indicateur
 - **Objectif** : le pipeline rapporte, pour chaque indicateur, le nombre
   de titres calculables sur le nombre total.
 - **Fichiers** : `src/dashboard/calc/ratios.py`,
@@ -498,9 +522,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   compte attendu pour chacun des six indicateurs.
 - **Critères de la spec couverts** : #11.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T37.
+- **Dépend de** : T38.
 
-### T39 — Ne jamais mélanger prix bruts et ajustés dans un calcul
+### T40 — Ne jamais mélanger prix bruts et ajustés dans un calcul
 - **Objectif** : `calc.ratios` (et tout calcul de variation de prix)
   n'utilise que la série ajustée pour toute période chevauchant un
   fractionnement.
@@ -512,9 +536,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   ajustée.
 - **Critères de la spec couverts** : #4 (volet calcul).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T7, T37.
+- **Dépend de** : T8, T38.
 
-### T40 — Devise explicite, sans conversion implicite
+### T41 — Devise explicite, sans conversion implicite
 - **Objectif** : chaque valeur produite par `calc.ratios` porte sa devise,
   toujours USD dans cette tranche, jamais convertie silencieusement.
 - **Fichiers** : `src/dashboard/calc/ratios.py`,
@@ -524,9 +548,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   conversion n'est appliquée dans le chemin de calcul.
 - **Critères de la spec couverts** : #10.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T37.
+- **Dépend de** : T38.
 
-### T41 — Percentile face à l'histoire propre, années disponibles affichées
+### T42 — Percentile face à l'histoire propre, années disponibles affichées
 - **Objectif** : `calc.percentiles` calcule le percentile du multiple
   primaire sur l'historique depuis 2011 et le nombre d'années réellement
   disponibles.
@@ -536,9 +560,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   en 2019 dans la fixture affiche six ans d'historique, pas plus.
 - **Critères de la spec couverts** : #19.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T37.
+- **Dépend de** : T38.
 
-### T42 — Classer un code SIC dans sa division officielle
+### T43 — Classer un code SIC dans sa division officielle
 - **Objectif** : `calc.sector_grouping` classe le code SIC d'un titre dans
   l'une des neuf divisions SIC officielles définies dans le plan, non
   calculable si le code sort des plages couvertes.
@@ -553,12 +577,12 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   (1850) est signalé non calculable, jamais rattaché par défaut à une
   division voisine.
 - **Critères de la spec couverts** : aucun directement (prérequis des
-  critères 19, 20 ; #20 est prouvé en T43 en s'appuyant sur ce
+  critères 19, 20 ; #20 est prouvé en T44 en s'appuyant sur ce
   regroupement).
 - **Terminée quand** : le test passe.
 - **Dépend de** : T4.
 
-### T43 — Repli sur l'absolu si le groupe sectoriel a moins de dix titres
+### T44 — Repli sur l'absolu si le groupe sectoriel a moins de dix titres
 - **Objectif** : `calc.percentiles` ne calcule pas de percentile sectoriel
   pour un groupe grossier de moins de dix titres et le signale.
 - **Fichiers** : `src/dashboard/calc/percentiles.py`,
@@ -568,9 +592,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   percentile sectoriel, `sector_pct_available` vaut faux.
 - **Critères de la spec couverts** : #20.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T41, T42.
+- **Dépend de** : T42, T43.
 
-### T44 — Filtrer avec des seuils configurables, compteur y compris zéro
+### T45 — Filtrer avec des seuils configurables, compteur y compris zéro
 - **Objectif** : `calc.filters` applique des seuils reçus en paramètre et
   retourne systématiquement le compteur de titres retenus.
 - **Fichiers** : `src/dashboard/calc/filters.py`,
@@ -580,9 +604,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   (compteur à zéro, sans erreur).
 - **Critères de la spec couverts** : #15.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T37.
+- **Dépend de** : T38.
 
-### T45 — Classer et plafonner à 25
+### T46 — Classer et plafonner à 25
 - **Objectif** : `calc.ranking` classe les titres retenus et n'en affiche
   jamais plus de 25.
 - **Fichiers** : `src/dashboard/calc/ranking.py`,
@@ -591,11 +615,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   ne produit que 25 lignes classées.
 - **Critères de la spec couverts** : #16.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T44.
+- **Dépend de** : T45.
 
 ## Stockage et persistance
 
-### T46 — Historique du screen en ajout seul
+### T47 — Historique du screen en ajout seul
 - **Objectif** : `storage.screen_history` ajoute une ligne par titre par
   jour dans `screen_results.parquet` et refuse d'écraser une ligne
   existante pour `(date, cik)`.
@@ -606,9 +630,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   d'écraser la ligne.
 - **Critères de la spec couverts** : #17.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T45.
+- **Dépend de** : T46.
 
-### T47 — Historique d'appartenance à l'univers en ajout seul
+### T48 — Historique d'appartenance à l'univers en ajout seul
 - **Objectif** : `storage.universe_history` ajoute une ligne par titre par
   jour, jamais élaguée.
 - **Fichiers** : `src/dashboard/storage/universe_history.py`,
@@ -618,9 +642,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   présentes et inchangées.
 - **Critères de la spec couverts** : #22.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T29.
+- **Dépend de** : T30.
 
-### T48 — Compter les jours consécutifs passés
+### T49 — Compter les jours consécutifs passés
 - **Objectif** : `calc.streak` calcule, à partir de l'historique du
   screen, le nombre de jours consécutifs où un titre passe les filtres.
 - **Fichiers** : `src/dashboard/calc/streak.py`,
@@ -629,11 +653,11 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   suite puis absent un jour affiche une série de 5, pas 6.
 - **Critères de la spec couverts** : #18.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T46.
+- **Dépend de** : T47.
 
 ## Orchestration
 
-### T49 — Le traitement quotidien reflète la clôture et les dépôts connus
+### T50 — Le traitement quotidien reflète la clôture et les dépôts connus
 - **Objectif** : `pipeline.daily_run` produit un résultat qui n'utilise
   que les cours de clôture du jour et les dépôts SEC connus jusqu'à cette
   date.
@@ -644,23 +668,23 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   produit pour cette date.
 - **Critères de la spec couverts** : #7.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T16, T14, T5, T7.
+- **Dépend de** : T17, T15, T5, T8.
 
-### T50 — Arrêter le traitement si le calcul de l'univers échoue
+### T51 — Arrêter le traitement si le calcul de l'univers échoue
 - **Objectif** : `pipeline.daily_run` n'écrit aucun résultat et n'affiche
   pas d'écran pour le jour si `calc.universe` renvoie un échec.
 - **Fichiers** : `src/dashboard/pipeline/daily_run.py`,
   `tests/pipeline/test_daily_run_universe_failure.py`.
 - **Test** : `test_universe_failure_halts_pipeline` — sur le cas de fixture
-  d'univers implausible (T29), aucune ligne n'est ajoutée à
+  d'univers implausible (T30), aucune ligne n'est ajoutée à
   `screen_results.parquet` ni à `universe_membership.parquet` pour ce jour.
 - **Critères de la spec couverts** : #25 (volet orchestration).
 - **Terminée quand** : le test passe.
-- **Dépend de** : T29, T49.
+- **Dépend de** : T30, T50.
 
 ## Présentation
 
-### T51 — Exclure du screen les titres sortis de l'univers du jour
+### T52 — Exclure du screen les titres sortis de l'univers du jour
 - **Objectif** : un titre qui ne fait plus partie de l'univers défini par
   règle n'apparaît pas dans le résultat du jour.
 - **Fichiers** : `src/dashboard/calc/filters.py` ou
@@ -670,9 +694,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   pas dans le résultat du jour.
 - **Critères de la spec couverts** : #2.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T29, T44.
+- **Dépend de** : T30, T45.
 
-### T52 — Préserver les données d'un titre sorti de l'univers
+### T53 — Préserver les données d'un titre sorti de l'univers
 - **Objectif** : les fondamentaux et l'historique de screen d'un titre
   sorti de l'univers restent intacts et consultables.
 - **Fichiers** : `tests/pipeline/test_delisted_ticker_history_preserved.py`.
@@ -681,9 +705,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   `screen_results` et `universe_membership` restent lisibles et inchangées.
 - **Critères de la spec couverts** : #21.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T29, T46, T47.
+- **Dépend de** : T30, T47, T48.
 
-### T53 — Tracer tout nombre affiché jusqu'à sa source
+### T54 — Tracer tout nombre affiché jusqu'à sa source
 - **Objectif** : `app.detail_view` permet de remonter, pour tout nombre
   affiché, jusqu'au champ source, sa date de fin d'exercice, sa date de
   dépôt et son numéro de dépôt — ou, pour un prix, sa date de cotation.
@@ -694,9 +718,9 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   ou les tags, `end`, `filed` et `accn` correspondants.
 - **Critères de la spec couverts** : #9.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T3, T37, T49.
+- **Dépend de** : T3, T38, T50.
 
-### T54 — Ne jamais présenter l'écran comme une mesure d'un indice publié
+### T55 — Ne jamais présenter l'écran comme une mesure d'un indice publié
 - **Objectif** : `app.screen_view` porte une mention explicite que
   l'univers est défini par nous, et aucune statistique n'est étiquetée
   S&P 500 ou S&P 400.
@@ -707,29 +731,28 @@ plan (`ingestion.edgar_tickers` → `src/dashboard/ingestion/edgar_tickers.py`,
   screen, et contient la mention d'univers défini par règle.
 - **Critères de la spec couverts** : #26.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T49, T51.
+- **Dépend de** : T50, T52.
 
 ## Vérification de couverture
 
 ### Critères de la spec
 
-Union des critères couverts : #1 (T14), #2 (T51), #3 (T6, T15), #4 (T7,
-T39), #5 (T5), #6 (T37), #7 (T49), #8 (T16), #9 (T53), #10 (T40), #11
-(T38), #12 (T35), #13 (T36), #14 (T26), #15 (T44), #16 (T45), #17 (T46),
-#18 (T48), #19 (T41), #20 (T43), #21 (T52), #22 (T47), #23 (T26), #24
-(T28), #25 (T29, T50), #26 (T54), Invariant 10 (T12).
+Union des critères couverts : #1 (T15), #2 (T52), #3 (T6, T16), #4 (T8,
+T40), #5 (T5), #6 (T38), #7 (T50), #8 (T17), #9 (T54), #10 (T41), #11
+(T39), #12 (T36), #13 (T37), #14 (T27), #15 (T45), #16 (T46), #17 (T47),
+#18 (T49), #19 (T42), #20 (T44), #21 (T53), #22 (T48), #23 (T27), #24
+(T29), #25 (T30, T51), #26 (T55), Invariant 10 (T13).
 
 Les 26 critères d'acceptation de spec.md et l'invariant 10 sont couverts.
 Aucun critère orphelin.
 
 ### Modules de plan.md
 
-Contrôle appliqué une deuxième fois après l'amendement de
-`.claude/skills/spec-tasks/SKILL.md`. Les 38 modules nommés dans `plan.md`
-sont chacun couverts par au moins une tâche, y compris les trois ajoutés
-lors de l'amendement réseau (`ingestion.edgar_client`, T10 ;
-`ingestion.eodhd_client`, T11 ; `ingestion.secrets`, T9) et les deux
-découverts ensuite (`ingestion.clock`, T13 ; `calc.sector_grouping`, T42).
+Les 38 modules nommés dans `plan.md` sont chacun couverts par au moins une
+tâche. T7 (comptage des faits rejetés par taxonomie) ne couvre pas un
+nouveau module — il étend `ingestion.edgar_facts`, déjà couvert par T5 et
+T6 — mais répond à une exigence de `plan.md` (comptage des rejets, R1 /
+invariant 7) qui n'avait jusqu'ici aucune tâche.
 
 Aucun module orphelin.
 

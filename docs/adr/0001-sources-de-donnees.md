@@ -28,6 +28,11 @@ Budget disponible : environ 30 €/mois.
   et non une simple valeur par période.
 - Un même exercice peut apparaître plusieurs fois avec des valeurs différentes
   (retraitements). C'est voulu, ce n'est pas un doublon à dédupliquer.
+- La taxonomie `dei` (Document and Entity Information) est retenue au même
+  titre que `us-gaap` : elle porte des faits présents dans tous les dépôts
+  américains normaux (dont les actions en circulation), et n'est pas
+  spécifique aux émetteurs IFRS. L'exclusion IFRS porte sur la catégorie
+  d'émetteurs, non sur les taxonomies retenues en stockage.
 
 ## Alternatives écartées
 

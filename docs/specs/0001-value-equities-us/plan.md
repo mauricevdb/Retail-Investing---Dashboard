@@ -17,9 +17,14 @@ ne contient de logique de valorisation.
 - `ingestion.edgar_submissions` — télécharge les dépôts par CIK (historique,
   `accn`, dates `filed`, code SIC), alimente `filings.parquet` et
   `sic_codes.parquet`.
-- `ingestion.edgar_facts` — télécharge `companyfacts.zip`, filtre la
-  taxonomie `us-gaap` (rejette `ifrs-full` à la source, critère 5), écrit
-  `fundamentals_raw.parquet` en mode ajout seul.
+- `ingestion.edgar_facts` — télécharge `companyfacts.zip`, retient les
+  faits des taxonomies `us-gaap` et `dei` (liste blanche, pas une exclusion
+  d'`ifrs-full` : toute taxonomie hors de cette liste, connue ou non, est
+  rejetée), écrit `fundamentals_raw.parquet` en mode ajout seul. Le nombre
+  de faits rejetés par taxonomie est compté et rapporté au même titre que
+  le taux de couverture des indicateurs (critère 11, invariant 7) — un
+  rejet silencieux et non comptabilisé serait indiscernable d'une simple
+  absence de données.
 - `ingestion.eodhd_prices` — télécharge en bulk les cours de clôture bruts
   et ajustés du jour pour l'univers, écrit `prices_raw.parquet` et
   `prices_adjusted.parquet` séparément (invariant 4).
@@ -266,7 +271,7 @@ calculables plutôt que d'en sur-compter.
 |---|---|---|
 | cik | str | identifiant émetteur |
 | concept | str | tag XBRL |
-| taxonomy | str | toujours `us-gaap` après filtre ingestion (critère 5) |
+| taxonomy | str | `us-gaap` ou `dei` — liste blanche appliquée à l'ingestion, `ifrs-full` et toute autre taxonomie rejetées et comptées (critère 5) |
 | unit | str | unité XBRL |
 | end | date | fin de période couverte par le fait |
 | start | date, nullable | début de période (nul pour les faits instantanés) |
