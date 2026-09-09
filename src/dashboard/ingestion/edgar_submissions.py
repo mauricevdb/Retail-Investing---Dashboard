@@ -22,3 +22,14 @@ def parse_filings(raw: dict) -> pl.DataFrame:
         )
     ]
     return pl.DataFrame(rows)
+
+
+def parse_sic_and_entity_type(raw: dict, as_of: date) -> pl.DataFrame:
+    row = {
+        "cik": raw["cik"],
+        "sic": raw["sic"],
+        "sic_description": raw["sicDescription"],
+        "entity_type": raw["entityType"],
+        "as_of": as_of,
+    }
+    return pl.DataFrame([row])
