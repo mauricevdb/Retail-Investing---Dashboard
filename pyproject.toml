@@ -23,3 +23,7 @@ package = false
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+    "contact: test de contact réseau réel à un fournisseur (invariant 9 de CLAUDE.md) ; jamais dans la suite par défaut",
+]
+addopts = "-m \"not contact\""

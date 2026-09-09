@@ -38,8 +38,12 @@ Sortie : `docs/specs/<NNNN>-<slug>/tasks.md`.
 Vérifier que l'union des critères couverts égale l'ensemble des critères de
 la spec. Signaler tout critère orphelin.
 
-Vérifier symétriquement que tout module nommé dans `plan.md` est couvert par
-au moins une tâche. Signaler tout module orphelin.
+Vérifier symétriquement que tout élément nommé dans `plan.md` — module,
+fonction publique, ou comportement décrit dans un contrat de module — est
+couvert par au moins une tâche. Le contrôle porte sur les comportements, pas
+seulement sur les noms de fichiers : un module ayant une tâche mais dont une
+fonction promise n'est construite nulle part est un trou de couverture.
+Signaler tout élément orphelin, module ou comportement.
 
 Raison de ce second contrôle : le découpage initial de la tranche 0001 a fait
 de la testabilité hors réseau le critère implicite d'existence d'une tâche,

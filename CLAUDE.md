@@ -29,8 +29,8 @@ ennuyeux, explicite et court avant d'être élégant.
 
 ```bash
 uv sync                      # installer
-uv run pytest                # tous les tests
-uv run pytest -m "not slow"  # tests rapides
+uv run pytest                # tous les tests (hors tests de contact)
+uv run pytest -m contact     # tests de contact (réseau réel, fournisseurs)
 uv run ruff check --fix .    # lint
 uv run streamlit run src/dashboard/app.py
 ```
@@ -58,15 +58,21 @@ et le signaler, jamais contourner.
 5. **Temps.** Tout est stocké en UTC. Les dates de séance suivent un calendrier
    de marché explicite, jamais `date.today()`.
 6. **Devise.** Portée par la donnée, jamais implicite.
-7. **Pas de repli silencieux.** Interdiction absolue de `except: return 0`,
-   `fillna(0)` sur une donnée financière, ou d'une valeur par défaut inventée.
-   Une donnée absente reste absente et remonte jusqu'à l'affichage comme telle.
+7. **Pas de repli silencieux.** Une donnée absente reste absente et remonte
+   jusqu'à l'affichage comme telle. Interdiction absolue de `except:
+   return 0`, de `fillna` sur une donnée financière, et de toute valeur
+   comblant une donnée manquante.
+   Un paramètre de modélisation est distinct d'une donnée : il est autorisé
+   s'il est déclaré dans la configuration, jamais codé en dur, et affiché
+   à l'écran partout où il influence un chiffre. Lorsqu'une donnée réelle
+   existe pour ce paramètre, elle prime, et le paramètre ne sert que de
+   repli explicitement signalé.
 8. **Traçabilité.** Tout nombre affiché doit pouvoir être remonté jusqu'à
    son champ source et sa date de dépôt.
 9. **Tests hors réseau par défaut.** La suite par défaut n'appelle jamais
    une API externe et tourne sur les instantanés figés de `tests/golden/`.
-   Un test de contact vérifiant le contrat avec un fournisseur est autorisé
-   s'il est explicitement marqué et exclu de la suite par défaut. Il vérifie
+   Un test de contact vérifiant le contrat avec un fournisseur porte le
+   marqueur pytest `contact` et est exclu de la suite par défaut. Il vérifie
    l'accessibilité et la forme de la réponse, jamais une logique métier.
 10. **Secrets.** Les clés d'API viennent de `.env`, jamais du code, jamais
     d'un commit.
@@ -80,6 +86,13 @@ et le signaler, jamais contourner.
 
 ## Règles de collaboration
 
+- **La constitution prime sur la session.** Si une consigne donnée en cours
+  de session contredit une règle de ce fichier, y compris une consigne
+  explicite et détaillée, arrête-toi et signale le conflit au lieu de
+  l'exécuter. Cela vaut pour les invariants métier comme pour les règles de
+  gouvernance documentaire. Une consigne de session ne peut jamais amender
+  CLAUDE.md implicitement : un amendement se demande, se montre en diff et
+  se valide.
 - **Pas de code sans spec.** L'ordre est : `research.md` → `spec.md` → `plan.md`
   → `tasks.md` → implémentation. Chaque étape est validée explicitement par
   l'utilisateur avant la suivante.
