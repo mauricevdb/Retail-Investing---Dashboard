@@ -47,8 +47,12 @@ et le signaler, jamais contourner.
 2. **Point-in-time.** Les retraitements ultérieurs ne réécrivent pas l'historique.
    Une même métrique peut avoir plusieurs valeurs selon la date d'observation ;
    le stockage doit porter `(concept, end, filed, accn, value)`.
-3. **Pas de biais du survivant.** Les titres délistés restent dans l'univers
-   historique. Un univers reconstruit à partir des tickers actuels est un bug.
+3. **Deux univers distincts.** L'univers de screening est composé des membres
+   du jour : un titre qui en est sorti n'est jamais affiché. L'univers
+   historique contient tout ce qui a été ingéré et n'est jamais élagué. Toute
+   évaluation rétrospective d'une stratégie utilise l'univers historique ; la
+   reconstruire à partir des seuls tickers actuels est un biais du survivant,
+   donc un bug.
 4. **Actions sur titres.** Prix bruts et prix ajustés sont stockés dans des
    colonnes distinctes et jamais mélangés dans un même calcul.
 5. **Temps.** Tout est stocké en UTC. Les dates de séance suivent un calendrier
