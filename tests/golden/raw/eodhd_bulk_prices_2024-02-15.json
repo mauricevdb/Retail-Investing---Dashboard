@@ -1,0 +1,24 @@
+[
+  {
+    "code": "AAAA",
+    "exchange_short_name": "US",
+    "date": "2024-02-14",
+    "open": 148.0,
+    "high": 151.0,
+    "low": 147.5,
+    "close": 150.0,
+    "adjusted_close": 75.0,
+    "volume": 1200000
+  },
+  {
+    "code": "AAAA",
+    "exchange_short_name": "US",
+    "date": "2024-02-15",
+    "open": 76.0,
+    "high": 77.0,
+    "low": 75.0,
+    "close": 76.5,
+    "adjusted_close": 76.5,
+    "volume": 2500000
+  }
+]

@@ -1,0 +1,16 @@
+{
+  "cik": "0000000003",
+  "entityType": "operating company",
+  "sic": "6022",
+  "sicDescription": "State Commercial Banks",
+  "tickers": ["CCCC"],
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000000003-24-000001"],
+      "filingDate": ["2024-02-10"],
+      "form": ["10-K"],
+      "primaryDocument": ["cccc-10k.htm"],
+      "reportDate": ["2023-12-31"]
+    }
+  }
+}

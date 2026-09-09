@@ -1,0 +1,16 @@
+{
+  "cik": "0000000001",
+  "entityType": "operating company",
+  "sic": "3674",
+  "sicDescription": "Semiconductors & Related Devices",
+  "tickers": ["AAAA"],
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000000001-24-000010", "0000000001-24-000003"],
+      "filingDate": ["2024-02-15", "2024-03-20"],
+      "form": ["10-K", "10-K/A"],
+      "primaryDocument": ["aaaa-10k.htm", "aaaa-10ka.htm"],
+      "reportDate": ["2023-12-31", "2023-12-31"]
+    }
+  }
+}

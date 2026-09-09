@@ -1,0 +1,16 @@
+{
+  "cik": "0000000004",
+  "entityType": "investment company",
+  "sic": "6726",
+  "sicDescription": "Investment Offices, NEC",
+  "tickers": ["DDDD"],
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000000004-24-000001"],
+      "filingDate": ["2024-02-12"],
+      "form": ["N-CSR"],
+      "primaryDocument": ["dddd-ncsr.htm"],
+      "reportDate": ["2023-12-31"]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "cik": 2,
+  "entityName": "Beta Foreign Filer",
+  "facts": {
+    "ifrs-full": {
+      "ProfitLossFromOperatingActivities": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 200000000,
+              "accn": "0000000002-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "20-F",
+              "filed": "2024-02-20",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
