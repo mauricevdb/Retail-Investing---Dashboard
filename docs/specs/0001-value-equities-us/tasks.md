@@ -609,7 +609,10 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 
 ### T44 — Signaler la divergence TTM / normalisé
 - **Objectif** : `calc.divergence` signale un titre quand l'écart entre
-  percentile TTM et percentile normalisé dépasse le seuil configuré.
+  l'indicateur TTM et l'indicateur normalisé dépasse le seuil configuré
+  (amendement de rédaction : « percentile » remplacé par « indicateur »,
+  conforme à spec.md critère 13 et à plan.md — `calc.percentiles`, T51,
+  n'est ni construit ni une dépendance de cette tâche).
 - **Fichiers** : `src/dashboard/calc/divergence.py`,
   `tests/calc/test_divergence.py`.
 - **Test** : `test_divergence_flag_above_threshold` — cas au-dessus du

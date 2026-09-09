@@ -3,7 +3,9 @@ from datetime import date
 import polars as pl
 
 from dashboard.calc.ebit_bridge import resolve as resolve_ebit
+from dashboard.calc.ebitda import resolve as resolve_ebitda
 from dashboard.calc.ev import resolve as resolve_ev
+from dashboard.calc.net_debt import resolve as resolve_net_debt
 
 
 def ev_to_ebit(
@@ -18,3 +20,15 @@ def ev_to_ebit(
         return None
 
     return enterprise_value / ebit
+
+
+def net_debt_to_ebitda(facts: pl.DataFrame, cik: str, end: date, t: date) -> float | None:
+    ebitda = resolve_ebitda(facts, cik, end, t)
+    if ebitda is None or ebitda <= 0:
+        return None
+
+    net_debt = resolve_net_debt(facts, cik, end, t)
+    if net_debt is None:
+        return None
+
+    return net_debt / ebitda
