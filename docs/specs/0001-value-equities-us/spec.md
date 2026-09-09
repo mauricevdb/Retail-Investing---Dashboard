@@ -16,9 +16,14 @@ suivi régulier d'un univers de cette taille.
 
 ### Inclus
 
-- Un univers de titres américains cotés, limité aux membres actuels du
-  S&P 500 et du S&P 400, à l'exclusion de la finance, de l'assurance et de
-  l'immobilier.
+- Un univers d'environ 900 grandes et moyennes capitalisations américaines,
+  défini par une règle que nous écrivons nous-mêmes — les *N* premières
+  sociétés par capitalisation boursière — plutôt que par l'appartenance à un
+  indice publié (ADR 0002). L'univers exclut la finance, l'assurance et
+  l'immobilier, ainsi que les fonds, ETF et véhicules assimilés ; il ne
+  retient que des sociétés opérationnelles déposant en `us-gaap`. Sa
+  composition reste stable au voisinage du rang de coupure : elle ne varie
+  pas au simple bruit quotidien des cours.
 - Six indicateurs, ni plus ni moins, affichés en première lecture pour
   chaque titre de l'univers filtré :
   1. EV/EBIT — multiple de valorisation opérationnelle, indicateur primaire.
@@ -45,6 +50,9 @@ suivi régulier d'un univers de cette taille.
   américain, présentant l'état du jour pour l'ensemble de l'univers filtré.
 - La possibilité de retrouver, pour tout nombre affiché, le champ source et
   sa date de dépôt.
+- Une mention explicite, visible sur l'écran, que l'univers est défini par
+  nous et non par un indice publié : aucune statistique produite n'est
+  présentée comme une mesure du S&P 500 ou du S&P 400.
 
 ### Explicitement exclu
 
@@ -52,7 +60,12 @@ suivi régulier d'un univers de cette taille.
   et sur un traitement quotidien (décision D5).
 - Émetteurs déposant en IFRS et émetteurs étrangers : la taxonomie retenue
   est `us-gaap` seule (décision D2).
-- Petites capitalisations hors S&P 500 et S&P 400 (décision D4).
+- Petites capitalisations hors de l'univers défini par règle, environ 900
+  sociétés (décision D4, ADR 0002).
+- L'appartenance à un indice publié (S&P 500, S&P 400 ou autre) comme
+  source de définition de l'univers : remplacée par une règle interne de
+  capitalisation, pour ne pas dépendre d'un jugement discrétionnaire de
+  comité ni d'une source externe supplémentaire (ADR 0002).
 - Finance, assurance et immobilier (codes SIC 6000 à 6799) : ces secteurs
   exigent des ratios propres, dont certains non fiablement calculables
   depuis EDGAR ; ce serait une branche de calcul, pas une extension de
@@ -88,8 +101,16 @@ exécution.
 ## Données requises
 
 - **Identité et appartenance à l'univers** — ticker courant, identifiant
-  SEC (CIK), appartenance au S&P 500 ou au S&P 400. Granularité : un état
+  SEC (CIK), statut d'appartenance à l'univers défini par règle (dans les
+  *N* premières capitalisations, hors exclusions). Granularité : un état
   par titre, à jour quotidiennement.
+- **Nature de l'émetteur** — de quoi distinguer une société opérationnelle
+  d'un fonds, d'un ETF ou d'un véhicule assimilé, dérivé des dépôts
+  eux-mêmes plutôt que d'une liste tierce. Nécessaire pour exclure ces
+  véhicules de l'univers.
+- **Capitalisation boursière** — dérivée des actions en circulation et du
+  dernier cours de clôture, utilisée pour classer les titres et définir
+  l'univers. Même exigence de point-in-time que les autres fondamentaux.
 - **Classification sectorielle** — code SIC de l'émetteur, source :
   endpoint des dépôts (submissions) d'EDGAR. Sert à la fois à exclure la
   finance, l'assurance et l'immobilier, et à regrouper les titres restants
@@ -117,8 +138,10 @@ exécution.
   valeur de chaque indicateur, rang, résultat des filtres. Jamais réécrit
   ni supprimé.
 - **Historique d'appartenance à l'univers** — un enregistrement quotidien
-  par titre indiquant s'il fait partie du S&P 500, du S&P 400, ou d'aucun
-  des deux ce jour-là. Jamais élagué.
+  par titre indiquant s'il fait partie de l'univers défini par règle ce
+  jour-là. Cette composition n'existe nulle part ailleurs : contrairement à
+  un indice publié, elle ne peut pas être reconstituée après coup si elle
+  n'est pas conservée. Jamais élagué.
 - **Devise** — dollar américain pour l'ensemble des champs de cette
   tranche, portée explicitement par chaque donnée plutôt que supposée.
 
@@ -128,9 +151,9 @@ exécution.
    plusieurs dépôts, quand l'écran calcule un indicateur pour `t`, alors
    seules les valeurs dont la date de dépôt est antérieure ou égale à `t`
    sont utilisées.
-2. Étant donné un titre qui n'est plus membre du S&P 500 ni du S&P 400,
-   quand l'écran de screening est régénéré, alors ce titre n'apparaît pas
-   dans le résultat du jour.
+2. Étant donné un titre qui ne fait plus partie de l'univers défini par
+   règle, quand l'écran de screening est régénéré, alors ce titre n'apparaît
+   pas dans le résultat du jour.
 3. Étant donné un exercice pour lequel un émetteur a déposé un retraitement
    après le dépôt initial, quand l'écran affiche la valeur d'un concept
    pour cet exercice à la date d'observation `t`, alors il affiche la
@@ -201,14 +224,30 @@ exécution.
     alors ce percentile n'est pas calculé, le niveau absolu du multiple est
     utilisé à la place, et l'écran signale que le percentile sectoriel est
     indisponible pour ce titre.
-21. Étant donné un titre sorti du S&P 500 et du S&P 400, quand l'écran de
-    screening est régénéré, alors ce titre en est absent, mais ses
+21. Étant donné un titre sorti de l'univers défini par règle, quand l'écran
+    de screening est régénéré, alors ce titre en est absent, mais ses
     fondamentaux et son historique de screen restent intacts et
     consultables dans l'univers historique.
 22. Étant donné un jour de traitement, quand la table d'appartenance à
     l'univers est mise à jour, alors une ligne est ajoutée pour ce jour
-    recensant les membres du S&P 500 et du S&P 400, sans jamais modifier
-    ni supprimer les lignes des jours précédents.
+    recensant les membres de l'univers défini par règle, sans jamais
+    modifier ni supprimer les lignes des jours précédents.
+23. Étant donné un émetteur identifié comme fonds, ETF ou véhicule
+    assimilé, quand l'univers du jour est constitué, alors cet émetteur en
+    est exclu.
+24. Étant donné deux calculs consécutifs de l'univers dont le classement par
+    capitalisation place des titres à proximité du rang de coupure, quand
+    l'univers est régénéré, alors sa composition ne varie pas au simple
+    bruit quotidien des cours, selon le mécanisme de stabilité défini dans
+    le plan.
+25. Étant donné le calcul quotidien de l'univers, quand il échoue ou
+    renvoie un nombre de titres hors d'une plage plausible définie en
+    configuration, alors le traitement s'arrête et l'écran ne s'affiche pas
+    pour ce jour, plutôt que d'afficher un résultat partiel sans le
+    signaler.
+26. Étant donné l'écran ou toute statistique qu'il produit, quand ils sont
+    présentés à l'utilisateur, alors ils ne sont jamais désignés comme une
+    mesure du S&P 500 ou du S&P 400.
 
 ## Critères liés aux invariants
 
@@ -220,7 +259,10 @@ exécution.
 3. **Deux univers distincts** — l'écran de screening n'affiche jamais un
    titre sorti de l'univers du jour (critère 2), mais ses données et
    l'historique de composition de l'univers sont conservés indéfiniment
-   dans l'univers historique (critères 21 et 22).
+   dans l'univers historique (critères 21 et 22). Cet historique est
+   d'autant plus critique que l'univers est désormais défini par nous
+   (ADR 0002) : il n'existe, contrairement à un indice publié, dans aucune
+   autre source.
 4. **Actions sur titres** — prix bruts et prix ajustés ne sont jamais
    mélangés dans un même calcul ; couvert par le critère d'acceptation 4.
 5. **Temps** — étant donné un instant quelconque, quand une donnée est
@@ -228,8 +270,10 @@ exécution.
    marché par le critère d'acceptation 8.
 6. **Devise** — couvert par le critère d'acceptation 10.
 7. **Pas de repli silencieux** — couvert par les critères d'acceptation 6
-   et 11 : une donnée ou un indicateur non calculable est signalé comme
-   tel, jamais masqué ni remplacé par une valeur inventée.
+   et 11 (une donnée ou un indicateur non calculable est signalé comme tel,
+   jamais masqué ni remplacé par une valeur inventée) et par le critère 25
+   (un calcul d'univers en échec arrête le traitement au lieu d'afficher un
+   résultat partiel silencieux).
 8. **Traçabilité** — couvert par le critère d'acceptation 9.
 9. **Tests hors réseau** — chacun des critères ci-dessus doit rester
    vérifiable sur des instantanés figés, sans appel à SEC EDGAR ni à EODHD
@@ -255,6 +299,10 @@ exécution.
 - La composition exacte des catégories sectorielles grossières
   (regroupement de codes SIC) : choix de plan documenté, vérifiable comme
   cohérent, pas comme « correct » dans l'absolu.
+- La valeur exacte de *N*, la fréquence de recalcul de l'univers et le
+  mécanisme précis assurant la stabilité de sa composition au rang de
+  coupure : décidés et justifiés dans le plan (ADR 0002), pas dans cette
+  spec.
 
 ## Questions ouvertes
 

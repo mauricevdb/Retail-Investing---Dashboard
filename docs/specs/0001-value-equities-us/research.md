@@ -108,14 +108,29 @@ Une option bon marché maintenant et irrécupérable plus tard se prend.
 pour un même exercice. Ce ne sont pas des doublons, et toute déduplication
 détruit précisément ce que ce stockage cherche à conserver.
 
-### D4 — Univers : S&P 500 et S&P 400, soit environ 900 valeurs
+### D4 — Univers : environ 900 grandes et moyennes capitalisations américaines, définies par règle
 
-**Raison** : le coût en appels n'est pas le critère, l'endpoint bulk rendant
-l'élargissement quasi gratuit. Ce qui change est la nature de ce que le screen
-remonte. Sur l'ensemble du marché américain, un screen value fait surtout
-remonter des coquilles vides, des sociétés sans chiffre d'affaires et des
-titres trop illiquides ; la qualité des données se dégrade également dans la
-queue de distribution, et chaque cas particulier coûte des heures de débogage.
+Révisée par l'ADR 0002 : l'univers n'est plus l'appartenance au S&P 500 et au
+S&P 400, mais une règle calculée en interne — les *N* premières sociétés
+américaines par capitalisation boursière, après exclusion des codes SIC 6000
+à 6799 et des fonds/ETF/véhicules assimilés. *N* reste de l'ordre de 900. La
+capitalisation se dérive des actions en circulation (EDGAR) et du dernier
+cours de clôture (EODHD) — aucune source supplémentaire.
+
+**Raison de la taille de l'univers (inchangée)** : le coût en appels n'est
+pas le critère, l'endpoint bulk rendant l'élargissement quasi gratuit. Ce qui
+change est la nature de ce que le screen remonte. Sur l'ensemble du marché
+américain, un screen value fait surtout remonter des coquilles vides, des
+sociétés sans chiffre d'affaires et des titres trop illiquides ; la qualité
+des données se dégrade également dans la queue de distribution, et chaque cas
+particulier coûte des heures de débogage.
+
+**Raison du passage à une règle plutôt qu'à un indice publié** : la
+composition d'un indice comme le S&P 500 dépend en partie du jugement
+discrétionnaire d'un comité, injustifiable dans notre propre écran ; une
+source de constituants d'indice aurait par ailleurs nécessité une dépendance
+externe supplémentaire (voir ADR 0002) pour un usage qui ne sert ici que de
+filtre de taille et de liquidité, jamais de réplication d'indice.
 
 **Argument contraire assumé** : les inefficiences de valorisation se logent
 plutôt là où la couverture des analystes est faible, donc dans les petites
@@ -123,9 +138,11 @@ capitalisations. Il est juste, et justifie un élargissement ultérieur.
 Élargir un univers est un changement de paramètre ; réparer un pipeline jamais
 validé n'en est pas un.
 
-**Note** : les constituants historiques d'indice ne servent qu'à évaluer une
-stratégie dans le passé. Pour un screen sur la situation présente, les
-constituants actuels suffisent.
+**Note** : notre univers n'existe nulle part ailleurs sous cette forme — à la
+différence des constituants d'un indice publié, il ne peut pas être
+reconstitué après coup s'il n'est pas conservé. La table d'appartenance
+quotidienne (spec, R8) en est donc la seule trace, y compris pour un usage
+futur d'évaluation rétrospective d'une stratégie.
 
 ### D5 — Fraîcheur : traitement quotidien, cotations différées, aucun temps réel
 
