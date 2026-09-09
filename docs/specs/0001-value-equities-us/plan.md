@@ -29,6 +29,34 @@ ne contient de logique de valorisation.
   système. Aucun autre module n'appelle une fonction d'horloge : la valeur
   est toujours reçue en paramètre, jamais lue directement (invariant 5).
 
+### Couche réseau (clients HTTP, effets de bord)
+
+Les modules `edgar_tickers`, `edgar_submissions`, `edgar_facts`,
+`eodhd_prices` et `eodhd_actions` ci-dessus n'exposent pour l'instant que
+leur moitié pure (`parse_*`, prenant un `raw` déjà chargé) — c'était le bon
+choix pour rester testables hors réseau, mais aucun module ne récupère
+encore réellement les données. Chacun gagne une fonction `fetch_*`
+correspondante, qui appelle le client de sa source puis délègue au
+`parse_*` déjà écrit :
+
+- `ingestion.edgar_client` — point d'entrée HTTP unique pour EDGAR.
+  Porte le User-Agent identifiant obligatoire sur chaque requête, la
+  limitation à 10 req/s concentrée à cet unique endroit (aucune autre
+  fonction ne doit émettre de requête EDGAR en dehors de ce client), et la
+  gestion des délais et des erreurs HTTP. `get_json(url) -> dict | list` ;
+  lève une exception explicite en cas d'échec, ne renvoie jamais de
+  résultat vide ou partiel (invariant 7) — un échec de récupération n'est
+  jamais confondu avec une réponse valide.
+- `ingestion.eodhd_client` — point d'entrée HTTP unique pour EODHD.
+  Authentification par clé, gestion des erreurs. Même contrat que le client
+  EDGAR : échec explicite, jamais de repli silencieux.
+- `ingestion.secrets` — utilitaire de masquage (`redact(text) -> text`),
+  testé séparément, appliqué systématiquement par les deux clients à tout
+  message d'exception qu'ils lèvent et à toute représentation textuelle
+  (`repr`/`str`) d'un objet de configuration portant une clé. Le vecteur
+  principal à couvrir : le message d'exception d'une bibliothèque HTTP
+  contient l'URL complète, donc la clé passée en chaîne de requête.
+
 ### Stockage (schéma seul, voir section dédiée)
 
 Fichiers Parquet, interrogés via DuckDB pour la présentation. Aucun serveur,
@@ -96,10 +124,28 @@ aucun ORM (CLAUDE.md).
 - `calc.ratios` — calcule les six indicateurs (EV/EBIT, rendement FCF/EV,
   ROIC, dette nette/EBITDA, et les deux percentiles) à partir des sorties
   ci-dessus, du prix et des actions en circulation.
-- `calc.sector_grouping` — regroupe les codes SIC en catégories grossières
-  (voir Décisions structurantes), pour des titres déjà hors SIC 6000–6799 :
-  cette exclusion est de la seule responsabilité de `calc.universe`, pas
-  répétée ici.
+- `calc.sector_grouping` — regroupe le code SIC d'un titre (déjà hors
+  SIC 6000–6799 : cette exclusion reste de la seule responsabilité de
+  `calc.universe`, pas répétée ici) dans l'une des neuf divisions SIC
+  officielles, le standard du régulateur plutôt qu'un regroupement inventé :
+
+  | Division | Plage SIC | Libellé |
+  |---|---|---|
+  | A | 0100–0999 | Agriculture, sylviculture, pêche |
+  | B | 1000–1499 | Mines |
+  | C | 1500–1799 | Construction |
+  | D | 2000–3999 | Industrie manufacturière |
+  | E | 4000–4999 | Transport, communications, énergie, eau |
+  | F | 5000–5199 | Commerce de gros |
+  | G | 5200–5999 | Commerce de détail |
+  | I | 7000–8999 | Services |
+  | J | 9100–9999 | Administration publique |
+
+  La division H (6000–6799, finance/assurance/immobilier) n'apparaît jamais
+  ici puisqu'elle est déjà hors univers. Un code SIC hors de ces plages
+  (1800–1999 ou 9000–9099, non affectés par le standard) est non calculable
+  pour le regroupement sectoriel, jamais rattaché par défaut à une division
+  voisine.
 - `calc.percentiles` — percentile face à l'histoire propre depuis 2011
   (avec nombre d'années disponibles) et percentile sectoriel (repli sur
   l'absolu si groupe < 10 titres).
@@ -368,10 +414,20 @@ exigence point-in-time que le reste.
   que des lignes nouvelles pour la date donnée ; refuse d'écraser une ligne
   déjà présente pour `(date, cik)` — erreur explicite plutôt que
   réécriture silencieuse.
-- **`ingestion.*`** Tous les modules d'ingestion : garantissent l'écriture
-  en ajout seul dans leurs tables respectives ; refusent de retourner une
-  valeur par défaut en cas d'échec réseau — l'absence de mise à jour du
-  jour est un état visible, jamais comblé silencieusement par la veille.
+- **`ingestion.edgar_client.get_json(url) -> dict | list`** Garantit : User-
+  Agent identifiant sur chaque requête, débit ≤ 10 req/s. Refuse : de
+  renvoyer un résultat vide ou partiel en cas d'échec — lève une exception
+  dont le message ne contient jamais l'URL en clair si elle porte un secret.
+- **`ingestion.eodhd_client.get_json(url) -> dict | list`** Même contrat que
+  le client EDGAR, authentification par clé plutôt que par User-Agent.
+- **`ingestion.secrets.redact(text) -> text`** Garantit : toute sous-chaîne
+  reconnue comme secret (clé API, valeur portée par une variable
+  d'environnement déclarée sensible) est remplacée avant retour. Refuse :
+  de renvoyer le texte inchangé si un secret configuré y est présent.
+- **`ingestion.*` (modules de parsing T2–T8)** : garantissent l'écriture en
+  ajout seul dans leurs tables respectives ; refusent de retourner une
+  valeur par défaut en cas d'échec — l'absence de mise à jour du jour est
+  un état visible, jamais comblé silencieusement par la veille.
 
 ## Traçabilité
 
@@ -403,7 +459,7 @@ exigence point-in-time que le reste.
 | 24 — stabilité au rang de coupure | `calc.universe` | `test_universe_stable_near_cutoff_with_hysteresis` |
 | 25 — échec bruyant si taille implausible | `calc.universe`, `pipeline.daily_run` | `test_universe_failure_halts_pipeline` |
 | 26 — jamais présenté comme le S&P 500/400 | `app.screen_view` | `test_no_index_label_in_ui` |
-| Invariant 10 — aucune clé dans logs/erreurs | tous les modules d'ingestion | `test_no_api_key_in_logs_or_errors` |
+| Invariant 10 — aucune clé dans logs/erreurs | `ingestion.edgar_client`, `ingestion.eodhd_client`, `ingestion.secrets` | `test_no_api_key_in_logs_or_errors` |
 
 ## Risques
 
@@ -460,8 +516,16 @@ exigence point-in-time que le reste.
   pure testée indépendamment de `calc.ratios`, et chaque résultat porte le
   ou les tags effectivement utilisés, jamais une valeur numérique seule.
 - **Dépassement de la limite de 10 requêtes/seconde d'EDGAR** — réponse 403
-  en cascade. Garde-fou : la limitation de débit est isolée dans un seul
-  point du code d'ingestion EDGAR, testée indépendamment.
+  en cascade. Garde-fou : la limitation de débit est isolée dans
+  `ingestion.edgar_client`, seul point du code autorisé à émettre une
+  requête EDGAR, testée indépendamment.
+- **Fuite d'une clé d'API dans un message d'erreur** — le vecteur principal
+  est le message d'exception d'une bibliothèque HTTP, qui contient l'URL
+  complète et donc la clé en chaîne de requête. Garde-fou :
+  `ingestion.secrets.redact` appliqué systématiquement par les deux clients
+  à tout message d'exception et à toute représentation de configuration ;
+  testé en provoquant un échec réel du client, pas seulement de l'utilitaire
+  de masquage isolé.
 - **Horodatage des dépôts SEC en heure de l'Est américain, pas en UTC** —
   une conversion implicite ou absente fausserait la comparaison `filed ≤ t`
   près de minuit. Garde-fou : la conversion vers UTC est explicite et
@@ -492,8 +556,11 @@ exigence point-in-time que le reste.
   — documentées ici comme décisions de plan, pas dans un ADR séparé, à
   condition que le tag effectivement utilisé reste stocké et traçable pour
   chaque valeur produite (critères 9, 11).
-- **Regroupement des codes SIC en catégories grossières** — ne constitue
-  pas une nouvelle source de données, donc pas d'ADR requis au sens
-  strict de CLAUDE.md ; documenté ici comme décision de plan, réversible
-  sans perte de données puisque `sic_codes.parquet` conserve le code SIC
-  brut et permet un reclassement ultérieur.
+- **Regroupement des codes SIC en catégories grossières** — les neuf
+  divisions SIC officielles (voir section Calcul, `calc.sector_grouping`),
+  plutôt qu'un regroupement inventé : standard du régulateur, déjà « une
+  dizaine de catégories grossières » sans reconstruire une classification
+  GICS. Ne constitue pas une nouvelle source de données, donc pas d'ADR
+  requis au sens strict de CLAUDE.md ; réversible sans perte de données
+  puisque `sic_codes.parquet` conserve le code SIC brut et permet un
+  reclassement ultérieur.

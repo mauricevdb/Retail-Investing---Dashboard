@@ -36,4 +36,17 @@ Sortie : `docs/specs/<NNNN>-<slug>/tasks.md`.
 ## Fin de tâche
 
 Vérifier que l'union des critères couverts égale l'ensemble des critères de
-la spec. Signaler tout critère orphelin. S'arrêter.
+la spec. Signaler tout critère orphelin.
+
+Vérifier symétriquement que tout module nommé dans `plan.md` est couvert par
+au moins une tâche. Signaler tout module orphelin.
+
+Raison de ce second contrôle : le découpage initial de la tranche 0001 a fait
+de la testabilité hors réseau le critère implicite d'existence d'une tâche,
+ce qui a rendu la couche d'effets de bord (les clients réseau eux-mêmes)
+invisible au découpage — aucune tâche ne les construisait, alors que
+`plan.md` les décrivait. Le contrôle sur les critères orphelins ne l'aurait
+jamais détecté, puisque ces modules ne portent aucun critère de spec en
+propre.
+
+S'arrêter.

@@ -63,8 +63,11 @@ et le signaler, jamais contourner.
    Une donnée absente reste absente et remonte jusqu'à l'affichage comme telle.
 8. **Traçabilité.** Tout nombre affiché doit pouvoir être remonté jusqu'à
    son champ source et sa date de dépôt.
-9. **Tests hors réseau.** Aucun test n'appelle une API externe. Les tests
-   tournent sur des instantanés figés dans `tests/golden/`.
+9. **Tests hors réseau par défaut.** La suite par défaut n'appelle jamais
+   une API externe et tourne sur les instantanés figés de `tests/golden/`.
+   Un test de contact vérifiant le contrat avec un fournisseur est autorisé
+   s'il est explicitement marqué et exclu de la suite par défaut. Il vérifie
+   l'accessibilité et la forme de la réponse, jamais une logique métier.
 10. **Secrets.** Les clés d'API viennent de `.env`, jamais du code, jamais
     d'un commit.
 
