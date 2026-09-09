@@ -1,0 +1,16 @@
+{
+  "cik": "0000000005",
+  "entityType": "investment company",
+  "sic": "5040",
+  "sicDescription": "Wholesale-Professional & Commercial Equipment & Supplies",
+  "tickers": ["EEEE"],
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000000005-24-000001"],
+      "filingDate": ["2024-02-18"],
+      "form": ["N-CSR"],
+      "primaryDocument": ["eeee-ncsr.htm"],
+      "reportDate": ["2023-12-31"]
+    }
+  }
+}

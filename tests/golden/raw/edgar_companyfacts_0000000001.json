@@ -44,6 +44,146 @@
             }
           ]
         }
+      },
+      "DepreciationDepletionAndAmortization": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 50000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "NetCashProvidedByUsedInOperatingActivities": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 200000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "PaymentsToAcquirePropertyPlantAndEquipment": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 30000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "LongTermDebtNoncurrent": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 100000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15"
+            }
+          ]
+        }
+      },
+      "LongTermDebtCurrent": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 20000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15"
+            }
+          ]
+        }
+      },
+      "CashAndCashEquivalentsAtCarryingValue": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 80000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15"
+            }
+          ]
+        }
+      },
+      "StockholdersEquity": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 250000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15"
+            }
+          ]
+        }
+      },
+      "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 400000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "IncomeTaxExpenseBenefit": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 100000000,
+              "accn": "0000000001-24-000010",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-15",
+              "start": "2023-01-01"
+            }
+          ]
+        }
       }
     },
     "dei": {

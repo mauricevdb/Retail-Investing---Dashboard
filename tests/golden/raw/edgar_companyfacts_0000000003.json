@@ -1,0 +1,133 @@
+{
+  "cik": 3,
+  "entityName": "Gamma Regional Bank",
+  "facts": {
+    "us-gaap": {
+      "CommonStockSharesOutstanding": {
+        "units": {
+          "shares": [
+            {
+              "end": "2023-12-31",
+              "val": 50000000,
+              "accn": "0000000003-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-20"
+            }
+          ]
+        }
+      },
+      "NetIncomeLoss": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 40000000,
+              "accn": "0000000003-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-20",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "IncomeTaxExpenseBenefit": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 10000000,
+              "accn": "0000000003-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-20",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "InterestExpense": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 5000000,
+              "accn": "0000000003-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-20",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "NetCashProvidedByUsedInOperatingActivities": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 60000000,
+              "accn": "0000000003-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-20",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "PaymentsToAcquireProductiveAssets": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 8000000,
+              "accn": "0000000003-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-20",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "Cash": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 15000000,
+              "accn": "0000000003-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-20"
+            }
+          ]
+        }
+      },
+      "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 30000000,
+              "accn": "0000000003-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-20"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,163 @@
+{
+  "cik": 4,
+  "entityName": "Delta Investment Trust",
+  "facts": {
+    "us-gaap": {
+      "CommonStockSharesIssued": {
+        "units": {
+          "shares": [
+            {
+              "end": "2023-12-31",
+              "val": 20000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25"
+            }
+          ]
+        }
+      },
+      "TreasuryStockShares": {
+        "units": {
+          "shares": [
+            {
+              "end": "2023-12-31",
+              "val": 2000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25"
+            }
+          ]
+        }
+      },
+      "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 25000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "PaymentsToAcquirePropertyPlantAndEquipment": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 5000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "LongTermDebtNoncurrent": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 5000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25"
+            }
+          ]
+        }
+      },
+      "StockholdersEquity": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": -20000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25"
+            }
+          ]
+        }
+      },
+      "CashAndCashEquivalentsAtCarryingValue": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 10000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25"
+            }
+          ]
+        }
+      },
+      "NetIncomeLoss": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 5000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "IncomeTaxExpenseBenefit": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 9000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      },
+      "OperatingIncomeLoss": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": -15000000,
+              "accn": "0000000004-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-25",
+              "start": "2023-01-01"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
