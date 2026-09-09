@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ruff format . >/dev/null 2>&1; uv run ruff check --fix . >/dev/null 2>&1; true"
+          }
+        ]
+      }
+    ]
+  }
+}
