@@ -81,9 +81,14 @@ débit. La profondeur d'ingestion et la fenêtre d'analyse restent deux
 décisions distinctes : tronquer plus tard au calcul est trivial, recharger un
 historique non stocké ne l'est pas.
 
-### D2 — Taxonomie : `us-gaap` seulement
+### D2 — Émetteurs : les déposants IFRS sont exclus de la tranche 0001
 
-Les émetteurs étrangers déposant en `ifrs-full` sont exclus de la tranche 0001.
+Les émetteurs étrangers publiant en IFRS (taxonomie `ifrs-full`) sont exclus
+de la tranche 0001. L'exclusion porte sur la catégorie d'émetteurs, pas sur
+les taxonomies retenues en stockage : les taxonomies effectivement conservées
+dans `fundamentals_raw.parquet` sont `us-gaap` et `dei` — cette dernière porte
+des faits communs à tous les dépôts américains normaux (dont les actions en
+circulation) et n'est pas spécifique aux émetteurs IFRS (ADR 0003).
 
 **Raison** : les inclure n'ajouterait pas des lignes de même forme mais des
 branches dans la logique de calcul. Les tags diffèrent et exigeraient une table
@@ -170,7 +175,7 @@ la latence.
 ## Exclusions à reporter dans la spec
 
 À écrire comme exclusions assumées, et non comme oublis, afin de pouvoir les
-lever proprement plus tard : le temps réel, la taxonomie IFRS, les petites
+lever proprement plus tard : le temps réel, les émetteurs IFRS, les petites
 capitalisations, l'exécution d'ordres.
 
 ## Non résolu
