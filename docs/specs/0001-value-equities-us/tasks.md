@@ -819,9 +819,15 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   pas d'écran pour le jour si `calc.universe` renvoie un échec.
 - **Fichiers** : `src/dashboard/pipeline/daily_run.py`,
   `tests/pipeline/test_daily_run_universe_failure.py`.
-- **Test** : `test_universe_failure_halts_pipeline` — sur le cas de fixture
-  d'univers implausible (T37), aucune ligne n'est ajoutée à
-  `screen_results.parquet` ni à `universe_membership.parquet` pour ce jour.
+- **Test** : énoncé corrigé après implémentation : le texte original
+  vérifiait `screen_results.parquet` en plus de `universe_membership.parquet`,
+  ce qui présuppose les indicateurs, les filtres et le classement déjà
+  câblés dans `pipeline.daily_run` — or T45 à T53 ne sont pas des
+  dépendances de T58, et rien n'écrit encore dans `screen_results.parquet`
+  à ce stade, échec ou pas : l'assertion n'aurait rien prouvé.
+  `test_universe_failure_halts_pipeline` — sur le cas de fixture d'univers
+  implausible (T37), aucune ligne n'est ajoutée à
+  `universe_membership.parquet` pour ce jour.
 - **Critères de la spec couverts** : #25 (volet orchestration).
 - **Terminée quand** : le test passe.
 - **Dépend de** : T37, T57.
