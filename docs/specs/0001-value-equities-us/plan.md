@@ -261,8 +261,11 @@ calculables plutôt que d'en sur-compter.
 
 - `app.screen_view` — tableau filtré/classé, compteur de titres retenus
   (y compris zéro), alertes de divergence et de couverture manquante.
-- `app.detail_view` — détail d'un titre : données brutes, champ source,
-  `end`, `filed`, `accn` pour chaque nombre affiché.
+- `app.detail_view` — détail d'un titre : pour une grandeur issue d'un
+  dépôt, champ source, rang de repli utilisé, `end`, `filed`, `accn` ; pour
+  une grandeur dérivée (percentile, indicateur composé), formule, entrées,
+  population de comparaison et fenêtre retenue (invariant 8 amendé, ADR
+  0004, critères 9 et 27).
 
 ## Schéma de données
 
@@ -394,6 +397,24 @@ exigence point-in-time que le reste.
 
 ## Contrats de module
 
+Amendement (invariant 8, ADR 0004) : la traçabilité n'avait pas été
+traduite en contrat de module à l'écriture initiale de ce plan — seul le
+cas d'une grandeur directement issue d'un dépôt était couvert. Chaque
+famille de grandeurs gagne un point d'accès détail dédié, additif, qui ne
+modifie la signature d'aucune fonction déjà écrite ni testée :
+- `calc.point_in_time` gagne `resolve_detail(facts, concept, cik, end, t)
+  -> {concept, end, filed, accn, value} | absente`, une fonction sœur de
+  `resolve` ; `resolve` peut l'appeler en interne et n'en extraire que la
+  valeur, sans que son propre contrat change.
+- Chaque bridge à chaîne de repli (T25–T31) expose, à côté du tag déjà
+  renvoyé, le rang de repli effectivement utilisé (1 = tag primaire, 2 =
+  premier repli, etc.) — l'information de qualité que l'invariant 8 exige
+  désormais explicitement : un indicateur calculé sur un repli lointain ne
+  vaut pas un indicateur calculé sur le tag primaire.
+- Les grandeurs dérivées (`calc.percentiles`) exposent leur détail sous la
+  forme formule + entrées + population de comparaison + fenêtre retenue,
+  jamais sous la forme tag/`filed`/`accn`, qui n'a pas de sens pour elles.
+
 - **`calc.point_in_time(facts, concept, cik, t) -> valeur | absente`**
   Garantit : ne renvoie jamais une valeur dont `filed > t`. Refuse : de
   deviner une valeur en l'absence de dépôt antérieur à `t` — renvoie
@@ -446,7 +467,7 @@ exigence point-in-time que le reste.
 | 6 — donnée absente signalée, jamais par défaut | `calc.ratios` | `test_missing_fundamental_flagged` |
 | 7 — écran reflète clôture + dépôts connus du jour | `pipeline.daily_run` | `test_daily_run_uses_close_and_known_filings` |
 | 8 — date de référence = dernière séance | `calc.market_calendar` | `test_last_session_not_calendar_today` |
-| 9 — traçabilité de tout nombre affiché | `app.detail_view`, `filings.parquet` | `test_every_displayed_number_traceable` |
+| 9 — traçabilité d'une grandeur issue d'un dépôt (dont le rang de repli) | `app.detail_view`, `calc.point_in_time.resolve_detail`, `filings.parquet` | `test_every_displayed_number_traceable` |
 | 10 — devise explicite, sans conversion | schéma (colonnes devise), `calc.ratios` | `test_currency_explicit_no_conversion` |
 | 11 — taux de couverture par indicateur | `calc.ratios` et les bridges (`ebit`, `fcf`, `debt`, `cash`, `equity`, `dna`, `shares`) | `test_coverage_rate_reported_per_indicator` |
 | 12 — TTM primaire, médiane 5 ans secondaire | `calc.ttm`, `calc.normalized_5y` | `test_ttm_and_5y_median_computed` |
@@ -464,6 +485,7 @@ exigence point-in-time que le reste.
 | 24 — stabilité au rang de coupure | `calc.universe` | `test_universe_stable_near_cutoff_with_hysteresis` |
 | 25 — échec bruyant si taille implausible | `calc.universe`, `pipeline.daily_run` | `test_universe_failure_halts_pipeline` |
 | 26 — jamais présenté comme le S&P 500/400 | `app.screen_view` | `test_no_index_label_in_ui` |
+| 27 — traçabilité d'une grandeur dérivée (formule, entrées, population, fenêtre) | `app.detail_view`, `calc.percentiles` | `test_every_displayed_number_traceable` |
 | Invariant 10 — aucune clé dans logs/erreurs | `ingestion.edgar_client`, `ingestion.eodhd_client`, `ingestion.secrets` | `test_no_api_key_in_logs_or_errors` |
 
 ## Risques
@@ -561,6 +583,19 @@ exigence point-in-time que le reste.
   — documentées ici comme décisions de plan, pas dans un ADR séparé, à
   condition que le tag effectivement utilisé reste stocké et traçable pour
   chaque valeur produite (critères 9, 11).
+- **Traçabilité des grandeurs dérivées (invariant 8 amendé, ADR 0004)** —
+  découverte en implémentant T61 : l'invariant 8 initial et le critère 9
+  supposaient que tout nombre affiché remontait à un fait déposé
+  (champ source, `end`, `filed`, `accn`), ce qui ne dit rien pour un
+  percentile ou tout indicateur composé de plusieurs faits. Corrigé par
+  un second cas de traçabilité (formule, entrées, population de
+  comparaison, fenêtre — critère 27) plutôt que par une extension forcée
+  du premier cas. Ne constitue pas une nouvelle source de données, donc
+  pas d'ADR requis au sens strict de CLAUDE.md pour la distinction
+  elle-même ; l'ADR 0004 documente néanmoins le fait que cette
+  traçabilité n'avait pas été traduite en contrat de module au moment du
+  plan initial, et que les points d'accès détail ont été ajoutés après
+  coup, de façon additive.
 - **Regroupement des codes SIC en catégories grossières** — les neuf
   divisions SIC officielles (voir section Calcul, `calc.sector_grouping`),
   plutôt qu'un regroupement inventé : standard du régulateur, déjà « une

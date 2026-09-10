@@ -68,7 +68,11 @@ et le signaler, jamais contourner.
    existe pour ce paramètre, elle prime, et le paramètre ne sert que de
    repli explicitement signalé.
 8. **Traçabilité.** Tout nombre affiché doit pouvoir être remonté jusqu'à
-   son champ source et sa date de dépôt.
+   son origine. Pour une grandeur issue d'un dépôt, l'origine est le champ
+   source, sa date de dépôt et son numéro d'accession, ainsi que le rang de
+   repli utilisé dans la chaîne de tags. Pour une grandeur dérivée, elle est
+   la formule, ses entrées, la population de comparaison et la fenêtre
+   retenue. Aucun chiffre ne s'affiche sans que son origine soit exposable.
 9. **Tests hors réseau par défaut.** La suite par défaut n'appelle jamais
    une API externe et tourne sur les instantanés figés de `tests/golden/`.
    Un test de contact vérifiant le contrat avec un fournisseur porte le

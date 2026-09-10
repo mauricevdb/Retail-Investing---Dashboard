@@ -1,6 +1,9 @@
 def _passes(
     status: dict[str, float | str | None], thresholds: dict[str, tuple[float | None, float | None]]
 ) -> bool:
+    if status.get("in_universe") is False:
+        return False
+
     for indicator, (low, high) in thresholds.items():
         value = status.get(indicator)
         if value is None:

@@ -858,17 +858,32 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Dépend de** : T37, T54, T55.
 
 ### T61 — Tracer tout nombre affiché jusqu'à sa source
-- **Objectif** : `app.detail_view` permet de remonter, pour tout nombre
-  affiché, jusqu'au champ source, sa date de fin d'exercice, sa date de
-  dépôt et son numéro de dépôt — ou, pour un prix, sa date de cotation.
+- **Objectif** : énoncé corrigé après implémentation — invariant 8 amendé,
+  ADR 0004 : le texte original et l'ancien critère 9 supposaient que tout
+  nombre affiché remonte à un fait déposé (champ source, `end`, `filed`,
+  `accn`), ce qui est faux pour les deux percentiles, des grandeurs
+  dérivées de l'historique de `screen_results`, pas d'un fait d'un jour
+  donné — la même incohérence structurelle qu'à T45, ici sur les
+  dépendances plutôt que sur le compte d'indicateurs. `app.detail_view`
+  permet de remonter, pour une grandeur issue d'un dépôt, jusqu'au champ
+  source, au rang de repli utilisé, à sa date de fin d'exercice, sa date
+  de dépôt et son numéro de dépôt — ou, pour un prix, sa date de
+  cotation — et, pour une grandeur dérivée, jusqu'à la formule, ses
+  entrées, la population de comparaison et la fenêtre retenue.
 - **Fichiers** : `src/dashboard/app/detail_view.py`,
-  `tests/app/test_detail_view_traceability.py`.
-- **Test** : `test_every_displayed_number_traceable` — pour chacun des six
-  indicateurs d'un titre de la fixture, la fonction de détail retourne le
-  ou les tags, `end`, `filed` et `accn` correspondants.
-- **Critères de la spec couverts** : #9.
+  `src/dashboard/calc/point_in_time.py` (fonction sœur additive
+  `resolve_detail`), `tests/app/test_detail_view_traceability.py`.
+- **Test** : `test_every_displayed_number_traceable` — pour Alpha, dont
+  tous les indicateurs se résolvent au tag primaire, les quatre
+  indicateurs issus de faits déposés (EV/EBIT, rendement FCF/EV, ROIC,
+  dette nette/EBITDA) retournent le ou les tags, le rang de repli, `end`,
+  `filed` et `accn` correspondants ; les deux percentiles retournent
+  formule, entrées, population de comparaison et fenêtre plutôt qu'un
+  tag. Se limite au cas où chaque bridge résout au niveau primaire — ne
+  couvre pas la reconstruction du rang de repli sur un titre en repli.
+- **Critères de la spec couverts** : #9, #27.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T3, T45, T57.
+- **Dépend de** : T3, T45, T49, T51, T57.
 
 ### T62 — Ne jamais présenter l'écran comme une mesure d'un indice publié
 - **Objectif** : `app.screen_view` porte une mention explicite que

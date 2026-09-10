@@ -178,10 +178,11 @@ exécution.
    l'utilisateur consulte l'écran, alors la date de référence affichée est
    celle de la dernière séance de bourse effective, jamais la date du jour
    calendaire.
-9. Étant donné un nombre quelconque affiché à l'écran, quand l'utilisateur
-   veut en vérifier l'origine, alors il peut remonter jusqu'au champ
-   source, à sa date de fin d'exercice, à sa date de dépôt et à son numéro
-   de dépôt — ou, pour un prix, jusqu'à sa date de cotation.
+9. Étant donné un nombre affiché à l'écran directement issu d'un fait
+   déposé, quand l'utilisateur veut en vérifier l'origine, alors il peut
+   remonter jusqu'au champ source, au rang de repli utilisé dans la chaîne
+   de tags, à sa date de fin d'exercice, à sa date de dépôt et à son
+   numéro de dépôt — ou, pour un prix, jusqu'à sa date de cotation.
 10. Étant donné deux titres quelconques de l'univers, quand ils sont
     comparés à l'écran, alors leurs valeurs fondamentales et leurs prix
     sont exprimés dans la même devise, sans conversion implicite.
@@ -250,6 +251,12 @@ exécution.
 26. Étant donné l'écran ou toute statistique qu'il produit, quand ils sont
     présentés à l'utilisateur, alors ils ne sont jamais désignés comme une
     mesure du S&P 500 ou du S&P 400.
+27. Étant donné un nombre affiché à l'écran qui est une grandeur dérivée —
+    un percentile, un indicateur composé de plusieurs faits, ou toute
+    valeur qui n'est pas la lecture directe d'un seul fait déposé — quand
+    l'utilisateur veut en vérifier l'origine, alors il peut remonter
+    jusqu'à la formule utilisée, ses entrées, la population de comparaison
+    le cas échéant, et la fenêtre temporelle retenue.
 
 ## Critères liés aux invariants
 
@@ -276,7 +283,13 @@ exécution.
    jamais masqué ni remplacé par une valeur inventée) et par le critère 25
    (un calcul d'univers en échec arrête le traitement au lieu d'afficher un
    résultat partiel silencieux).
-8. **Traçabilité** — couvert par le critère d'acceptation 9.
+8. **Traçabilité** — couvert par le critère d'acceptation 9 (grandeurs
+   issues d'un dépôt, y compris le rang de repli utilisé) et par le
+   critère d'acceptation 27 (grandeurs dérivées : formule, entrées,
+   population de comparaison, fenêtre retenue). Amendement : l'invariant
+   supposait initialement que tout chiffre remontait à un fait déposé, ce
+   qui est faux pour les percentiles et autres grandeurs dérivées — voir
+   ADR 0004.
 9. **Tests hors réseau** — chacun des critères ci-dessus doit rester
    vérifiable sur des instantanés figés, sans appel à SEC EDGAR ni à EODHD
    pendant l'exécution des tests.
