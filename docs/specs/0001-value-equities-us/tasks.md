@@ -898,6 +898,39 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Terminée quand** : le test passe.
 - **Dépend de** : T57, T59.
 
+### T63 — Assembler `pipeline.daily_run` de bout en bout
+- **Objectif** : `pipeline.daily_run.run_daily` enchaîne, pour un jour de
+  traitement donné, un seul parcours reliant les briques déjà construites
+  et testées isolément, sans en réécrire la logique : calcul de l'univers
+  (déjà câblé en T58), calcul des indicateurs fondés sur des faits pour
+  chaque titre membre (`calc.ratios.indicator_status`), filtrage
+  (`calc.filters.apply_filters`), classement et plafonnement à 25
+  (`calc.ranking.rank`), puis persistance du résultat du jour
+  (`storage.screen_history.append`).
+- **Fichiers** : `src/dashboard/pipeline/daily_run.py`,
+  `tests/pipeline/test_daily_run_end_to_end.py`.
+- **Test** : `test_daily_run_end_to_end` — sur une petite fixture d'univers
+  plausible (quelques titres membres avec fondamentaux, prix et
+  capitalisation complets), un appel à `run_daily` produit exactement une
+  ligne par titre retenu dans `screen_results.parquet`, cohérente avec ce
+  que `calc.ratios.indicator_status`, `calc.filters.apply_filters` et
+  `calc.ranking.rank` produiraient appelés directement sur les mêmes
+  données — pas une réimplémentation parallèle de leur logique.
+- **Explicitement hors périmètre** : les percentiles (critères 19, 20), la
+  divergence TTM/normalisé (critère 13), le streak (critère 18) et le
+  taux de couverture agrégé au niveau écran (critère 11, volet rapport)
+  restent des paramètres reçus ou des étapes séparées dans cette tâche —
+  leur câblage dans `run_daily` suppose un historique multi-jours
+  (`screen_results` déjà accumulé) que T63 à elle seule ne construit pas.
+  Signalé pour ne pas être oublié, pas résolu ici ; à reprendre dans une
+  tâche dédiée si la tranche se poursuit au-delà de T63.
+- **Critères de la spec couverts** : aucun nouveau directement — referme
+  la boucle d'orchestration pour des critères déjà couverts
+  individuellement (#2, #6, #7, #11 volet par-titre, #15, #16, #17, #25),
+  jusqu'ici jamais exercés ensemble dans un seul appel.
+- **Terminée quand** : le test passe.
+- **Dépend de** : T45, T52, T53, T54, T58.
+
 ## Vérification de couverture
 
 ### Critères de la spec
@@ -972,4 +1005,9 @@ traitement) ; aucune tâche ne teste explicitement qu'un échec de `fetch_*`
 lui-même (T14–T18) empêche de la même façon toute réutilisation silencieuse
 des données de la veille dans `pipeline.daily_run`.
 
-Total : 62 tâches.
+T63 ne couvre aucun critère numéroté supplémentaire — elle referme la
+boucle d'orchestration entre des modules déjà chacun couverts
+individuellement (T45, T52, T53, T54, T58), sur le même principe que T7
+(étend un module déjà couvert plutôt que d'en couvrir un nouveau).
+
+Total : 63 tâches.
