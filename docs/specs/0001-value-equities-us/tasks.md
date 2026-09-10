@@ -624,14 +624,27 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 ### T45 — Signaler un indicateur non calculable, jamais de valeur par défaut
 - **Objectif** : `calc.ratios` porte un statut calculable/non calculable
   par indicateur et par titre, sans jamais inventer de valeur.
+  Amendement de portée (trou de couverture relevé à l'implémentation) :
+  aucune tâche ne construisait le rendement FCF/EV (indicateur #2 de
+  spec.md, colonne `fcf_yield` de `screen_results.parquet` dans plan.md)
+  — `calc.ratios.fcf_yield` est donc construit ici, sur le modèle de
+  `ev_to_ebit`/`net_debt_to_ebitda`, sans garde de signe (plan.md ne le
+  classe pas parmi les ratios non interprétables par leur dénominateur).
+  Les deux percentiles (`calc.percentiles`, T51, pas encore construite)
+  sont reçus par `indicator_status` déjà résolus, en paramètres — comme
+  `market_cap` pour `calc.ev` — plutôt que recalculés ici : un percentile
+  est une mesure croisée sur l'univers, pas une propriété d'un titre isolé
+  qu'un test à un seul émetteur peut exercer.
 - **Fichiers** : `src/dashboard/calc/ratios.py`,
   `tests/calc/test_ratios_missing_data.py`.
 - **Test** : `test_missing_fundamental_flagged` — un titre dont une
-  composante d'un seul indicateur est absente a ce seul indicateur signalé
-  non calculable, les cinq autres restent produits normalement.
+  composante d'un seul indicateur (les capitaux propres, donc ROIC) est
+  absente a ce seul indicateur signalé non calculable ; les cinq autres
+  (EV/EBIT, rendement FCF/EV, dette nette/EBITDA, et les deux percentiles
+  passés déjà résolus) restent produits normalement.
 - **Critères de la spec couverts** : #6.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T41, T42, T40.
+- **Dépend de** : T41, T42, T40, T28.
 
 ### T46 — Rapporter le taux de couverture par indicateur
 - **Objectif** : le pipeline rapporte, pour chaque indicateur, le nombre
