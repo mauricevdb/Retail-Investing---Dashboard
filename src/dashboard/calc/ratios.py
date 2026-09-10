@@ -48,6 +48,9 @@ def fcf_yield(market_cap: float, facts: pl.DataFrame, cik: str, end: date, t: da
     return fcf / enterprise_value
 
 
+INDICATOR_KEYS = ("ev_ebit", "fcf_yield", "roic", "net_debt_ebitda", "pct_own_history", "pct_sector")
+
+
 def indicator_status(
     market_cap: float,
     facts: pl.DataFrame,
@@ -56,7 +59,8 @@ def indicator_status(
     t: date,
     pct_own_history: float | None,
     pct_sector: float | None,
-) -> dict[str, float | None]:
+    currency: str = "USD",
+) -> dict[str, float | str | None]:
     return {
         "ev_ebit": ev_to_ebit(market_cap, facts, cik, end, t),
         "fcf_yield": fcf_yield(market_cap, facts, cik, end, t),
@@ -64,4 +68,28 @@ def indicator_status(
         "net_debt_ebitda": net_debt_to_ebitda(facts, cik, end, t),
         "pct_own_history": pct_own_history,
         "pct_sector": pct_sector,
+        "currency": currency,
+    }
+
+
+def price_variation(prices_adj: pl.DataFrame, ticker: str, date_today: date) -> float | None:
+    rows = (
+        prices_adj.filter((pl.col("ticker") == ticker) & (pl.col("date") <= date_today))
+        .sort("date", descending=True)
+        .head(2)
+    )
+    if rows.height < 2:
+        return None
+
+    return rows["close_adj"][0] / rows["close_adj"][1]
+
+
+def coverage_rate(statuses: list[dict[str, float | None]]) -> dict[str, tuple[int, int]]:
+    if not statuses:
+        return {}
+
+    total = len(statuses)
+    return {
+        indicator: (sum(1 for status in statuses if status[indicator] is not None), total)
+        for indicator in INDICATOR_KEYS
     }

@@ -608,11 +608,14 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Dépend de** : T22.
 
 ### T44 — Signaler la divergence TTM / normalisé
-- **Objectif** : `calc.divergence` signale un titre quand l'écart entre
-  l'indicateur TTM et l'indicateur normalisé dépasse le seuil configuré
-  (amendement de rédaction : « percentile » remplacé par « indicateur »,
-  conforme à spec.md critère 13 et à plan.md — `calc.percentiles`, T51,
-  n'est ni construit ni une dépendance de cette tâche).
+- **Objectif** : énoncé corrigé après implémentation : le texte original
+  parlait à tort de « percentile TTM et percentile normalisé » — un mot
+  du vocabulaire de T51 (`calc.percentiles`, pas encore construite à ce
+  stade, et pas une dépendance de cette tâche) s'était substitué à celui
+  de spec.md critère 13 et de plan.md, qui parlent tous deux de
+  l'indicateur lui-même. `calc.divergence` signale un titre quand l'écart
+  entre l'indicateur TTM et l'indicateur normalisé dépasse le seuil
+  configuré.
 - **Fichiers** : `src/dashboard/calc/divergence.py`,
   `tests/calc/test_divergence.py`.
 - **Test** : `test_divergence_flag_above_threshold` — cas au-dessus du
@@ -622,12 +625,14 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Dépend de** : T43.
 
 ### T45 — Signaler un indicateur non calculable, jamais de valeur par défaut
-- **Objectif** : `calc.ratios` porte un statut calculable/non calculable
-  par indicateur et par titre, sans jamais inventer de valeur.
-  Amendement de portée (trou de couverture relevé à l'implémentation) :
-  aucune tâche ne construisait le rendement FCF/EV (indicateur #2 de
-  spec.md, colonne `fcf_yield` de `screen_results.parquet` dans plan.md)
-  — `calc.ratios.fcf_yield` est donc construit ici, sur le modèle de
+- **Objectif** : énoncé corrigé après implémentation : le texte original
+  supposait « les cinq autres [indicateurs] » déjà disponibles à ce stade,
+  ce qui présuppose les six indicateurs de spec.md construits — or aucune
+  tâche ne construisait le rendement FCF/EV (indicateur #2 de spec.md,
+  colonne `fcf_yield` de `screen_results.parquet` dans plan.md). `calc.ratios`
+  porte un statut calculable/non calculable par indicateur et par titre,
+  sans jamais inventer de valeur ; `calc.ratios.fcf_yield` est construit
+  ici pour combler ce trou, sur le modèle de
   `ev_to_ebit`/`net_debt_to_ebitda`, sans garde de signe (plan.md ne le
   classe pas parmi les ratios non interprétables par leur dénominateur).
   Les deux percentiles (`calc.percentiles`, T51, pas encore construite)
@@ -701,15 +706,20 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   l'une des neuf divisions SIC officielles définies dans le plan, non
   calculable si le code sort des plages couvertes.
 - **Fichiers** : `src/dashboard/calc/sector_grouping.py`,
-  `tests/calc/test_sector_grouping.py`. Étend
-  `tests/golden/raw/edgar_submissions_0000000005.json` (nouvel émetteur,
-  SIC de services, ex. 7372) pour disposer d'au moins deux divisions
-  distinctes dans la fixture, en plus du cas hors plage (ex. SIC 1850).
+  `tests/calc/test_sector_grouping.py`. Énoncé corrigé après
+  implémentation : CIK 5 n'était plus disponible pour « un nouvel
+  émetteur » — Epsilon (SIC 5040, fonds/ETF) occupe ce CIK depuis T34,
+  pour un besoin sans rapport (isoler le critère `entity_type` de
+  l'exclusion d'univers). `calc.sector_grouping` ne se soucie pas
+  d'`entity_type` : le SIC d'Epsilon (5040, plage 5000–5199) suffit à
+  fournir une seconde division distincte sans nouvel émetteur. Introduit
+  à la place : `tests/golden/raw/edgar_submissions_0000000006.json`
+  (CIK 6, SIC 1850) pour le cas hors plage.
 - **Test** : `test_sector_grouping_classifies_by_sic_division` — le SIC
   3674 d'Alpha est classé en division D (industrie manufacturière), le SIC
-  7372 du nouvel émetteur en division I (services), et un SIC hors plage
-  (1850) est signalé non calculable, jamais rattaché par défaut à une
-  division voisine.
+  5040 d'Epsilon en division F (commerce de gros), et le SIC 1850 de CIK 6
+  (hors plage) est signalé non calculable, jamais rattaché par défaut à
+  une division voisine.
 - **Critères de la spec couverts** : aucun directement (prérequis des
   critères 19, 20 ; #20 est prouvé en T51 en s'appuyant sur ce
   regroupement).

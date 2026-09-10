@@ -1,0 +1,16 @@
+{
+  "cik": "0000000006",
+  "entityType": "operating company",
+  "sic": "1850",
+  "sicDescription": "Reserved (non standard)",
+  "tickers": ["FFFF"],
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000000006-24-000001"],
+      "filingDate": ["2024-02-22"],
+      "form": ["10-K"],
+      "primaryDocument": ["ffff-10k.htm"],
+      "reportDate": ["2023-12-31"]
+    }
+  }
+}
