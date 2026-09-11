@@ -5,5 +5,11 @@ _UNIVERSE_CAPTION = (
 )
 
 
-def render_screen_text(retained_count: int) -> str:
-    return f"{_UNIVERSE_CAPTION}\n{retained_count} titre(s) retenu(s) aujourd'hui."
+def render_screen_text(retained_count: int, non_calculable_shares_count: int = 0) -> str:
+    text = f"{_UNIVERSE_CAPTION}\n{retained_count} titre(s) retenu(s) aujourd'hui."
+    if non_calculable_shares_count > 0:
+        text += (
+            f"\n{non_calculable_shares_count} titre(s) non calculable(s) pour le "
+            "classement (actions en circulation introuvables)."
+        )
+    return text

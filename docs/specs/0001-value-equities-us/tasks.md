@@ -1128,16 +1128,49 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Terminée quand** : le test passe.
 - **Dépend de** : T25, T63.
 
+### T72 — Signaler les titres non calculables pour le classement
+- **Objectif** : régression introduite par T71 lui-même, relevée par
+  `/spec-verify` (troisième passage) sur un fixture réel : Beta (CIK 2,
+  exclu par taxonomie IFRS, zéro fait après rejet) fait renvoyer
+  `calc.shares_bridge.resolve()` `(None, None)`, et
+  `pipeline.daily_run._derive_shares_pit` retire alors purement et
+  simplement Beta de `shares_pit` — aucune trace, aucun signal, indiscernable
+  d'un titre qui n'aurait jamais existé dans le bassin de candidats. C'est
+  l'inverse exact du garde-fou que plan.md documente déjà pour ce risque
+  précis (section Risques, « Actions en circulation manquantes ou en retard
+  pour un émetteur ») : « même traitement que les autres fondamentaux
+  absents (critère 6) — l'émetteur concerné est signalé non calculable pour
+  le classement plutôt qu'exclu silencieusement ou classé avec une valeur
+  par défaut. » T71 a fermé un trou de traçabilité en rouvrant un trou plus
+  ancien, déjà nommé. Cette tâche ne cherche pas à conserver le titre dans
+  la table d'appartenance de `calc.universe` elle-même — ça toucherait la
+  jointure de classement de T34-T37, déjà testée et plus risquée à modifier
+  — mais à rendre son absence explicable au niveau du pipeline et de la vue
+  rendue, jamais silencieuse.
+- **Fichiers** : `src/dashboard/pipeline/daily_run.py`,
+  `src/dashboard/app/screen_view.py`,
+  `tests/pipeline/test_daily_run_end_to_end.py` (étendu).
+- **Test** : reprend le scénario Beta dans un `run_daily` complet (un titre
+  du bassin sans aucune action en circulation dérivable de `facts`) ; le
+  texte de vue produit par `render_screen_text` doit mentionner
+  explicitement le nombre de titres non calculables pour le classement, et
+  ce nombre doit refléter Beta — son absence de `universe_membership` doit
+  être expliquée par le texte rendu, jamais seulement déductible en creux.
+- **Critères de la spec couverts** : #6 (signalé comme incomplet, jamais
+  masqué silencieusement), invariant 7.
+- **Terminée quand** : le test passe.
+- **Dépend de** : T71, T62.
+
 ## Vérification de couverture
 
 ### Critères de la spec
 
 Union des critères couverts : #1 (T22), #2 (T59), #3 (T6, T23), #4 (T8,
-T47), #5 (T5), #6 (T45, T65), #7 (T57), #8 (T24), #9 (T61, T64, T65, T66,
-T69), #10 (T48), #11 (T46), #12 (T43), #13 (T44), #14 (T34), #15 (T52), #16
-(T53), #17 (T54), #18 (T56), #19 (T49), #20 (T51), #21 (T60), #22 (T55,
-T68), #23 (T34), #24 (T36), #25 (T37, T58), #26 (T62), #27 (T61, T65, T69),
-Invariant 10 (T13).
+T47), #5 (T5), #6 (T45, T65, T72), #7 (T57), #8 (T24), #9 (T61, T64, T65,
+T66, T69), #10 (T48), #11 (T46), #12 (T43), #13 (T44), #14 (T34), #15
+(T52), #16 (T53), #17 (T54), #18 (T56), #19 (T49), #20 (T51), #21 (T60),
+#22 (T55, T68), #23 (T34), #24 (T36), #25 (T37, T58), #26 (T62), #27 (T61,
+T65, T69), Invariant 10 (T13).
 
 Les 27 critères d'acceptation de spec.md et l'invariant 10 sont couverts.
 Aucun critère orphelin. (Amendement : le total était resté à 26 dans cette
@@ -1234,4 +1267,13 @@ dans le pipeline réel : la capitalisation boursière, calcul le plus
 déterminant du tableau de bord, n'avait jusqu'ici aucun chemin de code vers
 une donnée point-in-time réelle.
 
-Total : 71 tâches.
+T72 est une tâche corrective issue d'un troisième passage de
+`/spec-verify` : T71, en fermant un trou de traçabilité réel, en a rouvert
+un autre déjà documenté par plan.md pour ce risque précis (un émetteur
+sans actions en circulation déposées doit être signalé non calculable
+pour le classement, jamais exclu silencieusement). Rappel du même schéma
+qu'à T45/T50/T61 : une correction vérifiée localement (le chiffre est
+maintenant dérivé de faits réels) peut rouvrir une garantie déjà promise
+ailleurs si l'effet de bord sur le chemin silencieux n'est pas revérifié.
+
+Total : 72 tâches.

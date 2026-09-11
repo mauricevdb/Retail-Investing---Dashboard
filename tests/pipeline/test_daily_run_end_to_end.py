@@ -37,6 +37,11 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
     t = date(2024, 3, 1)
 
     tickers = {"0000000101": "ZZZA", "0000000102": "ZZZB", "0000000103": "ZZZC"}
+    # ZZZD : présent dans le bassin (SIC éligible, prix connus), mais sans
+    # aucun fait déposé -- comme Beta (CIK 2, taxonomie IFRS rejetée) dans
+    # l'audit /spec-verify. Ses actions en circulation ne sont dérivables
+    # d'aucune façon.
+    non_calculable_cik, non_calculable_ticker = "0000000104", "ZZZD"
     ebit_by_cik = {
         "0000000101": 100_000_000.0,
         "0000000102": 50_000_000.0,
@@ -89,15 +94,18 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
     shares_pit = pl.DataFrame(
         [
             {"ticker": ticker, "cik": cik, "shares_outstanding": 1.0}
-            for cik, ticker in tickers.items()
+            for cik, ticker in {**tickers, non_calculable_cik: non_calculable_ticker}.items()
         ]
     )
     prices_adj = pl.DataFrame(
-        [{"ticker": ticker, "date": t, "close_adj": 10.0} for ticker in tickers.values()]
+        [
+            {"ticker": ticker, "date": t, "close_adj": 10.0}
+            for ticker in (*tickers.values(), non_calculable_ticker)
+        ]
     )
-    # Même division SIC (7372, services) pour les trois -- groupe sectoriel
-    # de 3 titres, sous le seuil de 10 : le percentile sectoriel doit donc
-    # se replier explicitement (critère 20), pas manquer silencieusement.
+    # Même division SIC (7372, services) pour les quatre -- groupe sectoriel
+    # sous le seuil de 10 : le percentile sectoriel doit donc se replier
+    # explicitement (critère 20), pas manquer silencieusement.
     sic_codes = pl.DataFrame(
         [
             {
@@ -106,7 +114,7 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
                 "entity_type": "operating company",
                 "as_of": end,
             }
-            for ticker in tickers.values()
+            for ticker in (*tickers.values(), non_calculable_ticker)
         ]
     )
 
@@ -136,13 +144,18 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
         own_history_by_cik=own_history_by_cik,
     )
 
-    # Univers non vide.
+    # Univers non vide -- ZZZD, sans aucune action en circulation
+    # dérivable, n'apparaît pas parmi les membres classés.
     membership = pl.read_parquet(universe_history_path)
     assert membership.filter(pl.col("in_universe")).height == 3
+    assert non_calculable_ticker not in membership["ticker"].to_list()
 
-    # Vue affichable produite, mentionnant le compteur de titres retenus.
+    # Vue affichable produite, mentionnant le compteur de titres retenus
+    # ET le nombre de titres non calculables pour le classement -- l'absence
+    # de ZZZD n'est pas seulement déductible en creux, elle est expliquée.
     assert view_text is not None
     assert "2" in view_text
+    assert "1 titre(s) non calculable(s) pour le classement" in view_text
 
     written = pl.read_parquet(screen_history_path).sort("rank")
 

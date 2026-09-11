@@ -37,13 +37,22 @@ def run(
     return {"date": session, "fundamental": fundamental_value, "close": close}
 
 
-def _derive_shares_pit(shares_pit: pl.DataFrame, facts: pl.DataFrame, t: date) -> pl.DataFrame:
+def _derive_shares_pit(
+    shares_pit: pl.DataFrame, facts: pl.DataFrame, t: date
+) -> tuple[pl.DataFrame, list[str]]:
     rows = []
+    excluded_tickers = []
     for row in shares_pit.iter_rows(named=True):
         shares_outstanding, _ = resolve_shares(facts, row["cik"], t)
         if shares_outstanding is not None:
             rows.append({**row, "shares_outstanding": shares_outstanding})
-    return pl.DataFrame(rows, schema=shares_pit.schema)
+        else:
+            # Non calculable, jamais exclu silencieusement (invariant 7,
+            # critère 6) : signalé au niveau du pipeline via le compte
+            # renvoyé, même si le titre ne peut pas rester dans la table
+            # d'appartenance de calc.universe (T72).
+            excluded_tickers.append(row["ticker"])
+    return pl.DataFrame(rows, schema=shares_pit.schema), excluded_tickers
 
 
 def run_daily(
@@ -63,12 +72,13 @@ def run_daily(
     own_history_by_cik: dict[str, list[tuple[int, float]]] | None = None,
     since_year: int = 2011,
 ) -> str | None:
+    non_calculable_shares_tickers: list[str] = []
     if facts is not None:
         # Actions en circulation dérivées des dépôts SEC (T25) plutôt que
         # reçues telles quelles : la capitalisation boursière décide qui
         # entre dans l'univers, elle ne peut pas reposer sur une valeur non
         # tracée jusqu'à un fait déposé (invariant 2, T71).
-        shares_pit = _derive_shares_pit(shares_pit, facts, t)
+        shares_pit, non_calculable_shares_tickers = _derive_shares_pit(shares_pit, facts, t)
 
     membership = compute_universe(
         shares_pit,
@@ -147,4 +157,7 @@ def run_daily(
         screen_rows = pl.DataFrame([{**status, "date": t} for status in ranked])
         append_screen_history(screen_history_path, screen_rows)
 
-    return render_screen_text(retained_count=len(ranked))
+    return render_screen_text(
+        retained_count=len(ranked),
+        non_calculable_shares_count=len(non_calculable_shares_tickers),
+    )
