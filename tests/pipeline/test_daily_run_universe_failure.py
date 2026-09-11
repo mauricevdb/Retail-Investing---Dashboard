@@ -19,6 +19,7 @@ def test_universe_failure_halts_pipeline(tmp_path: Path) -> None:
             "ticker": tickers,
             "sic": ["6022"] * 9 + ["3674"],
             "entity_type": ["operating company"] * 10,
+            "as_of": [date(2024, 1, 1)] * 10,
         }
     )
     shares_pit = pl.DataFrame({"ticker": tickers, "shares_outstanding": [1_000_000.0] * 10})

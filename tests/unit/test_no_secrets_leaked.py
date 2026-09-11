@@ -38,9 +38,7 @@ def test_no_api_key_in_logs_or_errors(caplog) -> None:
 
     for exc_info in (edgar_exc_info, eodhd_exc_info):
         assert secret not in str(exc_info.value)
-        formatted = "".join(
-            traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb)
-        )
+        formatted = "".join(traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb))
         assert secret not in formatted
 
     assert secret not in caplog.text

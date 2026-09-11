@@ -22,8 +22,16 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
         "0000000102": 50_000_000.0,
         "0000000103": 200_000_000.0,
     }
-    debt_by_cik = {"0000000101": 20_000_000.0, "0000000102": 5_000_000.0, "0000000103": 50_000_000.0}
-    cash_by_cik = {"0000000101": 10_000_000.0, "0000000102": 5_000_000.0, "0000000103": 10_000_000.0}
+    debt_by_cik = {
+        "0000000101": 20_000_000.0,
+        "0000000102": 5_000_000.0,
+        "0000000103": 50_000_000.0,
+    }
+    cash_by_cik = {
+        "0000000101": 10_000_000.0,
+        "0000000102": 5_000_000.0,
+        "0000000103": 10_000_000.0,
+    }
 
     facts_rows = []
     for cik in tickers:
@@ -48,7 +56,12 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
     # se replier explicitement (critère 20), pas manquer silencieusement.
     sic_codes = pl.DataFrame(
         [
-            {"ticker": ticker, "sic": "7372", "entity_type": "operating company"}
+            {
+                "ticker": ticker,
+                "sic": "7372",
+                "entity_type": "operating company",
+                "as_of": end,
+            }
             for ticker in tickers.values()
         ]
     )
@@ -97,7 +110,14 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
 
     # Les six indicateurs sont toujours présents -- calculés ou
     # explicitement None, jamais une colonne manquante.
-    for column in ("ev_ebit", "fcf_yield", "roic", "net_debt_ebitda", "pct_own_history", "pct_sector"):
+    for column in (
+        "ev_ebit",
+        "fcf_yield",
+        "roic",
+        "net_debt_ebitda",
+        "pct_own_history",
+        "pct_sector",
+    ):
         assert column in written.columns
 
     a_row = written.filter(pl.col("cik") == "0000000101").row(0, named=True)

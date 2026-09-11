@@ -4,6 +4,7 @@ import polars as pl
 
 from dashboard.calc.ebit_bridge import resolve as resolve_ebit
 from dashboard.calc.point_in_time import resolve as resolve_pit
+from dashboard.calc.point_in_time import resolve_detail
 
 _PRETAX_INCOME_TAG = (
     "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
@@ -42,6 +43,28 @@ def resolve_tax_rate(
         return capped_rate, _CALCULATED_SOURCE
 
     return default_tax_rate, f"repli configuré : taux par défaut ({default_tax_rate:.0%})"
+
+
+def trace_tax_rate(facts: pl.DataFrame, cik: str, end: date, t: date) -> list[dict]:
+    tax_detail = resolve_detail(facts, "IncomeTaxExpenseBenefit", cik, end, t)
+
+    pretax_primary = resolve_detail(facts, _PRETAX_INCOME_TAG, cik, end, t)
+    if pretax_primary is not None:
+        pretax_value = pretax_primary["value"]
+        pretax_components = [{**pretax_primary, "rank": 1}]
+    else:
+        net_income_detail = resolve_detail(facts, "NetIncomeLoss", cik, end, t)
+        if net_income_detail is not None and tax_detail is not None:
+            pretax_value = net_income_detail["value"] + tax_detail["value"]
+            pretax_components = [{**net_income_detail, "rank": 2}]
+        else:
+            pretax_value = None
+            pretax_components = []
+
+    if pretax_value is not None and pretax_value > 0 and tax_detail is not None:
+        return pretax_components + [{**tax_detail, "rank": 1}]
+
+    return []
 
 
 def resolve(

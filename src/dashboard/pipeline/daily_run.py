@@ -117,7 +117,9 @@ def run_daily(
 
         if status["ev_ebit"] is not None:
             history = own_history_by_cik.get(cik, []) + [(t.year, status["ev_ebit"])]
-            pct_own_history, _ = own_history_percentile(history, t_year=t.year, since_year=since_year)
+            pct_own_history, _ = own_history_percentile(
+                history, t_year=t.year, since_year=since_year
+            )
             status["pct_own_history"] = pct_own_history
 
     statuses = list(statuses_by_cik.values())

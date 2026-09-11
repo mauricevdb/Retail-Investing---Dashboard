@@ -22,7 +22,9 @@ def test_nopat_tax_rate_capping_and_fallback() -> None:
 
     # Dans la bande : Alpha, résultat avant impôt 400M (tag primaire),
     # impôt 100M -> taux calculé 25 %.
-    alpha_rate, alpha_source = resolve_tax_rate(_facts("0000000001"), cik="0000000001", end=end, t=t)
+    alpha_rate, alpha_source = resolve_tax_rate(
+        _facts("0000000001"), cik="0000000001", end=end, t=t
+    )
     assert alpha_rate == 0.25
     assert alpha_source == (
         "us-gaap:IncomeTaxExpenseBenefit / résultat avant impôt, plafonné [0%, 50%]"
@@ -30,7 +32,9 @@ def test_nopat_tax_rate_capping_and_fallback() -> None:
 
     # Hors bande, plafonné : Delta, résultat avant impôt reconstruit
     # (5M + 9M = 14M), impôt 9M -> taux brut 64,3 %, plafonné à 50 %.
-    delta_rate, delta_source = resolve_tax_rate(_facts("0000000004"), cik="0000000004", end=end, t=t)
+    delta_rate, delta_source = resolve_tax_rate(
+        _facts("0000000004"), cik="0000000004", end=end, t=t
+    )
     assert delta_rate == 0.5
     assert delta_source == (
         "us-gaap:IncomeTaxExpenseBenefit / résultat avant impôt, plafonné [0%, 50%]"

@@ -11,14 +11,12 @@ def test_universe_ranking_uses_smoothed_market_cap() -> None:
 
     # AAAA : stable à 90 pendant 19 jours, puis pic anormal à 300 le jour t.
     aaaa_prices = [
-        {"ticker": "AAAA", "date": start + timedelta(days=i), "close_adj": 90.0}
-        for i in range(19)
+        {"ticker": "AAAA", "date": start + timedelta(days=i), "close_adj": 90.0} for i in range(19)
     ] + [{"ticker": "AAAA", "date": t, "close_adj": 300.0}]
 
     # BBBB : stable à 110 sur les 20 jours, aucune anomalie.
     bbbb_prices = [
-        {"ticker": "BBBB", "date": start + timedelta(days=i), "close_adj": 110.0}
-        for i in range(20)
+        {"ticker": "BBBB", "date": start + timedelta(days=i), "close_adj": 110.0} for i in range(20)
     ]
 
     prices_adj = pl.DataFrame(aaaa_prices + bbbb_prices)

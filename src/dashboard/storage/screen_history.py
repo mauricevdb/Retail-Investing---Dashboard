@@ -13,8 +13,7 @@ def append(path: Path, rows: pl.DataFrame) -> None:
         overlap = existing.join(rows, on=["date", "cik"], how="inner")
         if overlap.height > 0:
             raise ScreenHistoryAlreadyWrittenError(
-                f"lignes déjà présentes pour (date, cik) : "
-                f"{overlap.select(['date', 'cik']).rows()}"
+                f"lignes déjà présentes pour (date, cik) : {overlap.select(['date', 'cik']).rows()}"
             )
         combined = pl.concat([existing, rows])
     else:

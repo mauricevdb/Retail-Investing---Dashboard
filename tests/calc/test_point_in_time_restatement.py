@@ -14,11 +14,17 @@ def test_restatement_latest_value_history_preserved() -> None:
     facts = parse_company_facts(raw)
 
     before = resolve(
-        facts, cik="0000000001", concept="NetIncomeLoss", end=date(2023, 12, 31),
+        facts,
+        cik="0000000001",
+        concept="NetIncomeLoss",
+        end=date(2023, 12, 31),
         t=date(2024, 3, 1),
     )
     after = resolve(
-        facts, cik="0000000001", concept="NetIncomeLoss", end=date(2023, 12, 31),
+        facts,
+        cik="0000000001",
+        concept="NetIncomeLoss",
+        end=date(2023, 12, 31),
         t=date(2024, 4, 1),
     )
 

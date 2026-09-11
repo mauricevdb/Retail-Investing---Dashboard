@@ -3,6 +3,15 @@ from datetime import date
 import polars as pl
 
 
+def resolve_sic_as_of(sic_codes: pl.DataFrame, t: date) -> pl.DataFrame:
+    return (
+        sic_codes.filter(pl.col("as_of") <= t)
+        .sort("as_of", descending=True)
+        .group_by("ticker", maintain_order=True)
+        .first()
+    )
+
+
 def apply_exclusions(sic_codes: pl.DataFrame) -> pl.DataFrame:
     sic_numeric = sic_codes["sic"].cast(pl.Int64)
     in_finance_insurance_real_estate = (sic_numeric >= 6000) & (sic_numeric <= 6799)
@@ -14,10 +23,7 @@ def rank_by_smoothed_market_cap(
     shares_pit: pl.DataFrame, prices_adj: pl.DataFrame, t: date, window: int = 20
 ) -> pl.DataFrame:
     recent = prices_adj.filter(pl.col("date") <= t).with_columns(
-        pl.col("date")
-        .rank(method="ordinal", descending=True)
-        .over("ticker")
-        .alias("_recency")
+        pl.col("date").rank(method="ordinal", descending=True).over("ticker").alias("_recency")
     )
     windowed = recent.filter(pl.col("_recency") <= window)
 
@@ -25,9 +31,7 @@ def rank_by_smoothed_market_cap(
         pl.col("close_adj").mean().alias("market_cap_smoothed")
     )
     market_cap = smoothed.join(shares_pit, on="ticker").with_columns(
-        (pl.col("market_cap_smoothed") * pl.col("shares_outstanding")).alias(
-            "market_cap_smoothed"
-        )
+        (pl.col("market_cap_smoothed") * pl.col("shares_outstanding")).alias("market_cap_smoothed")
     )
 
     return market_cap.sort("market_cap_smoothed", descending=True).with_row_index(
@@ -60,7 +64,8 @@ def universe(
     window: int = 20,
     plausible_range: tuple[int, int] = (700, 1100),
 ) -> pl.DataFrame:
-    eligible_tickers = apply_exclusions(sic_codes)["ticker"].to_list()
+    resolved_sic = resolve_sic_as_of(sic_codes, t)
+    eligible_tickers = apply_exclusions(resolved_sic)["ticker"].to_list()
     eligible_shares = shares_pit.filter(pl.col("ticker").is_in(eligible_tickers))
     eligible_prices = prices_adj.filter(pl.col("ticker").is_in(eligible_tickers))
 

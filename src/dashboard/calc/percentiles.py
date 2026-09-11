@@ -16,7 +16,9 @@ def own_history_percentile(
 _MIN_SECTOR_GROUP_SIZE = 10
 
 
-def sector_percentile(sector_values: list[float], current_value: float) -> tuple[float | None, bool]:
+def sector_percentile(
+    sector_values: list[float], current_value: float
+) -> tuple[float | None, bool]:
     if len(sector_values) < _MIN_SECTOR_GROUP_SIZE:
         return None, False
 

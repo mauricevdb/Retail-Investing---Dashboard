@@ -35,9 +35,15 @@ def test_coverage_rate_reported_per_indicator() -> None:
     titres = {
         "T001": _base_facts("T001", with_equity=True, with_dna=True, with_fcf=True),  # complet
         "T002": _base_facts("T002", with_equity=False, with_dna=True, with_fcf=True),  # ROIC KO
-        "T003": _base_facts("T003", with_equity=True, with_dna=False, with_fcf=True),  # net_debt/EBITDA KO
-        "T004": _base_facts("T004", with_equity=True, with_dna=True, with_fcf=True),  # pct_sector KO
-        "T005": _base_facts("T005", with_equity=True, with_dna=True, with_fcf=False),  # fcf_yield KO
+        "T003": _base_facts(
+            "T003", with_equity=True, with_dna=False, with_fcf=True
+        ),  # net_debt/EBITDA KO
+        "T004": _base_facts(
+            "T004", with_equity=True, with_dna=True, with_fcf=True
+        ),  # pct_sector KO
+        "T005": _base_facts(
+            "T005", with_equity=True, with_dna=True, with_fcf=False
+        ),  # fcf_yield KO
     }
     pct_sector_by_titre = {"T001": 0.5, "T002": 0.5, "T003": 0.5, "T004": None, "T005": 0.5}
 

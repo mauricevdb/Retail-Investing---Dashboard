@@ -16,6 +16,7 @@ def test_universe_failure_on_implausible_size() -> None:
             # 9 titres artificiellement exclus (finance), 1 seul éligible.
             "sic": ["6022"] * 9 + ["3674"],
             "entity_type": ["operating company"] * 10,
+            "as_of": [date(2024, 1, 1)] * 10,
         }
     )
     shares_pit = pl.DataFrame({"ticker": tickers, "shares_outstanding": [1_000_000.0] * 10})

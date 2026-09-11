@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from dashboard.ingestion.edgar_facts import parse_company_facts
@@ -15,7 +15,7 @@ def test_daily_run_uses_close_and_known_filings() -> None:
     with open(GOLDEN / "eodhd_bulk_prices_2024-02-15.json", encoding="utf-8") as f:
         _, prices_adjusted = parse_bulk_prices(json.load(f))
 
-    instant = datetime(2024, 2, 15, 22, 0, tzinfo=timezone.utc)
+    instant = datetime(2024, 2, 15, 22, 0, tzinfo=UTC)
 
     result = run(
         facts=facts,

@@ -48,7 +48,14 @@ def fcf_yield(market_cap: float, facts: pl.DataFrame, cik: str, end: date, t: da
     return fcf / enterprise_value
 
 
-INDICATOR_KEYS = ("ev_ebit", "fcf_yield", "roic", "net_debt_ebitda", "pct_own_history", "pct_sector")
+INDICATOR_KEYS = (
+    "ev_ebit",
+    "fcf_yield",
+    "roic",
+    "net_debt_ebitda",
+    "pct_own_history",
+    "pct_sector",
+)
 
 
 def indicator_status(

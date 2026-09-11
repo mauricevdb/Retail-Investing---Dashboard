@@ -22,10 +22,14 @@ def test_ev_ebit_non_calculable_on_non_positive_ebit() -> None:
 
     # Cas calculable, pour ne pas tester une fonction qui renverrait
     # toujours None : Alpha, EBIT 500M positif, EV = 2000M + 40M = 2040M.
-    alpha_value = ev_to_ebit(market_cap=2_000_000_000, facts=_facts("0000000001"), cik="0000000001", end=end, t=t)
+    alpha_value = ev_to_ebit(
+        market_cap=2_000_000_000, facts=_facts("0000000001"), cik="0000000001", end=end, t=t
+    )
     assert alpha_value == 2040000000 / 500000000
 
     # Non calculable : Delta est en perte opérationnelle (EBIT = -15M) --
     # aucune valeur numérique, quelle que soit la capitalisation.
-    delta_value = ev_to_ebit(market_cap=999_999_999, facts=_facts("0000000004"), cik="0000000004", end=end, t=t)
+    delta_value = ev_to_ebit(
+        market_cap=999_999_999, facts=_facts("0000000004"), cik="0000000004", end=end, t=t
+    )
     assert delta_value is None

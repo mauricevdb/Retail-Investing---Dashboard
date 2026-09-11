@@ -21,9 +21,7 @@ def test_universe_stable_near_cutoff_with_hysteresis() -> None:
 
         result = apply_hysteresis(ranked, hier_membership, n=n, buffer=buffer)
 
-        member_status = result.filter(pl.col("ticker") == "MMMM").row(0, named=True)[
-            "in_universe"
-        ]
+        member_status = result.filter(pl.col("ticker") == "MMMM").row(0, named=True)["in_universe"]
         nonmember_status = result.filter(pl.col("ticker") == "NNNN").row(0, named=True)[
             "in_universe"
         ]

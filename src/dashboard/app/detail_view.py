@@ -2,54 +2,63 @@ from datetime import date
 
 import polars as pl
 
-from dashboard.calc.point_in_time import resolve_detail
+from dashboard.calc.cash_bridge import trace as trace_cash
+from dashboard.calc.debt_bridge import trace as trace_debt
+from dashboard.calc.dna_bridge import trace as trace_dna
+from dashboard.calc.ebit_bridge import trace as trace_ebit
+from dashboard.calc.equity_bridge import trace as trace_equity
+from dashboard.calc.fcf_bridge import trace as trace_fcf
+from dashboard.calc.nopat import trace_tax_rate
 
-# Concepts contribuant à chaque indicateur quand chaque bridge résout à son
-# tag primaire (rang de repli 1). Ne couvre pas la reconstruction du rang
-# sur un titre dont un bridge serait en repli -- hors périmètre de T61.
-_INDICATOR_CONCEPTS: dict[str, list[str]] = {
-    "ev_ebit": [
-        "OperatingIncomeLoss",
-        "LongTermDebtNoncurrent",
-        "LongTermDebtCurrent",
-        "CashAndCashEquivalentsAtCarryingValue",
-    ],
-    "fcf_yield": [
-        "NetCashProvidedByUsedInOperatingActivities",
-        "PaymentsToAcquirePropertyPlantAndEquipment",
-        "LongTermDebtNoncurrent",
-        "LongTermDebtCurrent",
-        "CashAndCashEquivalentsAtCarryingValue",
-    ],
-    "roic": [
-        "OperatingIncomeLoss",
-        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
-        "IncomeTaxExpenseBenefit",
-        "LongTermDebtNoncurrent",
-        "LongTermDebtCurrent",
-        "StockholdersEquity",
-        "CashAndCashEquivalentsAtCarryingValue",
-    ],
-    "net_debt_ebitda": [
-        "OperatingIncomeLoss",
-        "DepreciationDepletionAndAmortization",
-        "LongTermDebtNoncurrent",
-        "LongTermDebtCurrent",
-        "CashAndCashEquivalentsAtCarryingValue",
-    ],
+# Chaque indicateur délègue sa trace aux bridges qui le composent réellement
+# (T25-T33) : la chaîne de repli et le rang qui en résulte viennent de ces
+# bridges, jamais d'une liste de tags supposée a priori (cf. T64).
+_INDICATOR_TRACERS: dict[str, tuple] = {
+    "ev_ebit": (trace_ebit, trace_debt, trace_cash),
+    "fcf_yield": (trace_fcf, trace_debt, trace_cash),
+    "roic": (trace_ebit, trace_tax_rate, trace_debt, trace_equity, trace_cash),
+    "net_debt_ebitda": (trace_ebit, trace_dna, trace_debt, trace_cash),
 }
 
 
 def trace_indicator(
-    facts: pl.DataFrame, cik: str, end: date, t: date, indicator: str
-) -> list[dict]:
-    trace = []
-    for concept in _INDICATOR_CONCEPTS[indicator]:
-        detail = resolve_detail(facts, concept, cik, end, t)
-        if detail is not None:
-            # Rang de repli 1 (tag primaire) : seul cas couvert par T61.
-            trace.append({**detail, "rank": 1})
-    return trace
+    facts: pl.DataFrame, cik: str, end: date, t: date, indicator: str, value: float | None
+) -> dict:
+    components = [
+        component
+        for tracer in _INDICATOR_TRACERS[indicator]
+        for component in tracer(facts, cik, end, t)
+    ]
+
+    if value is None:
+        # Donnée réellement absente (invariant 7, critères 6/11) : signalée
+        # comme non calculable, jamais masquée ni comblée par défaut.
+        status = "non_calculable"
+    elif not components:
+        # Un chiffre est affiché mais aucune composante n'a pu être remontée
+        # à un fait déposé (invariant 8, critères 9/27) : ce n'est jamais
+        # une absence de donnée, c'est une limite de l'outil, et elle doit
+        # être signalée comme telle.
+        status = "non_traceable"
+    else:
+        status = "ok"
+
+    return {"status": status, "components": components}
+
+
+def trace_price(prices_adj: pl.DataFrame, ticker: str, date_today: date) -> dict | None:
+    rows = (
+        prices_adj.filter((pl.col("ticker") == ticker) & (pl.col("date") <= date_today))
+        .sort("date", descending=True)
+        .head(1)
+    )
+    if rows.height == 0:
+        return None
+
+    row = rows.row(0, named=True)
+    # Toujours la série ajustée (invariant 4) : jamais un prix brut, même
+    # au voisinage d'un fractionnement.
+    return {"quotation_date": row["date"], "series": "close_adj", "value": row["close_adj"]}
 
 
 def trace_percentile(kind: str, **kwargs: object) -> dict:
