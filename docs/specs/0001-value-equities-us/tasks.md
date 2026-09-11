@@ -1036,15 +1036,107 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Terminée quand** : le test passe.
 - **Dépend de** : T55.
 
+### T69 — Traçabilité du repli sur le taux d'imposition par défaut
+- **Objectif** : découverte par `/spec-verify` (deuxième passage), démontrée
+  en direct : un titre disposant de l'EBIT, de la dette, des capitaux
+  propres et de la trésorerie mais d'aucune donnée fiscale produit un ROIC
+  affiché (`0.49375`) avec un statut `"ok"`, sans qu'aucune des composantes
+  tracées ne mentionne que le taux d'imposition par défaut (21 %) a été
+  utilisé. `calc.nopat.trace_tax_rate` (T64) calcule pourtant cette
+  information, mais `calc.nopat.resolve()` jette `tax_rate_source`
+  (`nopat, _, _ = resolve_nopat(...)` dans `calc.roic`), et
+  `app.detail_view.trace_indicator` ne la réinjecte jamais quand le repli
+  est silencieux (`trace_tax_rate` renvoie `[]`). Ça contredit l'invariant 7
+  (« affiché à l'écran partout où il influence un chiffre ») et le
+  garde-fou que plan.md promet lui-même (section Risques, « Approximation
+  du taux d'imposition à 21 % ») : « jamais un ROIC affiché sans que
+  l'origine du taux ne reste retrouvable. » Cette tâche ferme l'écart de
+  divulgation ; elle ne traite pas la question distincte, plus large, de
+  savoir si `default_tax_rate` doit être déclaré dans un mécanisme de
+  configuration plutôt que codé en dur comme paramètre par défaut Python —
+  signalé, pas tranché ici.
+- **Fichiers** : `src/dashboard/calc/nopat.py`,
+  `src/dashboard/app/detail_view.py`,
+  `tests/app/test_detail_view_traceability.py` (étendu).
+- **Test** : reprend le scénario adversarial de l'audit (EBIT, dette,
+  capitaux propres, trésorerie connus, aucune donnée fiscale) ; la trace de
+  `roic` doit inclure une composante distincte signalant explicitement le
+  repli sur le taux par défaut (sans `end`/`filed`/`accn` — ce n'est pas un
+  fait déposé — mais portant le taux utilisé et sa justification), jamais
+  une trace qui semble complète sans elle.
+- **Critères de la spec couverts** : #9, #27 (un paramètre de modélisation
+  qui influence un chiffre reste, comme un fait déposé, exposable).
+- **Terminée quand** : le test passe.
+- **Dépend de** : T64, T65.
+
+### T70 — Jointure point-in-time sur `ticker_cik`
+- **Objectif** : le garde-fou de plan.md (section Risques, « Changement de
+  code SIC ou de ticker non reflété ») nomme explicitement deux tables :
+  « `sic_codes` **et** `ticker_cik` sont historisées avec `as_of` ». T67
+  n'a résolu que `sic_codes` ; tasks.md notait pourtant le point comme
+  « assigné à T67 » sans distinguer les deux moitiés — clôture partielle
+  présentée comme complète, relevée par `/spec-verify` (deuxième passage).
+  `ticker_cik.parquet` (produit par T2 avec sa propre colonne `as_of`)
+  n'est aujourd'hui importé nulle part en dehors de son propre module et de
+  son propre test : aucun point d'appel réel n'existe à corriger. Cette
+  tâche ajoute le résolveur point-in-time lui-même, sur le même modèle que
+  `resolve_sic_as_of` (T67), prouvé correct en isolation. Le câblage dans
+  un point d'appel réel de `calc.universe` — qui suppose de revoir le
+  contournement de T63 (`shares_pit` porte déjà `ticker` et `cik`) — reste
+  une question distincte, plus large, non traitée ici.
+- **Fichiers** : `src/dashboard/calc/universe.py`,
+  `tests/calc/test_ticker_cik_as_of.py`.
+- **Test** : une fixture `ticker_cik` portant deux instantanés `as_of` pour
+  le même `cik` (par exemple un changement de ticker à une date) ;
+  `resolve_ticker_cik_as_of` doit retenir le ticker connu à `t`, jamais la
+  ligne la plus récente du tableau sans égard à sa date — même forme de
+  test que `test_universe_as_of.py` (T67).
+- **Critères de la spec couverts** : aucun directement — garde-fou de
+  plan.md, moitié restante de celui refermé par T67.
+- **Terminée quand** : le test passe.
+- **Dépend de** : T2, T67.
+
+### T71 — Dériver `shares_pit` des dépôts EDGAR via `calc.shares_bridge`
+- **Objectif** : `calc.shares_bridge.resolve()` (chaîne de repli
+  point-in-time pour les actions en circulation, T25) est testé en
+  isolation mais n'est appelé nulle part dans `pipeline.daily_run` ni
+  `calc.universe`, relevé par `/spec-verify` (deuxième passage). Le
+  paramètre `shares_pit` que `calc.universe` consomme pour la
+  capitalisation boursière — le calcul qui décide quels titres entrent
+  dans l'univers — est fourni tel quel par l'appelant dans chaque test,
+  sans jamais être dérivé des dépôts SEC. Ce n'est pas un chiffre faux
+  aujourd'hui (rien ne l'exerce en dehors de fixtures déjà résolues), mais
+  un trou où le même défaut que T67 vient de corriger pour `sic_codes`
+  pourrait se réintroduire sans qu'aucun test ne le voie. Cette tâche câble
+  `calc.shares_bridge.resolve()` dans `pipeline.daily_run` pour au moins un
+  titre ; la reconstruction de `shares_pit` pour l'ensemble du bassin de
+  candidats (~900-1100 titres, cf. `plausible_range`) à partir de faits en
+  masse reste une question distincte, plus large, susceptible de révéler
+  d'autres écarts d'architecture — à trancher séparément si
+  l'implémentation le montre.
+- **Fichiers** : `src/dashboard/pipeline/daily_run.py`,
+  `tests/pipeline/test_daily_run_end_to_end.py` (étendu).
+- **Test** : `run_daily` dérive `shares_outstanding` d'au moins un titre via
+  `calc.shares_bridge.resolve()` à partir de `facts`, plutôt que de faire
+  confiance à une valeur fournie sans lien avec les faits déposés ; un
+  titre dont le tag primaire (`dei:EntityCommonStockSharesOutstanding`) est
+  absent doit retomber sur le tag de repli du bridge, visible dans le
+  résultat.
+- **Critères de la spec couverts** : aucun directement — prérequis
+  implicite du critère 11 et de l'invariant 2, prolongement de T25 dans le
+  pipeline réel.
+- **Terminée quand** : le test passe.
+- **Dépend de** : T25, T63.
+
 ## Vérification de couverture
 
 ### Critères de la spec
 
 Union des critères couverts : #1 (T22), #2 (T59), #3 (T6, T23), #4 (T8,
-T47), #5 (T5), #6 (T45, T65), #7 (T57), #8 (T24), #9 (T61, T64, T65, T66),
-#10 (T48), #11 (T46), #12 (T43), #13 (T44), #14 (T34), #15 (T52), #16
+T47), #5 (T5), #6 (T45, T65), #7 (T57), #8 (T24), #9 (T61, T64, T65, T66,
+T69), #10 (T48), #11 (T46), #12 (T43), #13 (T44), #14 (T34), #15 (T52), #16
 (T53), #17 (T54), #18 (T56), #19 (T49), #20 (T51), #21 (T60), #22 (T55,
-T68), #23 (T34), #24 (T36), #25 (T37, T58), #26 (T62), #27 (T61, T65),
+T68), #23 (T34), #24 (T36), #25 (T37, T58), #26 (T62), #27 (T61, T65, T69),
 Invariant 10 (T13).
 
 Les 27 critères d'acceptation de spec.md et l'invariant 10 sont couverts.
@@ -1095,7 +1187,12 @@ l'issue du Bloc 4. Un seul est désormais assigné :
    ticker non reflété » : « toute jointure se fait à la date effective,
    jamais sur la valeur la plus récente sans égard à la date. » Reconfirmé
    ouvert par `/spec-verify` (aucune jointure par `as_of` nulle part dans
-   `calc.universe`) — **assigné à T67**.
+   `calc.universe`) — **assigné à T67**. Énoncé corrigé après audit
+   (`/spec-verify`, deuxième passage) : T67 n'a refermé que la moitié
+   `sic_codes` de ce point ; la mention « assigné à T67 » ci-dessus, écrite
+   au singulier pour un garde-fou qui nomme deux tables, laissait croire à
+   une clôture complète. La moitié `ticker_cik` est désormais **assignée à
+   T70**.
 3. **Conversion explicite en UTC de l'horodatage des dépôts SEC** —
    plan.md, section Risques, « Horodatage des dépôts SEC en heure de l'Est
    américain, pas en UTC » : « la conversion vers UTC est explicite et
@@ -1125,4 +1222,16 @@ couvre la clause « prix » du critère 9, jusqu'ici sans code ni test ; T67
 comble le point 2 du contrôle 4.3 (jointure `as_of`) ; T68 renforce le
 critère 22 (jamais élaguée) sur `storage.universe_history`.
 
-Total : 68 tâches.
+T69–T71 sont des tâches correctives issues d'un second passage de
+`/spec-verify`, exécuté après la clôture de T64–T68 : trois violations
+actives, pas seulement des trous de couverture. T69 ferme un écart de
+divulgation de l'invariant 7 démontré en direct (repli sur le taux
+d'imposition par défaut jamais signalé dans la trace du ROIC, alors que
+plan.md promet explicitement le contraire). T70 referme la moitié
+`ticker_cik` du point 2 du contrôle 4.3, restée ouverte malgré la mention
+« assigné à T67 » — corrigée ci-dessus. T71 câble `calc.shares_bridge`
+dans le pipeline réel : la capitalisation boursière, calcul le plus
+déterminant du tableau de bord, n'avait jusqu'ici aucun chemin de code vers
+une donnée point-in-time réelle.
+
+Total : 71 tâches.

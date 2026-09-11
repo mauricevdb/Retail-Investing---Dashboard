@@ -8,7 +8,27 @@ from dashboard.pipeline.daily_run import run_daily
 
 
 def _fact(cik: str, concept: str, value: float, end: date, filed: date) -> dict:
-    return {"cik": cik, "concept": concept, "end": end, "filed": filed, "value": value}
+    return {
+        "cik": cik,
+        "concept": concept,
+        "end": end,
+        "filed": filed,
+        "value": value,
+        "taxonomy": None,
+    }
+
+
+def _shares_fact(
+    cik: str, taxonomy: str, concept: str, value: float, end: date, filed: date
+) -> dict:
+    return {
+        "cik": cik,
+        "concept": concept,
+        "end": end,
+        "filed": filed,
+        "value": value,
+        "taxonomy": taxonomy,
+    }
 
 
 def test_daily_run_end_to_end(tmp_path: Path) -> None:
@@ -40,11 +60,35 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
         facts_rows.append(
             _fact(cik, "CashAndCashEquivalentsAtCarryingValue", cash_by_cik[cik], end, filed)
         )
+    # Actions en circulation déposées : ZZZA et ZZZC au tag primaire, ZZZB
+    # sans tag primaire -- retombe sur le tag de repli du bilan (T25). Les
+    # trois résolvent à la même valeur que l'ancien shares_pit fixe
+    # (10M), pour prouver que la dérivation remplace la valeur fournie par
+    # l'appelant sans changer le résultat attendu du test.
+    facts_rows.append(
+        _shares_fact(
+            "0000000101", "dei", "EntityCommonStockSharesOutstanding", 10_000_000.0, end, filed
+        )
+    )
+    facts_rows.append(
+        _shares_fact(
+            "0000000102", "us-gaap", "CommonStockSharesOutstanding", 10_000_000.0, end, filed
+        )
+    )
+    facts_rows.append(
+        _shares_fact(
+            "0000000103", "dei", "EntityCommonStockSharesOutstanding", 10_000_000.0, end, filed
+        )
+    )
     facts = pl.DataFrame(facts_rows)
 
+    # Valeur volontairement absurde (1.0) : si pipeline.daily_run ne dérive
+    # plus jamais shares_outstanding des dépôts (T71), cette valeur fausse
+    # serait utilisée telle quelle et les indicateurs ci-dessous ne
+    # correspondraient plus aux valeurs attendues.
     shares_pit = pl.DataFrame(
         [
-            {"ticker": ticker, "cik": cik, "shares_outstanding": 10_000_000.0}
+            {"ticker": ticker, "cik": cik, "shares_outstanding": 1.0}
             for cik, ticker in tickers.items()
         ]
     )

@@ -45,7 +45,13 @@ def resolve_tax_rate(
     return default_tax_rate, f"repli configuré : taux par défaut ({default_tax_rate:.0%})"
 
 
-def trace_tax_rate(facts: pl.DataFrame, cik: str, end: date, t: date) -> list[dict]:
+def trace_tax_rate(
+    facts: pl.DataFrame,
+    cik: str,
+    end: date,
+    t: date,
+    default_tax_rate: float = 0.21,
+) -> list[dict]:
     tax_detail = resolve_detail(facts, "IncomeTaxExpenseBenefit", cik, end, t)
 
     pretax_primary = resolve_detail(facts, _PRETAX_INCOME_TAG, cik, end, t)
@@ -64,7 +70,17 @@ def trace_tax_rate(facts: pl.DataFrame, cik: str, end: date, t: date) -> list[di
     if pretax_value is not None and pretax_value > 0 and tax_detail is not None:
         return pretax_components + [{**tax_detail, "rank": 1}]
 
-    return []
+    # Aucune donnée fiscale exploitable : le taux par défaut est un
+    # paramètre de modélisation, pas un fait déposé (invariant 7). Il doit
+    # rester exposable partout où il influence un chiffre, jamais une trace
+    # silencieusement vide qui laisse croire à une absence de repli.
+    return [
+        {
+            "parameter": "default_tax_rate",
+            "value": default_tax_rate,
+            "source": f"repli configuré : taux par défaut ({default_tax_rate:.0%})",
+        }
+    ]
 
 
 def resolve(

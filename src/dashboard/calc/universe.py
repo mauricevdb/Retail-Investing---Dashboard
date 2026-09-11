@@ -12,6 +12,15 @@ def resolve_sic_as_of(sic_codes: pl.DataFrame, t: date) -> pl.DataFrame:
     )
 
 
+def resolve_ticker_cik_as_of(ticker_cik: pl.DataFrame, t: date) -> pl.DataFrame:
+    return (
+        ticker_cik.filter(pl.col("as_of") <= t)
+        .sort("as_of", descending=True)
+        .group_by("cik", maintain_order=True)
+        .first()
+    )
+
+
 def apply_exclusions(sic_codes: pl.DataFrame) -> pl.DataFrame:
     sic_numeric = sic_codes["sic"].cast(pl.Int64)
     in_finance_insurance_real_estate = (sic_numeric >= 6000) & (sic_numeric <= 6799)

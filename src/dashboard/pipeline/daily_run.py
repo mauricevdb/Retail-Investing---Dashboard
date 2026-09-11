@@ -12,6 +12,7 @@ from dashboard.calc.point_in_time import resolve as resolve_pit
 from dashboard.calc.ranking import rank
 from dashboard.calc.ratios import indicator_status
 from dashboard.calc.sector_grouping import classify as classify_sector
+from dashboard.calc.shares_bridge import resolve as resolve_shares
 from dashboard.calc.universe import universe as compute_universe
 from dashboard.storage.screen_history import append as append_screen_history
 from dashboard.storage.universe_history import append as append_universe_history
@@ -36,6 +37,15 @@ def run(
     return {"date": session, "fundamental": fundamental_value, "close": close}
 
 
+def _derive_shares_pit(shares_pit: pl.DataFrame, facts: pl.DataFrame, t: date) -> pl.DataFrame:
+    rows = []
+    for row in shares_pit.iter_rows(named=True):
+        shares_outstanding, _ = resolve_shares(facts, row["cik"], t)
+        if shares_outstanding is not None:
+            rows.append({**row, "shares_outstanding": shares_outstanding})
+    return pl.DataFrame(rows, schema=shares_pit.schema)
+
+
 def run_daily(
     shares_pit: pl.DataFrame,
     prices_adj: pl.DataFrame,
@@ -53,6 +63,13 @@ def run_daily(
     own_history_by_cik: dict[str, list[tuple[int, float]]] | None = None,
     since_year: int = 2011,
 ) -> str | None:
+    if facts is not None:
+        # Actions en circulation dérivées des dépôts SEC (T25) plutôt que
+        # reçues telles quelles : la capitalisation boursière décide qui
+        # entre dans l'univers, elle ne peut pas reposer sur une valeur non
+        # tracée jusqu'à un fait déposé (invariant 2, T71).
+        shares_pit = _derive_shares_pit(shares_pit, facts, t)
+
     membership = compute_universe(
         shares_pit,
         prices_adj,

@@ -124,8 +124,11 @@ def test_non_calculable_and_non_traceable_are_distinct_statuses() -> None:
     # de calc.ratios) mais où aucune composante ne peut être remontée aux
     # faits déposés -- ici en interrogeant un CIK absent des faits fournis.
     # C'est la limite que l'outil doit signaler distinctement, jamais comme
-    # une liste vide indiscernable du cas non calculable.
-    non_traceable = trace_indicator(facts, "0000009999", end, t, "roic", 1.23)
+    # une liste vide indiscernable du cas non calculable. ev_ebit (et non
+    # roic, depuis T69) : ses composantes viennent uniquement des bridges de
+    # faits déposés, sans repli sur un paramètre de modélisation qui, lui,
+    # divulgue toujours quelque chose même pour un CIK inexistant.
+    non_traceable = trace_indicator(facts, "0000009999", end, t, "ev_ebit", 1.23)
     assert non_traceable["status"] == "non_traceable"
     assert non_traceable["components"] == []
 
@@ -157,3 +160,67 @@ def test_price_traceable_to_quotation_date() -> None:
 
     # Titre absent des prix fournis : pas de trace, jamais une date fictive.
     assert trace_price(prices_adj, "ZZZZ", date(2024, 2, 15)) is None
+
+
+def test_default_tax_rate_fallback_disclosed_in_roic_trace() -> None:
+    end = date(2023, 12, 31)
+    t = date(2024, 3, 1)
+    filed = date(2024, 2, 15)
+    cik = "0000008888"
+
+    # EBIT, dette, capitaux propres et trésorerie connus, mais aucune
+    # donnée fiscale : le taux d'imposition par défaut (21 %) est
+    # nécessairement utilisé pour calculer le ROIC (cf. audit /spec-verify,
+    # deuxième passage). Le ROIC reste calculable -- ce n'est pas un cas de
+    # donnée absente -- mais son origine doit rester exposable partout où
+    # elle influence le chiffre (invariant 7).
+    facts = pl.DataFrame(
+        [
+            {
+                "cik": cik,
+                "concept": "OperatingIncomeLoss",
+                "end": end,
+                "filed": filed,
+                "value": 100_000_000.0,
+            },
+            {
+                "cik": cik,
+                "concept": "LongTermDebtNoncurrent",
+                "end": end,
+                "filed": filed,
+                "value": 20_000_000.0,
+            },
+            {
+                "cik": cik,
+                "concept": "StockholdersEquity",
+                "end": end,
+                "filed": filed,
+                "value": 150_000_000.0,
+            },
+            {
+                "cik": cik,
+                "concept": "CashAndCashEquivalentsAtCarryingValue",
+                "end": end,
+                "filed": filed,
+                "value": 10_000_000.0,
+            },
+        ]
+    )
+
+    value = resolve_roic(facts, cik, end, t)
+    assert value is not None
+
+    result = trace_indicator(facts, cik, end, t, "roic", value)
+    assert result["status"] == "ok"
+
+    parameters = [c for c in result["components"] if "parameter" in c]
+    assert len(parameters) == 1
+    fallback = parameters[0]
+    assert fallback["parameter"] == "default_tax_rate"
+    assert fallback["value"] == 0.21
+    assert "source" in fallback
+
+    # Ce n'est pas un fait déposé : pas de champ source/date de dépôt/accn.
+    assert "end" not in fallback
+    assert "filed" not in fallback
+    assert "accn" not in fallback
