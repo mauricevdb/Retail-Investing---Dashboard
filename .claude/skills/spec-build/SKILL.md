@@ -17,6 +17,21 @@ description: Implémente une seule tâche de tasks.md en test-first. À utiliser
    ce que le test garantit et ce qu'il ne garantit pas.
 6. S'arrêter et attendre validation.
 
+## Fin de tâche
+
+Toute limite connue de l'implémentation constatée en fin de tâche doit
+devenir un critère d'acceptation ou une tâche, jamais un commentaire dans le
+code ni une note en fin de réponse. Une limite documentée en note ne remonte
+ni dans les tests ni dans l'audit : elle disparaît.
+
+Raison : la limite de traçabilité des replis (`app.detail_view` ne suivait
+que les tags primaires) avait été correctement documentée à la fin de T61
+— « se limite au cas où chaque bridge résout au niveau primaire » — et
+n'a refait surface que par sondage manuel lors d'un `/spec-verify`, sur un
+titre réel (Gamma) dont la trace s'est révélée entièrement vide. Consignée
+comme tâche dès T61, elle aurait été vérifiée par un test avant d'être
+découverte après.
+
 ## Interdits
 
 - Traiter plusieurs tâches dans un même tour.

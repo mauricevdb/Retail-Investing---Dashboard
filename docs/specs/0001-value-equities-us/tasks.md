@@ -899,50 +899,157 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Dépend de** : T57, T59.
 
 ### T63 — Assembler `pipeline.daily_run` de bout en bout
-- **Objectif** : `pipeline.daily_run.run_daily` enchaîne, pour un jour de
-  traitement donné, un seul parcours reliant les briques déjà construites
-  et testées isolément, sans en réécrire la logique : calcul de l'univers
-  (déjà câblé en T58), calcul des indicateurs fondés sur des faits pour
-  chaque titre membre (`calc.ratios.indicator_status`), filtrage
-  (`calc.filters.apply_filters`), classement et plafonnement à 25
-  (`calc.ranking.rank`), puis persistance du résultat du jour
-  (`storage.screen_history.append`).
+- **Objectif** : énoncé corrigé après audit (`/spec-verify`) — la première
+  version de cette tâche assemblait univers, indicateurs fondés sur des
+  faits, filtres, classement et persistance, mais excluait les
+  percentiles ; un test qui ne prouve que ce sous-ensemble n'est pas un
+  test de bout en bout, seulement un test unitaire de plus sous un autre
+  nom. `pipeline.daily_run.run_daily` enchaîne, pour un jour de
+  traitement donné, sur les instantanés figés : calcul de l'univers (non
+  vide), indicateurs fondés sur des faits **et** percentiles (propre
+  histoire, sectoriel avec repli si groupe < 10) pour chaque titre
+  membre, filtrage, classement et plafonnement à 25, écriture d'une ligne
+  par titre retenu dans `screen_results.parquet`, et production d'un
+  texte de vue affichable (`app.screen_view.render_screen_text`)
+  reflétant le résultat du jour — sans réécrire la logique d'aucune des
+  briques déjà construites et testées isolément.
 - **Fichiers** : `src/dashboard/pipeline/daily_run.py`,
-  `tests/pipeline/test_daily_run_end_to_end.py`.
-- **Test** : `test_daily_run_end_to_end` — sur une petite fixture d'univers
-  plausible (quelques titres membres avec fondamentaux, prix et
-  capitalisation complets), un appel à `run_daily` produit exactement une
-  ligne par titre retenu dans `screen_results.parquet`, cohérente avec ce
-  que `calc.ratios.indicator_status`, `calc.filters.apply_filters` et
-  `calc.ranking.rank` produiraient appelés directement sur les mêmes
-  données — pas une réimplémentation parallèle de leur logique.
-- **Explicitement hors périmètre** : les percentiles (critères 19, 20), la
-  divergence TTM/normalisé (critère 13), le streak (critère 18) et le
-  taux de couverture agrégé au niveau écran (critère 11, volet rapport)
-  restent des paramètres reçus ou des étapes séparées dans cette tâche —
-  leur câblage dans `run_daily` suppose un historique multi-jours
-  (`screen_results` déjà accumulé) que T63 à elle seule ne construit pas.
-  Signalé pour ne pas être oublié, pas résolu ici ; à reprendre dans une
-  tâche dédiée si la tranche se poursuit au-delà de T63.
+  `tests/pipeline/test_daily_run_end_to_end.py` (remplace le test
+  existant, dont la portée ne couvrait pas les percentiles).
+- **Test** : `test_daily_run_end_to_end` — sur une fixture d'univers
+  plausible avec plusieurs titres membres et un historique suffisant pour
+  les deux percentiles, un appel à `run_daily` produit : un univers non
+  vide, au moins une ligne dans `screen_results.parquet` portant les six
+  indicateurs (les deux percentiles calculés ou explicitement signalés
+  indisponibles, jamais silencieusement absents), un classement cohérent
+  avec ce que `calc.ratios.indicator_status`, `calc.percentiles`,
+  `calc.filters.apply_filters` et `calc.ranking.rank` produiraient
+  appelés directement sur les mêmes données, et un texte de vue non vide
+  mentionnant le compteur de titres retenus.
+- **Explicitement hors périmètre** : la divergence TTM/normalisé (critère
+  13) et le streak (critère 18) restent hors périmètre — ils supposent un
+  historique de `screen_results` accumulé sur plusieurs jours réels, que
+  cette tâche ne construit pas. Les percentiles, eux, n'ont plus cette
+  excuse : `calc.percentiles` n'a besoin que d'une série déjà résolue,
+  constructible dans la fixture du test lui-même, sans historique réel
+  accumulé — c'est pourquoi ils entrent désormais dans le périmètre alors
+  que divergence et streak en restent exclus.
 - **Critères de la spec couverts** : aucun nouveau directement — referme
   la boucle d'orchestration pour des critères déjà couverts
-  individuellement (#2, #6, #7, #11 volet par-titre, #15, #16, #17, #25),
+  individuellement (#2, #6, #7, #11, #15, #16, #17, #19, #20, #25, #26),
   jusqu'ici jamais exercés ensemble dans un seul appel.
 - **Terminée quand** : le test passe.
-- **Dépend de** : T45, T52, T53, T54, T58.
+- **Dépend de** : T45, T49, T51, T52, T53, T54, T58, T62.
+
+### T64 — Traçabilité des replis
+- **Objectif** : découverte au sondage numérique de `/spec-verify`, sur un
+  titre réel (Gamma, CIK 3) : `app.detail_view.trace_indicator` n'interroge
+  que les tags primaires codés en dur dans `_INDICATOR_CONCEPTS` ; sur
+  Gamma, dont l'EBIT est résolu par reconstruction (T26, pas le tag
+  primaire `OperatingIncomeLoss`), la trace d'EV/EBIT et de dette
+  nette/EBITDA revient vide, sans erreur ni explication. `trace_indicator`
+  doit interroger la chaîne de repli réellement utilisée par chaque bridge
+  (T25–T31), pas une liste de tags supposée a priori, et calculer le rang
+  de repli à partir du tag effectivement résolu — jamais l'écrire en dur.
+- **Fichiers** : `src/dashboard/app/detail_view.py`,
+  `tests/app/test_detail_view_traceability.py` (étendu).
+- **Test** : étend `test_every_displayed_number_traceable` pour couvrir
+  Gamma — un titre dont EV/EBIT est résolu par reconstruction. Le rang de
+  repli renvoyé pour l'EBIT de Gamma doit être 2 (premier repli), jamais 1
+  ; la reconstruction expose ses composantes (résultat net, impôts,
+  intérêts), pas un trou silencieux.
+- **Critères de la spec couverts** : #9 (rang de repli réellement calculé).
+- **Terminée quand** : le test passe, y compris sur Gamma.
+- **Dépend de** : T61, T26.
+
+### T65 — Distinguer non calculable et non traçable
+- **Objectif** : une composante absente parce que l'émetteur ne la publie
+  pas (non calculable, critères 6 et 11) et une composante absente parce
+  que le mécanisme de traçabilité ne sait pas la suivre (limite résiduelle
+  possible après T64) sont deux états distincts qui doivent s'afficher
+  différemment. Un écran de détail vide sans explication viole
+  l'invariant 7 (repli silencieux) autant que l'invariant 8
+  (traçabilité) : l'utilisateur ne peut pas distinguer « rien à
+  afficher » de « quelque chose ne va pas dans l'outil ».
+- **Fichiers** : `src/dashboard/app/detail_view.py`,
+  `tests/app/test_detail_view_traceability.py` (étendu).
+- **Test** : sur un titre dont un indicateur est réellement non calculable
+  (composante manquante chez l'émetteur, ex. Gamma sans dette pour
+  EV/EBIT) et sur un cas construit pour faire échouer la traçabilité
+  elle-même, `trace_indicator` renvoie des statuts explicitement
+  distincts — jamais une liste vide dans les deux cas sans distinction.
+- **Critères de la spec couverts** : #6, #9, #27 (invariants 7 et 8).
+- **Terminée quand** : le test passe.
+- **Dépend de** : T64.
+
+### T66 — Clause « pour un prix » du critère 9
+- **Objectif** : le critère 9 exige de pouvoir tracer un prix affiché
+  jusqu'à sa date de cotation ; ni code ni test ne couvrent cette clause
+  aujourd'hui. `app.detail_view` gagne une fonction de traçabilité pour un
+  prix (brut ou ajusté), sur le modèle de `trace_indicator` pour les
+  fondamentaux.
+- **Fichiers** : `src/dashboard/app/detail_view.py`,
+  `tests/app/test_detail_view_traceability.py` (étendu).
+- **Test** : pour un prix ajusté d'un titre de la fixture (AAAA au
+  2024-02-15), la fonction retourne la date de cotation correspondante
+  et, sur une période chevauchant le fractionnement de la fixture,
+  signale que la série utilisée est la série ajustée — jamais la série
+  brute (invariant 4).
+- **Critères de la spec couverts** : #9 (clause prix).
+- **Terminée quand** : le test passe.
+- **Dépend de** : T47.
+
+### T67 — Jointure point-in-time sur `as_of`
+- **Objectif** : garde-fou de plan.md (section Risques, « Changement de
+  code SIC ou de ticker non reflété ») resté sans tâche depuis le Bloc 4
+  du point de contrôle mi-parcours, confirmé toujours ouvert par
+  `/spec-verify` : `calc.universe` ne filtre `sic_codes` par aucune date
+  effective avant de calculer l'univers. Inoffensif aujourd'hui (une seule
+  ligne par titre dans chaque fixture), mais faux dès qu'une table
+  porterait plusieurs instantanés `as_of` pour un même titre — exactement
+  un bug qui ne plante pas. `calc.universe` doit résoudre le SIC (et toute
+  autre donnée historisée qu'il consomme) connu à la date effective `t`,
+  jamais la ligne la plus récente sans égard à sa date.
+- **Fichiers** : `src/dashboard/calc/universe.py`,
+  `tests/calc/test_universe_as_of.py`.
+- **Test** : une fixture `sic_codes` portant deux instantanés `as_of` pour
+  le même titre (par exemple un SIC finance à une date, un SIC
+  opérationnel à une date postérieure) ; `calc.universe` doit retenir le
+  SIC connu à `t`, pas la ligne la plus récente du tableau sans égard à
+  sa date.
+- **Critères de la spec couverts** : aucun directement — garde-fou de
+  plan.md, prérequis implicite des critères 14 et 23 dans un monde à
+  historique multi-jours.
+- **Terminée quand** : le test passe.
+- **Dépend de** : T34.
+
+### T68 — Garde anti-doublon `(date, cik)` sur `storage.universe_history`
+- **Objectif** : `storage.universe_history.append` refuse d'écraser ou de
+  dupliquer une ligne déjà présente pour `(date, cik)` — même garantie
+  que `storage.screen_history` (T54), jusqu'ici absente et signalée comme
+  telle dans l'explication de fin de tâche de T55, jamais reprise depuis.
+- **Fichiers** : `src/dashboard/storage/universe_history.py`,
+  `tests/storage/test_universe_history.py` (étendu).
+- **Test** : un second appel `append` pour la même date et le même titre
+  lève une erreur explicite plutôt que d'ajouter une ligne dupliquée.
+- **Critères de la spec couverts** : #22 (renforce « jamais élaguée »).
+- **Terminée quand** : le test passe.
+- **Dépend de** : T55.
 
 ## Vérification de couverture
 
 ### Critères de la spec
 
 Union des critères couverts : #1 (T22), #2 (T59), #3 (T6, T23), #4 (T8,
-T47), #5 (T5), #6 (T45), #7 (T57), #8 (T24), #9 (T61), #10 (T48), #11
-(T46), #12 (T43), #13 (T44), #14 (T34), #15 (T52), #16 (T53), #17 (T54),
-#18 (T56), #19 (T49), #20 (T51), #21 (T60), #22 (T55), #23 (T34), #24
-(T36), #25 (T37, T58), #26 (T62), Invariant 10 (T13).
+T47), #5 (T5), #6 (T45, T65), #7 (T57), #8 (T24), #9 (T61, T64, T65, T66),
+#10 (T48), #11 (T46), #12 (T43), #13 (T44), #14 (T34), #15 (T52), #16
+(T53), #17 (T54), #18 (T56), #19 (T49), #20 (T51), #21 (T60), #22 (T55,
+T68), #23 (T34), #24 (T36), #25 (T37, T58), #26 (T62), #27 (T61, T65),
+Invariant 10 (T13).
 
-Les 26 critères d'acceptation de spec.md et l'invariant 10 sont couverts.
-Aucun critère orphelin.
+Les 27 critères d'acceptation de spec.md et l'invariant 10 sont couverts.
+Aucun critère orphelin. (Amendement : le total était resté à 26 dans cette
+section après l'ajout du critère 27 par l'ADR 0004 — corrigé ici.)
 
 Invariant 9 (tests hors réseau par défaut, amendé au point de contrôle) :
 le dispositif lui-même — marqueur `contact` déclaré et exclu par défaut,
@@ -973,28 +1080,29 @@ de module) — signalés, non traités
 
 En appliquant le contrôle élargi aux comportements décrits dans les
 contrats de module et la section « Risques » de plan.md, au-delà des seuls
-noms de fichiers, trois comportements promis restent sans tâche :
+noms de fichiers, trois comportements promis restaient sans tâche à
+l'issue du Bloc 4. Un seul est désormais assigné :
 
 1. **Seuil de cohérence prix veille/jour dans `calc.ratios`** — plan.md,
    section Risques, « Fractionnement non reflété à temps par la source de
    prix » : « `calc.ratios` compare le ratio de prix veille/jour à un seuil
    de cohérence et signale l'anomalie plutôt que de la laisser
-   silencieusement fausser un indicateur. » Aucune tâche T38–T53 ne
-   construit ni ne teste cette comparaison ; T47 ne teste que la
-   séparation brut/ajusté, pas un seuil d'anomalie jour sur jour.
+   silencieusement fausser un indicateur. » Toujours sans tâche ; T47 ne
+   teste que la séparation brut/ajusté, pas un seuil d'anomalie jour sur
+   jour. Reconfirmé ouvert par `/spec-verify`, soumis à arbitrage.
 2. **Jointure point-in-time sur `sic_codes`/`ticker_cik` à la date
    effective** — plan.md, section Risques, « Changement de code SIC ou de
    ticker non reflété » : « toute jointure se fait à la date effective,
-   jamais sur la valeur la plus récente sans égard à la date. » Les tâches
-   existantes (T34, T50) testent un instantané à une seule date ; aucune
-   ne teste qu'un changement de SIC ou de ticker dans le temps est
-   résolu par `as_of` plutôt que par la valeur la plus récente.
+   jamais sur la valeur la plus récente sans égard à la date. » Reconfirmé
+   ouvert par `/spec-verify` (aucune jointure par `as_of` nulle part dans
+   `calc.universe`) — **assigné à T67**.
 3. **Conversion explicite en UTC de l'horodatage des dépôts SEC** —
    plan.md, section Risques, « Horodatage des dépôts SEC en heure de l'Est
    américain, pas en UTC » : « la conversion vers UTC est explicite et
    documentée au point d'ingestion, jamais laissée à la valeur telle que
-   reçue. » Aucune tâche ne teste un cas de bord proche de minuit où une
-   conversion manquante ferait basculer une comparaison `filed ≤ t`.
+   reçue. » Toujours sans tâche : aucun test ne couvre un cas de bord
+   proche de minuit où une conversion manquante ferait basculer une
+   comparaison `filed ≤ t`. Soumis à arbitrage.
 
 Note connexe, plus faible, non comptée ci-dessus : le contrat générique
 des modules d'ingestion T2–T9 (« refusent de retourner une valeur par
@@ -1007,7 +1115,14 @@ des données de la veille dans `pipeline.daily_run`.
 
 T63 ne couvre aucun critère numéroté supplémentaire — elle referme la
 boucle d'orchestration entre des modules déjà chacun couverts
-individuellement (T45, T52, T53, T54, T58), sur le même principe que T7
-(étend un module déjà couvert plutôt que d'en couvrir un nouveau).
+individuellement (T45, T49, T51, T52, T53, T54, T58, T62), sur le même
+principe que T7 (étend un module déjà couvert plutôt que d'en couvrir un
+nouveau).
 
-Total : 63 tâches.
+T64–T68 sont des tâches correctives issues de `/spec-verify` : T64 et T65
+renforcent le critère 9 (traçabilité) sans en ajouter de nouveau ; T66
+couvre la clause « prix » du critère 9, jusqu'ici sans code ni test ; T67
+comble le point 2 du contrôle 4.3 (jointure `as_of`) ; T68 renforce le
+critère 22 (jamais élaguée) sur `storage.universe_history`.
+
+Total : 68 tâches.

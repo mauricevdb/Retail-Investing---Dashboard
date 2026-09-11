@@ -472,7 +472,7 @@ modifie la signature d'aucune fonction déjà écrite ni testée :
 | 11 — taux de couverture par indicateur | `calc.ratios` et les bridges (`ebit`, `fcf`, `debt`, `cash`, `equity`, `dna`, `shares`) | `test_coverage_rate_reported_per_indicator` |
 | 12 — TTM primaire, médiane 5 ans secondaire | `calc.ttm`, `calc.normalized_5y` | `test_ttm_and_5y_median_computed` |
 | 13 — divergence signalée au-delà du seuil | `calc.divergence` | `test_divergence_flag_above_threshold` |
-| 14 — SIC 6000–6799 exclu | `ingestion.edgar_submissions`, `calc.universe` | `test_finance_insurance_realestate_excluded` |
+| 14 — SIC 6000–6799 exclu | `ingestion.edgar_submissions`, `calc.universe` | `test_universe_exclusions` |
 | 15 — compteur affiché y compris zéro | `calc.filters` | `test_filter_count_including_zero` |
 | 16 — classement plafonné à 25 | `calc.ranking` | `test_ranking_capped_at_25` |
 | 17 — historique du screen append-only | `storage.screen_history` | `test_screen_history_never_rewritten` |
@@ -481,7 +481,7 @@ modifie la signature d'aucune fonction déjà écrite ni testée :
 | 20 — repli absolu si secteur < 10 titres | `calc.percentiles` | `test_sector_percentile_fallback_below_10` |
 | 21 — données préservées pour titre sorti | `fundamentals_raw`, `screen_results` (jamais élaguées) | `test_delisted_ticker_history_preserved` |
 | 22 — table d'appartenance append-only | `storage.universe_history` | `test_membership_table_append_only` |
-| 23 — fonds/ETF exclus | `calc.universe` | `test_funds_and_etfs_excluded` |
+| 23 — fonds/ETF exclus | `calc.universe` | `test_universe_exclusions` |
 | 24 — stabilité au rang de coupure | `calc.universe` | `test_universe_stable_near_cutoff_with_hysteresis` |
 | 25 — échec bruyant si taille implausible | `calc.universe`, `pipeline.daily_run` | `test_universe_failure_halts_pipeline` |
 | 26 — jamais présenté comme le S&P 500/400 | `app.screen_view` | `test_no_index_label_in_ui` |
