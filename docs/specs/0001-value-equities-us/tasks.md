@@ -1161,16 +1161,71 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Terminée quand** : le test passe.
 - **Dépend de** : T71, T62.
 
+### T73 — Distinguer exclusion par règle et absence de donnée
+- **Objectif** : régression introduite par T72 lui-même, relevée par
+  `/spec-verify` (quatrième passage) : `pipeline.daily_run._derive_shares_pit`
+  s'exécute sur la totalité de `shares_pit`, avant que
+  `calc.universe.apply_exclusions` ne détermine qui est réellement éligible
+  par SIC. Démontré en direct : une banque (SIC 6022, catégoriquement
+  exclue par le critère 14, sans aucune action en circulation déposée)
+  produit le texte « 1 titre(s) non calculable(s) pour le classement »,
+  alors qu'elle n'a jamais été candidate — son absence est une décision de
+  règle, pas un échec de calcul. Le compte affiché conflate deux causes
+  distinctes et affiche un chiffre faux. Corriger l'ordre ou le périmètre
+  du calcul (au choix le plus simple) pour que seuls les titres
+  SIC-éligibles mais sans action en circulation dérivable soient comptés.
+- **Fichiers** : `src/dashboard/pipeline/daily_run.py`,
+  `tests/pipeline/test_daily_run_end_to_end.py` (étendu).
+- **Test** : dans le même run, un titre exclu par règle (SIC finance) sans
+  aucune donnée d'actions en circulation, et un titre SIC-éligible sans
+  aucune donnée d'actions en circulation (cas déjà couvert par T72) ; le
+  compte affiché ne reflète que le second, jamais le premier. C'est la
+  combinaison que le test de T72 ne couvrait pas.
+- **Critères de la spec couverts** : #6, #14 (les deux causes d'absence ne
+  doivent jamais se confondre l'une dans l'autre).
+- **Terminée quand** : le test passe.
+- **Dépend de** : T72, T34.
+
+### T74 — Câbler ou retirer `resolve_ticker_cik_as_of`
+- **Objectif** : `calc.universe.resolve_ticker_cik_as_of` (T70) est correcte
+  et testée, mais n'est appelée nulle part depuis son ajout — relevé une
+  deuxième fois par `/spec-verify`. Du code correct que rien n'appelle est
+  une dette silencieuse, pas un acquis. Avant d'implémenter quoi que ce
+  soit, proposer laquelle des deux issues retenir et pourquoi : (a) la
+  câbler dans un point d'appel réel de `calc.universe` ou
+  `pipeline.daily_run`, à l'endroit que plan.md prévoit (jointure sur
+  `ticker_cik` à la date effective) ; ou (b) la retirer avec
+  `tests/calc/test_ticker_cik_as_of.py`, et inscrire le risque qu'elle
+  couvrait comme dette reportée plutôt que comme code mort. Attendre la
+  décision avant d'agir.
+- **Fichiers** : selon l'issue retenue — `src/dashboard/calc/universe.py`,
+  `src/dashboard/pipeline/daily_run.py` et/ou
+  `tests/calc/test_ticker_cik_as_of.py`.
+- **Test** : selon l'issue retenue — un test prouvant le câblage réel, ou
+  la suppression propre du code et de son test.
+- **Critères de la spec couverts** : aucun directement — referme (ou clôt
+  explicitement comme dette) le garde-fou point-in-time de plan.md.
+- **Terminée quand** : la décision est prise et appliquée.
+- **Dépend de** : T70.
+- **Décision retenue** : (b) retrait. `resolve_ticker_cik_as_of` et
+  `tests/calc/test_ticker_cik_as_of.py` sont supprimés. Le câblage réel
+  aurait supposé de revenir sur le contournement de T63 (`shares_pit` porte
+  déjà `ticker` et `cik`), un chantier hors du périmètre que T70 s'était
+  fixé. Le risque qu'elle couvrait (ticker ou CIK périmé dans
+  `calc.universe`) est consigné comme dette reportée dans
+  `docs/specs/0001-value-equities-us/etat-de-tranche.md`, pas laissé comme
+  code non appelé se faisant passer pour un acquis.
+
 ## Vérification de couverture
 
 ### Critères de la spec
 
 Union des critères couverts : #1 (T22), #2 (T59), #3 (T6, T23), #4 (T8,
-T47), #5 (T5), #6 (T45, T65, T72), #7 (T57), #8 (T24), #9 (T61, T64, T65,
-T66, T69), #10 (T48), #11 (T46), #12 (T43), #13 (T44), #14 (T34), #15
-(T52), #16 (T53), #17 (T54), #18 (T56), #19 (T49), #20 (T51), #21 (T60),
-#22 (T55, T68), #23 (T34), #24 (T36), #25 (T37, T58), #26 (T62), #27 (T61,
-T65, T69), Invariant 10 (T13).
+T47), #5 (T5), #6 (T45, T65, T72, T73), #7 (T57), #8 (T24), #9 (T61, T64,
+T65, T66, T69), #10 (T48), #11 (T46), #12 (T43), #13 (T44), #14 (T34, T73),
+#15 (T52), #16 (T53), #17 (T54), #18 (T56), #19 (T49), #20 (T51), #21
+(T60), #22 (T55, T68), #23 (T34), #24 (T36), #25 (T37, T58), #26 (T62), #27
+(T61, T65, T69), Invariant 10 (T13).
 
 Les 27 critères d'acceptation de spec.md et l'invariant 10 sont couverts.
 Aucun critère orphelin. (Amendement : le total était resté à 26 dans cette
@@ -1276,4 +1331,17 @@ qu'à T45/T50/T61 : une correction vérifiée localement (le chiffre est
 maintenant dérivé de faits réels) peut rouvrir une garantie déjà promise
 ailleurs si l'effet de bord sur le chemin silencieux n'est pas revérifié.
 
-Total : 72 tâches.
+T73 et T74 sont les tâches correctives d'un quatrième et dernier passage
+de `/spec-verify` sur cette tranche. T73 ferme la même classe de défaut
+qu'à T71→T72 : une correction vérifiée sur son propre scénario (T72
+corrige le silence sur un titre éligible sans donnée) introduit une
+imprécision non revérifiée contre un scénario voisin (un titre exclu par
+règle, jamais candidat, compté comme s'il l'était). T74 ne corrige aucune
+violation active — elle referme une dette identifiée deux fois de suite
+(code correct, jamais appelé) en forçant une décision explicite plutôt que
+de la laisser en l'état. La boucle d'audit correctif s'arrête ici ; l'état
+des garde-fous restés en arbitrage et de ce que la tranche n'a jamais
+exercé est consigné dans `etat-de-tranche.md`, pas dans une nouvelle série
+de tâches.
+
+Total : 74 tâches.

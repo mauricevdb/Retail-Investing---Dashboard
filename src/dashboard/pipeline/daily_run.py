@@ -13,6 +13,7 @@ from dashboard.calc.ranking import rank
 from dashboard.calc.ratios import indicator_status
 from dashboard.calc.sector_grouping import classify as classify_sector
 from dashboard.calc.shares_bridge import resolve as resolve_shares
+from dashboard.calc.universe import apply_exclusions, resolve_sic_as_of
 from dashboard.calc.universe import universe as compute_universe
 from dashboard.storage.screen_history import append as append_screen_history
 from dashboard.storage.universe_history import append as append_universe_history
@@ -38,11 +39,22 @@ def run(
 
 
 def _derive_shares_pit(
-    shares_pit: pl.DataFrame, facts: pl.DataFrame, t: date
+    shares_pit: pl.DataFrame, facts: pl.DataFrame, sic_codes: pl.DataFrame, t: date
 ) -> tuple[pl.DataFrame, list[str]]:
+    # Seuls les titres SIC-éligibles sont candidats au classement : un titre
+    # exclu par règle (critère 14/23) n'a jamais été candidat, son absence
+    # d'action en circulation ne doit jamais être comptée comme non
+    # calculable (T73) -- ce serait un chiffre faux, pas un signal utile.
+    resolved_sic = resolve_sic_as_of(sic_codes, t)
+    eligible_tickers = set(apply_exclusions(resolved_sic)["ticker"].to_list())
+
     rows = []
     excluded_tickers = []
     for row in shares_pit.iter_rows(named=True):
+        if row["ticker"] not in eligible_tickers:
+            rows.append(row)
+            continue
+
         shares_outstanding, _ = resolve_shares(facts, row["cik"], t)
         if shares_outstanding is not None:
             rows.append({**row, "shares_outstanding": shares_outstanding})
@@ -78,7 +90,9 @@ def run_daily(
         # reçues telles quelles : la capitalisation boursière décide qui
         # entre dans l'univers, elle ne peut pas reposer sur une valeur non
         # tracée jusqu'à un fait déposé (invariant 2, T71).
-        shares_pit, non_calculable_shares_tickers = _derive_shares_pit(shares_pit, facts, t)
+        shares_pit, non_calculable_shares_tickers = _derive_shares_pit(
+            shares_pit, facts, sic_codes, t
+        )
 
     membership = compute_universe(
         shares_pit,

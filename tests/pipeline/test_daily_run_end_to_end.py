@@ -42,6 +42,11 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
     # l'audit /spec-verify. Ses actions en circulation ne sont dérivables
     # d'aucune façon.
     non_calculable_cik, non_calculable_ticker = "0000000104", "ZZZD"
+    # ZZZBANK : exclue par règle (SIC 6022, finance), et sans aucune action
+    # en circulation déposée non plus. Jamais candidate au classement --
+    # son absence ne doit jamais être comptée comme « non calculable »
+    # (T73), contrairement à ZZZD, SIC-éligible mais sans donnée.
+    excluded_by_rule_cik, excluded_by_rule_ticker = "0000000105", "ZZZBANK"
     ebit_by_cik = {
         "0000000101": 100_000_000.0,
         "0000000102": 50_000_000.0,
@@ -91,30 +96,36 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
     # plus jamais shares_outstanding des dépôts (T71), cette valeur fausse
     # serait utilisée telle quelle et les indicateurs ci-dessous ne
     # correspondraient plus aux valeurs attendues.
+    all_ciks_to_tickers = {
+        **tickers,
+        non_calculable_cik: non_calculable_ticker,
+        excluded_by_rule_cik: excluded_by_rule_ticker,
+    }
     shares_pit = pl.DataFrame(
         [
             {"ticker": ticker, "cik": cik, "shares_outstanding": 1.0}
-            for cik, ticker in {**tickers, non_calculable_cik: non_calculable_ticker}.items()
+            for cik, ticker in all_ciks_to_tickers.items()
         ]
     )
     prices_adj = pl.DataFrame(
         [
             {"ticker": ticker, "date": t, "close_adj": 10.0}
-            for ticker in (*tickers.values(), non_calculable_ticker)
+            for ticker in all_ciks_to_tickers.values()
         ]
     )
-    # Même division SIC (7372, services) pour les quatre -- groupe sectoriel
-    # sous le seuil de 10 : le percentile sectoriel doit donc se replier
-    # explicitement (critère 20), pas manquer silencieusement.
+    # Même division SIC (7372, services) pour les titres éligibles -- groupe
+    # sectoriel sous le seuil de 10, le percentile sectoriel doit donc se
+    # replier explicitement (critère 20), pas manquer silencieusement.
+    # ZZZBANK porte le SIC 6022 (finance) : exclue par règle (critère 14).
     sic_codes = pl.DataFrame(
         [
             {
                 "ticker": ticker,
-                "sic": "7372",
+                "sic": "6022" if ticker == excluded_by_rule_ticker else "7372",
                 "entity_type": "operating company",
                 "as_of": end,
             }
-            for ticker in (*tickers.values(), non_calculable_ticker)
+            for ticker in all_ciks_to_tickers.values()
         ]
     )
 
@@ -144,15 +155,17 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
         own_history_by_cik=own_history_by_cik,
     )
 
-    # Univers non vide -- ZZZD, sans aucune action en circulation
-    # dérivable, n'apparaît pas parmi les membres classés.
+    # Univers non vide -- ni ZZZD (sans action en circulation dérivable) ni
+    # ZZZBANK (exclue par règle) n'apparaissent parmi les membres classés.
     membership = pl.read_parquet(universe_history_path)
     assert membership.filter(pl.col("in_universe")).height == 3
     assert non_calculable_ticker not in membership["ticker"].to_list()
+    assert excluded_by_rule_ticker not in membership["ticker"].to_list()
 
     # Vue affichable produite, mentionnant le compteur de titres retenus
-    # ET le nombre de titres non calculables pour le classement -- l'absence
-    # de ZZZD n'est pas seulement déductible en creux, elle est expliquée.
+    # ET le nombre de titres non calculables pour le classement -- 1 (ZZZD),
+    # jamais 2 : ZZZBANK est exclue par règle, pas faute de donnée, et ne
+    # doit jamais gonfler ce compte (T73).
     assert view_text is not None
     assert "2" in view_text
     assert "1 titre(s) non calculable(s) pour le classement" in view_text

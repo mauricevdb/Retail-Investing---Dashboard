@@ -467,7 +467,7 @@ modifie la signature d'aucune fonction déjà écrite ni testée :
 | 6 — donnée absente signalée, jamais par défaut | `calc.ratios` | `test_missing_fundamental_flagged` |
 | 7 — écran reflète clôture + dépôts connus du jour | `pipeline.daily_run` | `test_daily_run_uses_close_and_known_filings` |
 | 8 — date de référence = dernière séance | `calc.market_calendar` | `test_last_session_not_calendar_today` |
-| 9 — traçabilité d'une grandeur issue d'un dépôt (dont le rang de repli) | `app.detail_view`, `calc.point_in_time.resolve_detail`, `filings.parquet` | `test_every_displayed_number_traceable` |
+| 9 — traçabilité d'une grandeur issue d'un dépôt (dont le rang de repli, et, pour un prix, la date de cotation) | `app.detail_view`, `calc.point_in_time.resolve_detail`, `filings.parquet` | `test_every_displayed_number_traceable`, `test_price_traceable_to_quotation_date`, `test_default_tax_rate_fallback_disclosed_in_roic_trace` |
 | 10 — devise explicite, sans conversion | schéma (colonnes devise), `calc.ratios` | `test_currency_explicit_no_conversion` |
 | 11 — taux de couverture par indicateur | `calc.ratios` et les bridges (`ebit`, `fcf`, `debt`, `cash`, `equity`, `dna`, `shares`) | `test_coverage_rate_reported_per_indicator` |
 | 12 — TTM primaire, médiane 5 ans secondaire | `calc.ttm`, `calc.normalized_5y` | `test_ttm_and_5y_median_computed` |
@@ -480,12 +480,12 @@ modifie la signature d'aucune fonction déjà écrite ni testée :
 | 19 — percentile propre histoire + années dispo | `calc.percentiles` | `test_own_history_percentile_and_years` |
 | 20 — repli absolu si secteur < 10 titres | `calc.percentiles` | `test_sector_percentile_fallback_below_10` |
 | 21 — données préservées pour titre sorti | `fundamentals_raw`, `screen_results` (jamais élaguées) | `test_delisted_ticker_history_preserved` |
-| 22 — table d'appartenance append-only | `storage.universe_history` | `test_membership_table_append_only` |
+| 22 — table d'appartenance append-only | `storage.universe_history` | `test_membership_table_append_only`, `test_universe_history_rejects_duplicate_date_cik` |
 | 23 — fonds/ETF exclus | `calc.universe` | `test_universe_exclusions` |
 | 24 — stabilité au rang de coupure | `calc.universe` | `test_universe_stable_near_cutoff_with_hysteresis` |
 | 25 — échec bruyant si taille implausible | `calc.universe`, `pipeline.daily_run` | `test_universe_failure_halts_pipeline` |
 | 26 — jamais présenté comme le S&P 500/400 | `app.screen_view` | `test_no_index_label_in_ui` |
-| 27 — traçabilité d'une grandeur dérivée (formule, entrées, population, fenêtre) | `app.detail_view`, `calc.percentiles` | `test_every_displayed_number_traceable` |
+| 27 — traçabilité d'une grandeur dérivée (formule, entrées, population, fenêtre) | `app.detail_view`, `calc.percentiles` | `test_every_displayed_number_traceable`, `test_default_tax_rate_fallback_disclosed_in_roic_trace` |
 | Invariant 10 — aucune clé dans logs/erreurs | `ingestion.edgar_client`, `ingestion.eodhd_client`, `ingestion.secrets` | `test_no_api_key_in_logs_or_errors` |
 
 ## Risques
