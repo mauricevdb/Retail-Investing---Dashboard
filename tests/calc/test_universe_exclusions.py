@@ -22,7 +22,7 @@ def test_universe_exclusions() -> None:
         [
             _sic("0000000001", as_of),  # Alpha : SIC 3674, opérationnelle.
             _sic("0000000003", as_of),  # Gamma : SIC 6022 (banque).
-            _sic("0000000004", as_of),  # Delta : SIC 6726 ET fonds/ETF.
+            _sic("0000000004", as_of),  # Delta : SIC 6726 (investment office).
             _sic("0000000005", as_of),  # Epsilon : fonds/ETF, SIC 5040 (hors plage).
         ]
     )
@@ -30,3 +30,21 @@ def test_universe_exclusions() -> None:
     eligible = apply_exclusions(sic_codes)
 
     assert set(eligible["cik"]) == {"0000000001"}
+
+
+def test_universe_exclusions_missing_sic_treated_as_non_operating() -> None:
+    # Découvert en ingestion réelle (T75) : un fonds réglementé (BDC) a
+    # entityType "operating" comme une vraie société -- seul son SIC est
+    # vide, jamais un code numérique. entity_type seul ne suffit donc pas
+    # à l'exclure ; l'absence de SIC doit être traitée comme un signal
+    # d'exclusion, jamais silencieusement ignorée (invariant 7).
+    sic_codes = pl.DataFrame(
+        [
+            {"ticker": "AAAA", "sic": "3571", "entity_type": "operating"},
+            {"ticker": "BDCX", "sic": "", "entity_type": "operating"},
+        ]
+    )
+
+    eligible = apply_exclusions(sic_codes)
+
+    assert set(eligible["ticker"]) == {"AAAA"}

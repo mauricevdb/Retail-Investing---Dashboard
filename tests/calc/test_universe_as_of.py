@@ -17,13 +17,13 @@ def test_universe_resolves_sic_known_at_t_not_latest_row() -> None:
             {
                 "ticker": "OPCO",
                 "sic": "3674",
-                "entity_type": "operating company",
+                "entity_type": "operating",
                 "as_of": date(2024, 1, 1),
             },
             {
                 "ticker": "OPCO",
                 "sic": "6022",
-                "entity_type": "operating company",
+                "entity_type": "operating",
                 "as_of": date(2024, 5, 1),
             },
         ]

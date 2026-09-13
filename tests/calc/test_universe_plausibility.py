@@ -15,7 +15,7 @@ def test_universe_failure_on_implausible_size() -> None:
             "ticker": tickers,
             # 9 titres artificiellement exclus (finance), 1 seul éligible.
             "sic": ["6022"] * 9 + ["3674"],
-            "entity_type": ["operating company"] * 10,
+            "entity_type": ["operating"] * 10,
             "as_of": [date(2024, 1, 1)] * 10,
         }
     )

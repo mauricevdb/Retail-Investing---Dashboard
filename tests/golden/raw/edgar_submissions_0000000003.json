@@ -1,6 +1,6 @@
 {
   "cik": "0000000003",
-  "entityType": "operating company",
+  "entityType": "operating",
   "sic": "6022",
   "sicDescription": "State Commercial Banks",
   "tickers": ["CCCC"],

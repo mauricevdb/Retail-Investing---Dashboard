@@ -13,9 +13,20 @@ def resolve_sic_as_of(sic_codes: pl.DataFrame, t: date) -> pl.DataFrame:
 
 
 def apply_exclusions(sic_codes: pl.DataFrame) -> pl.DataFrame:
-    sic_numeric = sic_codes["sic"].cast(pl.Int64)
+    # "operating" est la vraie valeur renvoyée par l'API SEC pour
+    # entityType (vérifié en ingestion réelle, T75) -- "operating company"
+    # n'existe nulle part dans les vraies réponses.
+    is_operating_company = sic_codes["entity_type"] == "operating"
+
+    # cast non strict : un émetteur sans SIC assigné (fonds réglementé, BDC
+    # -- vérifié sur un cas réel, entityType y vaut aussi "operating") doit
+    # être traité comme non éligible, jamais planter ni être inclus par
+    # défaut (invariant 7). Un SIC absent devient null, qui rend
+    # in_finance_insurance_real_estate et sa négation également nulles :
+    # filter() exclut alors la ligne, comme une valeur manquante le doit.
+    sic_numeric = sic_codes["sic"].cast(pl.Int64, strict=False)
     in_finance_insurance_real_estate = (sic_numeric >= 6000) & (sic_numeric <= 6799)
-    is_operating_company = sic_codes["entity_type"] == "operating company"
+
     return sic_codes.filter(~in_finance_insurance_real_estate & is_operating_company)
 
 

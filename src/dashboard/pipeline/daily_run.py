@@ -104,7 +104,11 @@ def run_daily(
         buffer=buffer,
         plausible_range=plausible_range,
     )
-    append_universe_history(universe_history_path, membership)
+    # calc.universe.universe() ne porte aucune colonne "date" -- c'est ici,
+    # au moment de persister, qu'elle doit être ajoutée (même principe que
+    # screen_rows ci-dessous), pour que le garde anti-doublon (date, cik)
+    # de storage.universe_history (T68) trouve la colonne qu'il exige.
+    append_universe_history(universe_history_path, membership.with_columns(pl.lit(t).alias("date")))
 
     # Indicateurs, filtrage, classement et persistance du screen : reste
     # hors périmètre si l'appelant n'a pas encore fourni ces paramètres

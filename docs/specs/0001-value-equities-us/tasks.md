@@ -73,6 +73,10 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   critères 14, 23, prouvés en T34).
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
+- **Statut** : le parseur lui-même n'a jamais été en cause. Ses assertions
+  sur Alpha/Gamma vérifiaient une valeur `entity_type` fictive
+  (`"operating company"`), corrigée en `"operating"` (la vraie valeur SEC)
+  en même temps que le bug qu'elle cachait, trouvé et corrigé en T34.
 
 ### T5 — Ingérer les fondamentaux, rejeter les émetteurs IFRS
 - **Objectif** : produire `fundamentals_raw.parquet` à partir de
@@ -548,6 +552,31 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Critères de la spec couverts** : #14, #23.
 - **Terminée quand** : le test passe.
 - **Dépend de** : T4.
+- **Statut** : deux bugs réels trouvés en ingestion manuelle (T75, deuxième
+  essai contre le vrai EDGAR) :
+  1. `apply_exclusions` comparait `entity_type` à `"operating company"` —
+     une valeur qui n'existe nulle part dans l'API réelle. Vérifié sur
+     trois émetteurs réels : Apple (`entityType='operating'`,
+     `sic='3571'`), JPMorgan Chase (`'operating'`, `sic='6021'`, une
+     banque exclue par le SIC, pas par entity_type), SPDR S&P 500 ETF
+     Trust / SPY (`'other'`, `sic=''`). Résultat avant correction :
+     **tout émetteur réel était exclu**, y compris les éligibles. Corrigé :
+     comparaison à `"operating"`.
+  2. Un fonds réglementé réel (Prospect Capital, une BDC) a
+     `entityType='operating'` comme n'importe quelle société — seul son
+     SIC est vide (`''`), jamais un code numérique. `entity_type` seul ne
+     suffit donc pas à exclure les fonds/BDC (critère 23) : un SIC absent
+     doit être traité comme un signal d'exclusion, jamais ignoré
+     (invariant 7). `apply_exclusions` caste désormais `sic` en entier
+     sans erreur (`strict=False`) ; un SIC non numérique devient absent,
+     ce qui exclut la ligne par la logique à trois valeurs de Polars,
+     jamais un plantage ni une inclusion par défaut. Nouveau test :
+     `test_universe_exclusions_missing_sic_treated_as_non_operating`.
+     Fixtures `edgar_submissions_0000000001/02/03/06.json` corrigées
+     (`"operating company"` → `"operating"`) ; Delta/Epsilon
+     (`"investment company"`) laissées inchangées -- toujours exclues (la
+     valeur ne correspond à aucun cas réel identifié, mais reste un
+     sentinel valide pour ce test).
 
 ### T35 — Classer par capitalisation lissée sur 20 séances
 - **Objectif** : `calc.universe` calcule la capitalisation à partir des
@@ -814,6 +843,16 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Critères de la spec couverts** : #16.
 - **Terminée quand** : le test passe.
 - **Dépend de** : T52.
+- **Statut** : bug réel trouvé en ingestion manuelle (T75, troisième essai) :
+  `rank()` triait tous les titres retenus par `ev_ebit` sans exclure ceux
+  dont cet indicateur est `None` — `apply_filters` ne l'exclut que si
+  `ev_ebit` fait partie des seuils fournis, ce qui n'est pas garanti
+  (`thresholds={}` est un choix légitime : « aucun filtre »). Résultat :
+  `sorted()` plantait (`TypeError: '<' not supported between instances of
+  'NoneType' and 'float'`) dès qu'un titre réel avait un indicateur de tri
+  non calculable. Corrigé : un titre non calculable sur l'indicateur de tri
+  est exclu du classement, jamais comparé (invariant 7). Nouveau test :
+  `test_ranking_excludes_non_calculable_primary_indicator`.
 
 ## Stockage et persistance
 
@@ -994,6 +1033,22 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   jusqu'ici jamais exercés ensemble dans un seul appel.
 - **Terminée quand** : le test passe.
 - **Dépend de** : T45, T49, T51, T52, T53, T54, T58, T62.
+- **Statut** : bug réel trouvé en ingestion manuelle (T75, quatrième
+  essai) : `run_daily` transmettait `membership` à
+  `storage.universe_history.append` sans jamais lui ajouter de colonne
+  `"date"` — `calc.universe.universe()` n'en produit aucune. Invisible
+  tant qu'un seul appel écrivait dans un fichier neuf (aucun test
+  n'appelait `run_daily` deux fois sur le même chemin, contrairement à
+  `screen_history`, pour laquelle `run_daily` ajoute bien `"date": t`
+  explicitement). Un deuxième appel réel plantait
+  (`ColumnNotFoundError: "date"`, colonne exigée par le garde anti-doublon
+  de T68) au lieu d'ajouter une deuxième ligne, comme l'exige le critère
+  22. Corrigé : `"date"` ajoutée avant l'appel, symétriquement à
+  `screen_rows`. Nouveaux tests :
+  `test_daily_run_repeated_calls_write_distinct_dates` et
+  `test_daily_run_repeated_call_same_date_rejected` (ce dernier n'avait
+  jamais exercé le garde de T68 via `run_daily`, seulement via le
+  stockage isolé).
 
 ### T64 — Traçabilité des replis
 - **Objectif** : découverte au sondage numérique de `/spec-verify`, sur un

@@ -122,7 +122,7 @@ def test_daily_run_end_to_end(tmp_path: Path) -> None:
             {
                 "ticker": ticker,
                 "sic": "6022" if ticker == excluded_by_rule_ticker else "7372",
-                "entity_type": "operating company",
+                "entity_type": "operating",
                 "as_of": end,
             }
             for ticker in all_ciks_to_tickers.values()
