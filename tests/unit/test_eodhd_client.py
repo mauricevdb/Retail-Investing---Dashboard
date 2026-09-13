@@ -24,6 +24,10 @@ def test_eodhd_client_authenticates_and_raises_on_failure() -> None:
 
     assert result == [{"code": "AAAA"}]
     assert transport.calls[0]["params"]["api_token"] == "fake-eodhd-key"
+    # L'endpoint bulk renvoie du CSV par défaut (découvert par le test de
+    # contact, T20) : fmt=json doit être demandé explicitement à chaque
+    # appel, pas seulement quand ça échoue en silence côté client.
+    assert transport.calls[0]["params"]["fmt"] == "json"
 
     failing_transport = FakeTransport(error=ConnectionError("boom"))
     failing_client = EodhdClient(api_key="fake-eodhd-key", transport=failing_transport)

@@ -180,6 +180,14 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   Invariant 10 ; base réseau pour T17–T18 et T57 et suivants).
 - **Terminée quand** : le test passe.
 - **Dépend de** : aucune.
+- **Statut** : contrat corrigé après le test de contact réel (T20) :
+  `get_json` n'envoyait que `api_token`, jamais `fmt=json`. Contre un
+  transport factice (qui renvoie toujours du JSON déjà prêt), cette
+  omission était invisible ; contre le vrai endpoint bulk EODHD, qui
+  renvoie du CSV par défaut, elle faisait échouer tout appel réel à la
+  désérialisation. `fmt=json` est désormais systématiquement envoyé,
+  vérifié par `test_eodhd_client_authenticates_and_raises_on_failure`
+  (étendu) et par T20 contre le vrai service.
 
 ### T13 — Ne jamais exposer une clé d'API dans une erreur réseau réelle
 - **Objectif** : un échec réel du transport HTTP dans l'un ou l'autre
@@ -295,6 +303,13 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   (`uv run pytest -m contact`) et reste exclu de `uv run pytest` par
   défaut (vérifié par `addopts` de `pyproject.toml`).
 - **Dépend de** : T11, T13.
+- **Statut** : d'abord trouvée non implémentée (ni `tests/contact/` ni
+  `test_edgar_contact.py` n'existaient malgré la séquence 1-74 et la
+  mention de couverture de l'invariant 9). Écrite et vérifiée contre le
+  vrai `www.sec.gov` (User-Agent lu depuis `.env`, transport réel en
+  `urllib.request` local au test) : `test_edgar_contact_company_tickers_reachable`
+  passe en exécution manuelle (`uv run pytest -m contact`) et reste exclu
+  de la suite par défaut (61 passed, 1 deselected). **Faite.**
 
 ### T20 — Test de contact EODHD
 - **Objectif** : même exigence que T19, pour EODHD.
@@ -310,6 +325,16 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   (`uv run pytest -m contact`) et reste exclu de `uv run pytest` par
   défaut.
 - **Dépend de** : T12, T13.
+- **Statut** : d'abord trouvée non implémentée (même constat qu'à T19).
+  Écrite, puis échouée contre le vrai service avec
+  `EodhdClientError: Expecting value: line 1 column 1 (char 0)` — ni la
+  clé, ni le User-Agent, ni l'URL en cause : l'endpoint bulk EODHD renvoie
+  du CSV par défaut (`Content-Type: text/html`), et `EodhdClient.get_json`
+  ne demandait jamais `fmt=json`. Diagnostiqué par inspection de la
+  réponse brute (statut 200, clé acceptée, corps CSV), jamais en affichant
+  la clé. Corrigé dans T12 ; `test_eodhd_contact_bulk_endpoint_reachable`
+  passe désormais contre le vrai `eodhd.com` (clé absente de toute sortie
+  de test, vérifié par comparaison directe avant affichage). **Faite.**
 
 ### T21 — Fournir l'heure système en UTC, en un point unique
 - **Objectif** : `ingestion.clock.now` est l'unique point d'accès à l'heure
@@ -1232,10 +1257,19 @@ Aucun critère orphelin. (Amendement : le total était resté à 26 dans cette
 section après l'ajout du critère 27 par l'ADR 0004 — corrigé ici.)
 
 Invariant 9 (tests hors réseau par défaut, amendé au point de contrôle) :
-le dispositif lui-même — marqueur `contact` déclaré et exclu par défaut,
-un test de contact par source — est couvert par T19 (EDGAR) et T20
-(EODHD). Ces deux tâches ne couvrent aucun critère numéroté de spec.md :
-elles couvrent l'invariant en tant que tel.
+le dispositif — marqueur `contact` déclaré et exclu par défaut
+(`pyproject.toml`) — et le volet test de contact par source (T19 EDGAR,
+T20 EODHD) sont désormais tous deux en place, exécutés manuellement contre
+les vrais services (`uv run pytest -m contact`, 2 passed, 61 deselected).
+Énoncé corrigé après tentative d'exécution avec `.env` renseigné : T19 et
+T20 avaient d'abord été trouvées non implémentées malgré leur présence
+dans la séquence de tâches et cette mention de couverture, qui affirmait
+à tort l'invariant 9 satisfait. Aucune des quatre passes `/spec-verify` de
+cette tranche ne l'avait détecté : ne couvrant aucun critère numéroté de
+spec.md, elles étaient hors des tableaux de traçabilité vérifiés à chaque
+passage. Le test de contact EODHD (T20) a lui-même révélé un défaut réel
+du client (T12) : `fmt=json` jamais demandé, invisible contre un transport
+factice, corrigé.
 
 ### Modules et comportements de plan.md (contrôle élargi, cf. amendement
 spec-tasks du point de contrôle)
