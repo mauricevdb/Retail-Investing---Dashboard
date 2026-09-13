@@ -223,6 +223,10 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   l'orchestration, câblé dans T57).
 - **Terminée quand** : le test passe, aucun appel réseau réel.
 - **Dépend de** : T2, T11, T13.
+- **Statut** : d'abord trouvée non implémentée (découvert en écrivant T19 :
+  aucune fonction `fetch_*` n'existait dans le dépôt malgré la mention
+  « couche réseau comblée » en section Vérification de couverture, écart
+  non détecté par les quatre passages de `/spec-verify`). Écrite. **Faite.**
 
 ### T15 — Câbler `fetch_submissions` sur le client EDGAR
 - **Objectif** : `ingestion.edgar_submissions.fetch_submissions(client,
@@ -240,6 +244,8 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   l'orchestration, câblé dans T57).
 - **Terminée quand** : le test passe, aucun appel réseau réel.
 - **Dépend de** : T3, T4, T11, T13.
+- **Statut** : même constat qu'à T14 (jamais implémentée malgré la
+  mention de couverture). Écrite. **Faite.**
 
 ### T16 — Câbler `fetch_company_facts` sur le client EDGAR
 - **Objectif** : `ingestion.edgar_facts.fetch_company_facts(client, cik)`
@@ -255,6 +261,11 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   l'orchestration, câblé dans T57).
 - **Terminée quand** : le test passe, aucun appel réseau réel.
 - **Dépend de** : T5, T11, T13.
+- **Statut** : même constat qu'à T14 (jamais implémentée malgré la
+  mention de couverture). Écrite ; URL réelle
+  `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json`
+  (le préfixe `/api/xbrl/` de l'API XBRL, implicite dans l'énoncé
+  d'origine). **Faite.**
 
 ### T17 — Câbler `fetch_bulk_prices` sur le client EODHD
 - **Objectif** : `ingestion.eodhd_prices.fetch_bulk_prices(client, date)`
@@ -270,6 +281,11 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   l'orchestration, câblé dans T57).
 - **Terminée quand** : le test passe, aucun appel réseau réel.
 - **Dépend de** : T8, T12, T13.
+- **Statut** : même constat qu'à T14 (jamais implémentée malgré la
+  mention de couverture). Écrite ; URL réelle
+  `https://eodhd.com/api/eod-bulk-last-day/US?date=AAAA-MM-JJ` (paramètre
+  `date` explicite, `api_token`/`fmt=json` ajoutés par `EodhdClient`
+  lui-même, T12). **Faite.**
 
 ### T18 — Câbler `fetch_bulk_actions` sur le client EODHD
 - **Objectif** : `ingestion.eodhd_actions.fetch_bulk_actions(client, date)`
@@ -284,6 +300,10 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   l'orchestration, câblé dans T57).
 - **Terminée quand** : le test passe, aucun appel réseau réel.
 - **Dépend de** : T9, T12, T13.
+- **Statut** : même constat qu'à T14 (jamais implémentée malgré la
+  mention de couverture). Écrite ; URL réelle
+  `https://eodhd.com/api/eod-bulk-last-day/US?type=splits&date=AAAA-MM-JJ`
+  — même endpoint bulk que T17, distingué par `type=splits`. **Faite.**
 
 ### T19 — Test de contact EDGAR
 - **Objectif** : vérifier, contre le vrai `data.sec.gov` / `www.sec.gov`,
@@ -1285,7 +1305,11 @@ les cinq fonctions `fetch_*` promises par la section « Couche réseau » de
 plan.md pour `edgar_tickers`, `edgar_submissions`, `edgar_facts`,
 `eodhd_prices` et `eodhd_actions` sont désormais couvertes respectivement
 par T14, T15, T16, T17 et T18 — chacune testée avec un transport factice,
-sans réseau réel.
+sans réseau réel. Énoncé corrigé : ce paragraphe affirmait déjà ce
+« comblé » alors qu'aucune des cinq fonctions n'existait dans le dépôt —
+découvert en écrivant T19 (test de contact EDGAR), qui n'en dépendait pas
+et a donc pu être écrite malgré leur absence. Les cinq ont été
+implémentées dans le même tour que cette correction.
 
 Aucun module orphelin.
 

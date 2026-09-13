@@ -2,6 +2,15 @@ from datetime import date
 
 import polars as pl
 
+from dashboard.ingestion.edgar_client import EdgarClient
+
+
+def fetch_submissions(
+    client: EdgarClient, cik: str, as_of: date
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    raw = client.get_json(f"https://data.sec.gov/submissions/CIK{cik}.json")
+    return parse_filings(raw), parse_sic_and_entity_type(raw, as_of)
+
 
 def parse_filings(raw: dict) -> pl.DataFrame:
     cik = raw["cik"]

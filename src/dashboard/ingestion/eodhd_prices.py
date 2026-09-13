@@ -2,6 +2,13 @@ from datetime import date
 
 import polars as pl
 
+from dashboard.ingestion.eodhd_client import EodhdClient
+
+
+def fetch_bulk_prices(client: EodhdClient, day: date) -> tuple[pl.DataFrame, pl.DataFrame]:
+    raw = client.get_json(f"https://eodhd.com/api/eod-bulk-last-day/US?date={day.isoformat()}")
+    return parse_bulk_prices(raw)
+
 
 def parse_bulk_prices(raw: list[dict]) -> tuple[pl.DataFrame, pl.DataFrame]:
     raw_rows = [

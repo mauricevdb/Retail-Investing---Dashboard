@@ -2,6 +2,14 @@ from datetime import date
 
 import polars as pl
 
+from dashboard.ingestion.edgar_client import EdgarClient
+
+
+def fetch_company_facts(client: EdgarClient, cik: str) -> pl.DataFrame:
+    raw = client.get_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json")
+    return parse_company_facts(raw)
+
+
 _SCHEMA = {
     "cik": pl.Utf8,
     "concept": pl.Utf8,

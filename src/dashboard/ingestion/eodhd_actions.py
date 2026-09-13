@@ -2,6 +2,15 @@ from datetime import date
 
 import polars as pl
 
+from dashboard.ingestion.eodhd_client import EodhdClient
+
+
+def fetch_bulk_actions(client: EodhdClient, day: date) -> pl.DataFrame:
+    raw = client.get_json(
+        f"https://eodhd.com/api/eod-bulk-last-day/US?type=splits&date={day.isoformat()}"
+    )
+    return parse_corporate_actions(raw)
+
 
 def parse_corporate_actions(raw: list[dict]) -> pl.DataFrame:
     rows = []
