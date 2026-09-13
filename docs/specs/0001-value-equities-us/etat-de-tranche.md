@@ -63,14 +63,22 @@ théorique que réel à l'échelle où la tranche opère.
 
 ## Ce que la tranche n'a jamais exercé
 
-- **Aucune exécution contre des données réelles.** Les 61 tests de la
-  suite tournent sur des fixtures synthétiques de 1 à 13 lignes. Ni EDGAR
-  ni EODHD n'ont jamais été interrogés par ce code, y compris en lecture
-  seule.
-- **Aucun test de contact.** Le marqueur pytest `contact` (invariant 9)
-  est déclaré et exclu par défaut, mais aucun test portant ce marqueur
-  n'existe : `ingestion.edgar_client` et `ingestion.eodhd_client` n'ont
-  jamais été appelés hors d'un transport factice.
+- **`pipeline.ingest.run_from_network` (T75) n'a jamais été exécuté contre
+  le vrai réseau.** Le point d'entrée qui compose les cinq `fetch_*` et
+  alimente `pipeline.daily_run` existe et est testé, mais uniquement avec
+  des transports factices, par construction (invariant 9) : aucune suite
+  automatisée ne l'exécute contre EDGAR/EODHD réels, et personne ne l'a
+  encore fait manuellement. Ce que le vrai réseau a effectivement validé,
+  ce sont les contrats individuels des clients et des cinq `fetch_*`
+  (quatre tests de contact, T19-T20), pas leur composition de bout en
+  bout ni le comportement à plusieurs titres.
+- **4 tests de contact existent** (`test_edgar_contact_company_tickers_reachable`,
+  `test_eodhd_contact_bulk_endpoint_reachable`,
+  `test_eodhd_bulk_prices_honors_requested_date`,
+  `test_eodhd_bulk_actions_type_splits_returns_known_split`), marqués
+  `contact` et exclus par défaut (invariant 9), exécutés manuellement avec
+  succès contre les vrais services. Ça ne couvre qu'un seul CIK/ticker
+  (Alpha/AAAA) et une poignée de dates ; aucune volumétrie réaliste.
 - **Aucun test à l'échelle du bassin réel.** `calc.universe` cible un
   univers de l'ordre de 900 à 1100 titres ; toutes les fixtures en
   comptent au plus une dizaine. Le coût de `pipeline.daily_run._derive_shares_pit`

@@ -1261,6 +1261,41 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   `docs/specs/0001-value-equities-us/etat-de-tranche.md`, pas laissé comme
   code non appelé se faisant passer pour un acquis.
 
+### T75 — Point d'entrée d'ingestion réelle
+- **Objectif** : jusqu'ici, rien dans le dépôt n'appelle les cinq fonctions
+  `fetch_*` (T14-T18) depuis un point d'entrée de production — `etat-de-tranche.md`
+  le documentait comme n'ayant jamais été exercé. `pipeline.ingest.run_from_network`
+  compose les cinq appels réseau (client EDGAR pour les tickers, les dépôts
+  et les faits ; client EODHD pour les prix bulk et les opérations sur
+  titres) et alimente `pipeline.daily_run.run_daily` avec les données
+  obtenues, au lieu de les recevoir de son appelant. Paramétrable par une
+  liste de CIK ou de tickers (mutuellement exclusives), pour tourner sur
+  quelques titres avant de viser le bassin complet. `daily_run` garde sa
+  signature actuelle — `run_from_network` compose, ne la réécrit pas. Les
+  opérations sur titres et l'historique des dépôts, récupérés pour de vrai,
+  restent non consommés par `daily_run` (signature figée) : signalé, pas
+  masqué. Limite héritée de `daily_run`, non nouvelle : `end` (date de fin
+  d'exercice) reste un paramètre unique partagé par tous les titres du run
+  — ne convient qu'à un ensemble de titres partageant le même exercice
+  fiscal, comme `daily_run` le suppose déjà.
+- **Fichiers** : `src/dashboard/pipeline/ingest.py`,
+  `tests/pipeline/test_ingest_from_network.py`.
+- **Test** : `test_run_from_network_ingests_and_feeds_daily_run` — clients
+  EDGAR/EODHD à transport factice routé par URL (fixtures Alpha + AAAA),
+  un seul CIK sélectionné ; vérifie que `universe_membership` et
+  `screen_results` sont écrits avec les valeurs attendues (EV/EBIT dérivé
+  des vraies actions en circulation, pas d'une valeur fournie). Deux tests
+  complémentaires : `test_run_from_network_propagates_source_failure` (un
+  transport qui échoue fait remonter l'erreur du client, rien n'est écrit)
+  et `test_run_from_network_rejects_ambiguous_or_unknown_selection` (ni
+  `ciks` ni `tickers`, ou les deux, ou un CIK absent de la réponse
+  `company_tickers` : erreur explicite, jamais un sous-ensemble silencieux).
+- **Critères de la spec couverts** : aucun directement — assemble des
+  modules déjà couverts individuellement (T14-T18, T63), sur le principe
+  de T7/T63.
+- **Terminée quand** : les trois tests passent, aucun appel réseau réel.
+- **Dépend de** : T14, T15, T16, T17, T18, T63.
+
 ## Vérification de couverture
 
 ### Critères de la spec
@@ -1402,4 +1437,10 @@ des garde-fous restés en arbitrage et de ce que la tranche n'a jamais
 exercé est consigné dans `etat-de-tranche.md`, pas dans une nouvelle série
 de tâches.
 
-Total : 74 tâches.
+T75 referme la boucle ouverte par la découverte T14-T20 : les fonctions
+`fetch_*` existaient et fonctionnaient, mais rien ne les appelait en
+production. C'est le premier assemblage de bout en bout qui parte de
+données réseau réelles (via des transports factices en test) plutôt que
+de DataFrames déjà résolus fournis par l'appelant.
+
+Total : 75 tâches.
