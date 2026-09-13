@@ -21,7 +21,11 @@ def parse_filings(raw: dict) -> pl.DataFrame:
             "accn": accn,
             "form": form,
             "filed": date.fromisoformat(filed),
-            "period_of_report": date.fromisoformat(report_date),
+            # Vide pour un dépôt sans période de rapport (8-K, proxy,
+            # déclaration d'initié...) -- l'API SEC renvoie une chaîne
+            # vide, jamais un champ absent. Reste explicitement absent,
+            # jamais une date devinée (invariant 7).
+            "period_of_report": date.fromisoformat(report_date) if report_date else None,
         }
         for accn, form, filed, report_date in zip(
             recent["accessionNumber"],

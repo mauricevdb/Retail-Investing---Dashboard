@@ -51,6 +51,15 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   critère 9, prouvé en T61).
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
+- **Statut** : bug réel trouvé en ingestion manuelle (T75, premier essai
+  contre le vrai EDGAR, hors suite automatisée) : `reportDate` est une
+  chaîne vide pour tout dépôt sans période de rapport (8-K, proxy,
+  déclaration d'initié...) — l'API SEC renvoie `''`, jamais un champ
+  absent, ce que la fixture synthétique T1 ne reproduisait pas.
+  `parse_filings` plantait (`ValueError: Invalid isoformat string: ''`)
+  sur pratiquement tout émetteur réel. Corrigé : `period_of_report` reste
+  explicitement `None` pour ce dépôt, jamais une date devinée (invariant
+  7). Test étendu avec un cas mixte (10-K daté, 8-K sans période).
 
 ### T4 — Parser le code SIC et la nature de l'émetteur
 - **Objectif** : produire `sic_codes.parquet` (sic, sic_description,
