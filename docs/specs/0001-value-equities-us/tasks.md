@@ -1573,6 +1573,21 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   une vraie sortie d'`ingest_run.py` fait fonctionner la vue détail sans
   exception — vérification manuelle, même statut que T77.
 - **Dépend de** : T75, T77.
+- **Statut** : faite et testée (`test_fundamentals_history_append_only_no_dedup`,
+  `test_run_from_network_ingests_and_feeds_daily_run` étendu). Point d'appel
+  tranché en faveur de `pipeline.daily_run` (déjà seul responsable de
+  `append_screen_history`/`append_universe_history`), avec un nouveau
+  paramètre optionnel `fundamentals_history_path` sur `run_daily` et
+  `run_from_network`, par défaut `None` : aucun test existant n'a dû être
+  modifié pour s'adapter à cette tâche, seule l'écriture réelle (T75) et le
+  nouveau test l'activent. Vérification manuelle effectuée : relancé
+  `ingest_run.py` sur WMS avec `fundamentals_history_path` renseigné —
+  `fundamentals_raw.parquet` contient 21 564 faits réels ; relancé
+  `app/main.py` (T77) pointé dessus, la vue détail s'exécute sans exception
+  (`ev_ebit`/`fcf_yield`/`net_debt_ebitda` en `non_traceable` faute d'avoir
+  réglé `end` sur le bon exercice dans l'interface, `roic` en `ok` avec le
+  repli du taux d'imposition tracé) — le plantage constaté à la fin de T77
+  a disparu.
 
 ## Vérification de couverture
 
@@ -1745,11 +1760,12 @@ d'`ingest_run.py` (WMS) : l'écran de synthèse fonctionne, la vue détail
 plante faute de `fundamentals_raw.parquet` jamais persisté par le pipeline
 réel — écart assigné à T78, pas corrigé dans T77 (hors périmètre déclaré).
 
-T78 n'est pas encore implémentée — rédigée pour validation avant tout
-code. Découverte en vérifiant T77 en conditions réelles, pas par
+T78 est faite. Découverte en vérifiant T77 en conditions réelles, pas par
 `/spec-verify` : le schéma de `fundamentals_raw.parquet` que plan.md
-déclare n'a jamais été relié à un point d'écriture réel, dans la même
+déclare n'avait jamais été relié à un point d'écriture réel, dans la même
 famille que le trou T14-T18 (fonctions déclarées « couvertes » sans jamais
-avoir été appelées).
+avoir été appelées). Persistance ajoutée dans `pipeline.daily_run`, par un
+paramètre optionnel (`fundamentals_history_path`, défaut `None`) : aucun
+test ni appelant existant n'a eu besoin d'être modifié.
 
-Total : 78 tâches (T78 rédigée, non implémentée).
+Total : 78 tâches.
