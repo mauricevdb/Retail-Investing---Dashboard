@@ -1589,6 +1589,42 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   repli du taux d'imposition tracé) — le plantage constaté à la fin de T77
   a disparu.
 
+### T79 — `roic` ne doit jamais afficher « ok » sans composante issue d'un fait
+- **Objectif** : trouvé par `/spec-verify` (cinquième passage), démontré en
+  direct sur de vraies données réelles (WMS, mauvais `end` interrogé depuis
+  `app/main.py`) et sur des faits synthétiques totalement vides :
+  `app.detail_view.trace_indicator` déclare `"ok"` dès que sa liste
+  `components` n'est pas vide. Pour `roic`, un des cinq traceurs
+  (`calc.nopat.trace_tax_rate`, T69) renvoie **toujours** au moins un
+  élément — y compris son repli par défaut, quand aucune donnée fiscale
+  n'existe. Conséquence : si EBIT, dette, capitaux propres et trésorerie
+  sont **tous** introuvables, `components` contient quand même la seule
+  note de repli fiscal, et le statut reste `"ok"` au lieu de
+  `"non_traceable"` — la distinction que T65 a justement introduite pour
+  ce cas devient inatteignable pour cet indicateur précis. Un commentaire
+  de `test_non_calculable_and_non_traceable_are_distinct_statuses`
+  (« ev_ebit, et non roic, depuis T69 ») avait déjà remarqué le fait sans
+  le traiter comme un défaut à corriger.
+- **Fichiers** : `src/dashboard/app/detail_view.py`,
+  `tests/app/test_detail_view_traceability.py` (étendu).
+- **Test** : nouveau cas dans
+  `test_non_calculable_and_non_traceable_are_distinct_statuses` (ou test
+  dédié) : faits ne portant aucune des composantes de `roic` (ni EBIT, ni
+  dette, ni capitaux propres, ni trésorerie, ni donnée fiscale), `value`
+  non `None` (comme le ferait un appelant à partir d'une valeur persistée
+  à un autre `end`, cf. T77) — le statut doit être `"non_traceable"`,
+  jamais `"ok"`. Le composant de repli du taux par défaut doit rester
+  présent dans `components` (ne pas régresser T69 : le paramètre reste
+  exposé même quand le statut global est `"non_traceable"`).
+- **Critères de la spec couverts** : #9, #27 (la distinction non
+  calculable / non traçable, déjà couverte par #6/#9/#27 via T65, doit
+  tenir pour chaque indicateur, pas seulement pour ceux dont aucun traceur
+  ne divulgue un paramètre de modélisation).
+- **Terminée quand** : le test passe, et `test_every_displayed_number_traceable`/
+  `test_default_tax_rate_fallback_disclosed_in_roic_trace` (T69) restent
+  au vert sans modification.
+- **Dépend de** : T65, T69.
+
 ## Vérification de couverture
 
 ### Critères de la spec
