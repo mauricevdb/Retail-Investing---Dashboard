@@ -1804,4 +1804,47 @@ avoir été appelées). Persistance ajoutée dans `pipeline.daily_run`, par un
 paramètre optionnel (`fundamentals_history_path`, défaut `None`) : aucun
 test ni appelant existant n'a eu besoin d'être modifié.
 
-Total : 78 tâches.
+T79 est faite. Trouvée par `/spec-verify` (cinquième passage) : `roic`
+pouvait afficher `"ok"` sans aucune composante issue d'un fait déposé,
+parce qu'un de ses cinq traceurs (le repli du taux d'imposition, T69)
+divulgue toujours quelque chose. `trace_indicator` distingue désormais les
+composantes de fait (clé `concept`) des composantes de paramètre (clé
+`parameter`) pour décider le statut ; le paramètre reste divulgué dans les
+deux cas, T69 non régressé. Amendement au décompte total ci-dessous :
+omis par erreur lors de l'ajout de cette tâche, corrigé ici.
+
+### T80 — Contraindre `end` aux exercices réellement connus du titre sélectionné
+- **Objectif** : signalé en fin d'audit `/spec-verify` (cinquième passage),
+  non corrigé par T79 (qui traite le symptôme sur `trace_indicator`, pas la
+  cause) : dans `src/dashboard/app/main.py` (T77), `end` est un
+  `st.sidebar.date_input` en accès libre, sans aucun lien vérifié avec
+  l'`end` qui a réellement servi à calculer la valeur affichée dans
+  `screen_results.parquet`. Rien n'empêche l'utilisateur d'interroger la
+  trace d'un titre à un exercice pour lequel ce titre n'a jamais rien
+  déposé — la trace obtenue est alors correctement `"non_traceable"`
+  depuis T79, mais ça reste une réponse silencieusement dénuée de sens
+  plutôt qu'un signal explicite que l'exercice choisi n'existe pas pour ce
+  titre (invariant 7 : un paramètre de modélisation doit rester exposable
+  et cohérent, pas seulement affiché). Cette tâche remplace le sélecteur
+  libre par un choix contraint : les options d'`end` proposées pour un
+  titre sélectionné sont dérivées des `end` réellement présents dans
+  `fundamentals_raw.parquet` pour son `cik`, jamais une date arbitraire.
+  Implique de sélectionner le titre **avant** de choisir `end` dans l'ordre
+  des contrôles (actuellement l'inverse), puisque les options dépendent des
+  faits du titre choisi.
+- **Fichiers** : `src/dashboard/app/main.py`,
+  `tests/app/test_app_smoke.py` (étendu).
+- **Test** : fixture `fundamentals_raw.parquet` portant deux `end`
+  distincts pour le même CIK (par exemple deux exercices annuels
+  successifs) ; via `AppTest`, vérifier que le contrôle `end` n'propose que
+  ces deux valeurs (jamais une date hors de cet ensemble), qu'il se
+  répercute correctement sur la trace affichée pour chacune, et qu'aucune
+  valeur libre ne peut être saisie.
+- **Critères de la spec couverts** : aucun nouveau directement — renforce
+  l'invariant 7 autour du paramètre `end` introduit par T77, dans la
+  continuité de T79 (qui couvrait #9/#27 pour le même paramètre).
+- **Terminée quand** : le test passe, et `test_app_smoke_screen_and_detail`
+  (T77) reste au vert sans modification de son propre scénario.
+- **Dépend de** : T77, T79.
+
+Total : 80 tâches (T80 rédigée, non implémentée).
