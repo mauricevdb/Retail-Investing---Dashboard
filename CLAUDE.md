@@ -32,7 +32,7 @@ uv sync                      # installer
 uv run pytest                # tous les tests (hors tests de contact)
 uv run pytest -m contact     # tests de contact (réseau réel, fournisseurs)
 uv run ruff check --fix .    # lint
-uv run streamlit run src/dashboard/app.py
+uv run streamlit run src/dashboard/app/main.py
 ```
 
 ## Invariants métier — non négociables

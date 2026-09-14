@@ -1420,6 +1420,160 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   jamais confirmée). Consigné comme dette assumée dans
   `etat-de-tranche.md` plutôt que laissé en note de fin de tâche.
 
+### T77 — Assembler `src/dashboard/app/main.py` (point d'entrée Streamlit)
+- **Objectif** : le point d'entrée Streamlit référencé par CLAUDE.md
+  n'existe pas — rien de cette tranche n'a jamais été rendu dans un
+  navigateur. **Point tranché avant implémentation (collision de noms)** :
+  CLAUDE.md dictait à l'origine `uv run streamlit run src/dashboard/app.py`
+  (un fichier), alors que plan.md nomme les modules `app.screen_view` et
+  `app.detail_view` — ce qui suppose le paquet `src/dashboard/app/`, déjà
+  existant. Vérifié empiriquement : créer un fichier `app.py` au même
+  niveau que ce paquet rend `dashboard.app` inimportable comme paquet
+  (`ModuleNotFoundError: 'dashboard.app' is not a package`), cassant
+  `pipeline.daily_run` et tous les tests de T61/T62/T64-T66/T69. Résolu en
+  plaçant le point d'entrée **dans** le paquet plutôt qu'à côté :
+  `src/dashboard/app/main.py`, aucun import existant ne change. CLAUDE.md
+  amendé en conséquence (`uv run streamlit run src/dashboard/app/main.py`),
+  diff montré et validé avant application. `app.screen_view.render_screen_text` (T62) et
+  `app.detail_view.trace_indicator` (T61, T64-T66, T69) sont des fonctions
+  pures déjà testées, mais reçoivent toujours leurs données en paramètre
+  depuis des fixtures ou des DataFrames déjà résolus, jamais depuis un
+  fichier réellement persisté par `pipeline.daily_run`/`pipeline.ingest`,
+  lu par le mécanisme que plan.md promet : « Présentation (Streamlit,
+  lecture seule via DuckDB) ». DuckDB est une dépendance installée
+  (`pyproject.toml`) mais n'est appelé nulle part dans le dépôt — cette
+  tâche en est le premier usage réel. Deux composantes :
+  1. `storage.duckdb_reader.read_latest_screen(path)` — interroge
+     `screen_results.parquet` via DuckDB (`SELECT ... WHERE date = (SELECT
+     max(date) ...)`) et renvoie les lignes du jour de traitement le plus
+     récent en DataFrame Polars, en lecture seule — jamais une écriture,
+     jamais une valeur agrégée ou devinée si le fichier est absent ou vide
+     (invariant 7 : fichier absent ou vide propage une erreur explicite,
+     jamais un écran vide sans explication).
+  2. `src/dashboard/app/main.py` — appelle cette lecture, puis délègue tout le
+     rendu à `app.screen_view.render_screen_text` et, pour un titre
+     sélectionné, à `app.detail_view.trace_indicator`, sans dupliquer leur
+     logique (même principe de composition que T63 et T75 : assembler des
+     briques déjà testées, pas en réécrire une nouvelle version).
+- **Point tranché avant implémentation** : `trace_indicator` a besoin de
+  `end` (fin d'exercice), qu'aucun fichier persisté ne porte —
+  `screen_results.parquet` ne le contient pas (vérifié dans le schéma que
+  plan.md déclare lui-même : `date, cik, ticker, ev_ebit_ttm, ...`, aucune
+  colonne `end`), cohérent avec la limite déjà documentée depuis T75
+  (`end` est un paramètre du run, pas une donnée par titre). `end` devient
+  donc un paramètre de configuration d'`app.py` (invariant 7 amendé : un
+  paramètre de modélisation est autorisé s'il est déclaré et affiché
+  partout où il influence un chiffre) — saisi via un contrôle Streamlit
+  dans la barre latérale, jamais codé en dur, et affiché explicitement
+  au-dessus de l'écran de détail (« Exercice de référence : {end} »).
+  `t`, lui, n'a pas ce problème : chaque ligne de `screen_results.parquet`
+  porte déjà sa propre colonne `date`, c'est le `t` du run qui l'a produite.
+  Une seconde fonction de lecture est donc nécessaire :
+  `storage.duckdb_reader.read_facts_for_cik(path, cik)`, qui interroge
+  `fundamentals_raw.parquet` via DuckDB pour un seul `cik`, en lecture
+  seule — les faits bruts dont `trace_indicator` a besoin pour reconstruire
+  la chaîne de repli.
+- **Explicitement hors périmètre** : tout style, mise en page ou choix
+  ergonomique (hors-tests de spec.md : « l'ergonomie et la lisibilité de
+  l'interface ») ; la persistance elle-même (déjà couverte par T54, T55,
+  T68) ; le calcul quotidien lui-même (T57-T63, T75) — `app.py` ne fait que
+  lire ce qui a déjà été écrit par un traitement antérieur, jamais ne le
+  recalcule.
+- **Fichiers** : `src/dashboard/app/main.py`,
+  `src/dashboard/storage/duckdb_reader.py`,
+  `tests/storage/test_duckdb_reader.py`, `tests/app/test_app_smoke.py`.
+- **Test** :
+  - `test_duckdb_reader_reads_latest_day_read_only` — sur un
+    `screen_results.parquet` de fixture portant plusieurs jours, la lecture
+    renvoie exactement les lignes du jour le plus récent ; le fichier sur
+    disque est identique avant et après (aucune écriture) ; sur un chemin
+    inexistant ou un fichier vide, une exception explicite est levée,
+    jamais un DataFrame vide silencieux.
+  - `test_duckdb_reader_reads_facts_for_one_cik` — sur un
+    `fundamentals_raw.parquet` de fixture portant plusieurs émetteurs, la
+    lecture filtrée à un `cik` renvoie exactement ses faits, aucun fait
+    d'un autre émetteur ; lecture seule, mêmes garanties que ci-dessus.
+  - `test_app_smoke_screen_and_detail` — utilise
+    `streamlit.testing.v1.AppTest.from_file("src/dashboard/app/main.py")` sur un
+    répertoire de sortie de fixture (chemin injecté, jamais codé en dur) :
+    l'application démarre sans exception (`at.exception` vide) ; le
+    compteur de titres retenus est affiché, y compris sur une fixture à
+    zéro titre retenu (critère 15) ; aucune occurrence de « S&P » n'apparaît
+    dans le texte rendu (critère 26) ; l'exercice de référence configuré
+    (`end`) est affiché explicitement (invariant 7) ; sélectionner un titre
+    de la fixture fait apparaître sa trace (au moins un composant portant
+    `end`, `filed` et `accn` pour un indicateur issu d'un fait déposé —
+    critère 9).
+- **Critères de la spec couverts** : aucun nouveau directement — comme T63
+  et T75, elle referme la boucle de présentation pour des critères déjà
+  couverts individuellement au niveau fonction (#9, #15, #16, #26, #27),
+  jusqu'ici jamais rendus dans un navigateur ni lus depuis un stockage
+  réellement persisté plutôt que depuis une fixture passée en paramètre.
+- **Terminée quand** : les deux tests passent, et
+  `uv run streamlit run src/dashboard/app/main.py`, pointé sur une sortie réelle
+  de `ingest_run.py`, affiche effectivement un écran dans un navigateur —
+  vérification manuelle unique, non automatisable par nature (hors-tests
+  spec.md, « l'ergonomie et la lisibilité de l'interface »), au même titre
+  que les vérifications manuelles de T75/T76 contre le vrai réseau.
+- **Dépend de** : T54, T55, T61, T62, T64, T65, T66, T68, T69.
+- **Statut** : les deux composantes sont faites et testées (4 tests
+  `storage.duckdb_reader`, 1 test de fumée `AppTest` couvrant écran de
+  synthèse et vue détail). Vérification manuelle réelle effectuée contre la
+  vraie sortie de `ingest_run.py` (WMS, cf. `etat-de-tranche.md`) :
+  **l'écran de synthèse fonctionne** (« 1 titre(s) retenu(s) aujourd'hui »,
+  aucune mention S&P, exercice de référence configurable et affiché), mais
+  **la vue détail plante systématiquement en usage réel**
+  (`ScreenResultsUnavailableError: fichier absent :
+  ingestion_output\fundamentals_raw.parquet`). Cause confirmée par
+  recherche exhaustive : `fundamentals_raw.parquet`, dont plan.md déclare
+  le schéma complet, n'est écrit par aucun code de production —
+  `pipeline.ingest.run_from_network` et `pipeline.daily_run` gardent
+  `facts` en mémoire pour la durée du run puis le jettent, jamais persisté.
+  Invisible jusqu'ici : aucun test (y compris celui de cette tâche) n'a de
+  raison d'exercer un fichier réel — chacun fournit sa propre fixture au
+  chemin attendu. Hors périmètre de T77 (« la persistance elle-même...
+  hors périmètre ») : consigné et assigné à T78 plutôt que corrigé ici.
+
+### T78 — Persister `fundamentals_raw.parquet` depuis l'ingestion réelle
+- **Objectif** : découvert en vérifiant T77 contre la vraie sortie de
+  `ingest_run.py` : `fundamentals_raw.parquet`, dont plan.md déclare le
+  schéma complet (`cik, concept, taxonomy, unit, end, start, filed, accn,
+  value, fiscal_period, fiscal_year`, clé `(cik, concept, end, filed,
+  accn)`, ajout seul), n'est écrit par aucun code de production.
+  `pipeline.ingest.run_from_network` récupère `facts` via
+  `fetch_company_facts` et le transmet à `pipeline.daily_run.run_daily`,
+  qui l'utilise en mémoire (`_derive_shares_pit`, `indicator_status`) sans
+  jamais l'écrire sur disque. Conséquence concrète, vérifiée en direct : la
+  vue détail d'`app.py` (T77) est fonctionnelle contre toute fixture de
+  test, mais plante systématiquement contre une vraie sortie d'ingestion
+  (`ScreenResultsUnavailableError: fichier absent`). Cette tâche ajoute la
+  persistance, en ajout seul comme `screen_results.parquet`/
+  `universe_membership.parquet`, sans dédupliquer les retraitements
+  (invariant 2 : plusieurs lignes pour un même `(cik, concept, end)` avec
+  des `filed` différents sont attendues, cf. T6).
+- **Fichiers** : `src/dashboard/storage/fundamentals_history.py` (nouveau,
+  sur le modèle de `storage.screen_history`/`storage.universe_history`),
+  `src/dashboard/pipeline/ingest.py` ou `src/dashboard/pipeline/daily_run.py`
+  (point d'appel, à trancher pendant l'implémentation selon lequel des deux
+  a réellement accès à `facts` sans dépendre de l'autre), `tests/storage/
+  test_fundamentals_history.py`, `tests/pipeline/test_ingest_from_network.py`
+  (étendu).
+- **Test** : `test_fundamentals_history_append_only_no_dedup` — deux appels
+  successifs avec des `filed` différents pour le même `(cik, concept, end)`
+  produisent deux lignes distinctes, aucune écrasée (même garantie que T6,
+  au niveau de la persistance plutôt que du calcul). Étend
+  `test_run_from_network_ingests_and_feeds_daily_run` (T75) pour vérifier
+  que `fundamentals_raw.parquet` existe après l'appel et contient les
+  faits attendus.
+- **Critères de la spec couverts** : aucun nouveau directement — referme un
+  écart entre plan.md (schéma déclaré) et le code réel, dans la même
+  famille que T14-T18 (fonctions déclarées « couvertes » sans jamais avoir
+  été appelées).
+- **Terminée quand** : les tests passent, et relancer `app.py` (T77) contre
+  une vraie sortie d'`ingest_run.py` fait fonctionner la vue détail sans
+  exception — vérification manuelle, même statut que T77.
+- **Dépend de** : T75, T77.
+
 ## Vérification de couverture
 
 ### Critères de la spec
@@ -1574,4 +1728,28 @@ si sa dette est taguée sous un concept hors de la chaîne de repli connue —
 exactement le risque déjà nommé dans plan.md, jamais observé
 concrètement jusqu'ici.
 
-Total : 76 tâches.
+T77 est faite : elle ferme le dernier maillon jamais exercé de
+l'architecture en trois couches de plan.md (ingestion → calcul →
+présentation) et le premier usage réel de DuckDB, déclaré dans la stack de
+CLAUDE.md depuis le premier jour sans qu'aucune tâche antérieure ne l'ait
+mis en œuvre — un angle mort du contrôle de couverture, qui vérifie
+tasks.md contre plan.md, jamais contre CLAUDE.md (consigné dans
+`etat-de-tranche.md`). Comme T75, elle ne couvre aucun critère numéroté
+nouveau au sens strict de l'assemblage (référence #9, #15, #16, #26, #27
+déjà couverts par les fonctions qu'elle assemble). Une collision de noms
+entre le fichier `app.py` promis par CLAUDE.md et le paquet `app/` promis
+par plan.md a forcé un amendement mineur de CLAUDE.md avant implémentation
+(diff montré et validé) : le point d'entrée réel est
+`src/dashboard/app/main.py`. Vérifiée en direct contre la vraie sortie
+d'`ingest_run.py` (WMS) : l'écran de synthèse fonctionne, la vue détail
+plante faute de `fundamentals_raw.parquet` jamais persisté par le pipeline
+réel — écart assigné à T78, pas corrigé dans T77 (hors périmètre déclaré).
+
+T78 n'est pas encore implémentée — rédigée pour validation avant tout
+code. Découverte en vérifiant T77 en conditions réelles, pas par
+`/spec-verify` : le schéma de `fundamentals_raw.parquet` que plan.md
+déclare n'a jamais été relié à un point d'écriture réel, dans la même
+famille que le trou T14-T18 (fonctions déclarées « couvertes » sans jamais
+avoir été appelées).
+
+Total : 78 tâches (T78 rédigée, non implémentée).
