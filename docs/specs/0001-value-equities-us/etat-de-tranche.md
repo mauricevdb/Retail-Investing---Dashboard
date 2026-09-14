@@ -182,24 +182,29 @@ trouvé ou de temps, pas des cas dont l'existence serait ignorée :
   comptent au plus une dizaine. Le coût de `pipeline.daily_run._derive_shares_pit`
   (un appel Python par titre, non vectorisé) n'a jamais été mesuré à
   cette échelle.
-- **Pas d'écran.** `src/dashboard/app.py`, référencé par la commande
-  `uv run streamlit run` de CLAUDE.md, n'existe pas. Rien de cette tranche
-  n'a jamais été rendu dans un navigateur. Tâche préparée pour combler ce
-  point : T77 (`docs/specs/0001-value-equities-us/tasks.md`), pas encore
-  implémentée.
-- **DuckDB n'est utilisé nulle part.** CLAUDE.md déclare la stack
-  « Parquet + DuckDB », et plan.md précise l'architecture de présentation
-  comme « Streamlit, lecture seule via DuckDB ». Le paquet est une
-  dépendance installée (`pyproject.toml`, `uv.lock`) mais n'apparaît dans
-  aucun fichier de `src/` ni de `tests/` — jamais importé, jamais appelé.
-  Même statut que Streamlit ci-dessus, et même raison structurelle : ni
-  DuckDB ni `app.py` ne sont nommés comme modules dans la section
-  « Présentation » de plan.md (seuls `app.screen_view` et `app.detail_view`
-  le sont) — le contrôle de couverture de tasks.md vérifie tasks.md contre
-  les modules de plan.md, jamais contre la stack déclarée par CLAUDE.md, et
-  ne peut donc pas détecter ce genre d'écart par construction. T77 prévoit
-  d'introduire le premier usage réel de DuckDB (lecture des Parquet
-  persistés).
+- **Écran rendu depuis T77/T78, mais seulement vérifié à la main sur un
+  seul titre.** `src/dashboard/app/main.py` existe désormais (le point
+  d'entrée a dû être placé dans le paquet `app/`, pas à côté sous
+  `app.py`, à cause d'une collision de noms avec `app.screen_view`/
+  `app.detail_view` — CLAUDE.md amendé en conséquence). Vérifié en
+  navigateur réel contre la vraie sortie d'`ingest_run.py` (WMS) : l'écran
+  de synthèse et la vue détail s'exécutent tous deux sans exception une
+  fois `fundamentals_raw.parquet` persisté (T78). Reste non exercé : un
+  usage à l'échelle du bassin réel (~900-1100 titres), la navigation entre
+  plusieurs titres dans la même session, et tout ce que « l'ergonomie et
+  la lisibilité de l'interface » couvrirait (explicitement hors-tests de
+  spec.md).
+- **DuckDB et `fundamentals_raw.parquet` sont désormais utilisés
+  réellement (T77, T78)**, comblant l'écart qui existait entre la stack
+  déclarée par CLAUDE.md et le schéma déclaré par plan.md d'une part, et
+  le code réel de l'autre. Ce genre d'écart — un module ou un fichier
+  déclaré mais jamais relié à un point d'exécution réel — a maintenant été
+  vu quatre fois sur cette tranche (T14-T18, T71, T77, T78) : le contrôle
+  de couverture de tasks.md ne le détecte que lorsqu'un module de plan.md
+  ne trouve aucune tâche, jamais quand une tâche existe mais que sa
+  promesse de bout en bout (fichier réellement écrit, fonction réellement
+  appelée en production) n'a jamais été vérifiée contre autre chose qu'une
+  fixture.
 - **`calc.divergence` et `calc.streak` ne sont appelés par aucun code de
   production.** Testés isolément sur des séries construites pour
   l'occasion ; `pipeline.daily_run` ne les invoque jamais, faute d'un
