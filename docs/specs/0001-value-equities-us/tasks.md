@@ -1846,5 +1846,19 @@ omis par erreur lors de l'ajout de cette tâche, corrigé ici.
 - **Terminée quand** : le test passe, et `test_app_smoke_screen_and_detail`
   (T77) reste au vert sans modification de son propre scénario.
 - **Dépend de** : T77, T79.
+- **Statut** : faite et testée. Le titre est désormais sélectionné avant
+  l'exercice ; le sélecteur `end` (déplacé en `st.sidebar.selectbox`) ne
+  propose que les `end` réellement présents dans les faits du titre choisi
+  (aucun fichier n'existe si la liste est vide : message explicite, jamais
+  un sélecteur vide silencieux). Vérifié en conditions réelles contre la
+  vraie sortie WMS : 119 exercices réels proposés (au lieu d'une date
+  libre), sélectionner le bon (2016-03-31) restaure la trace complète des
+  quatre indicateurs jusqu'aux faits déposés du 10-K/A retraité.
 
-Total : 80 tâches (T80 rédigée, non implémentée).
+T80 est faite. Signalée en fin d'audit `/spec-verify` (cinquième passage) :
+`end` restait un sélecteur libre dans `app/main.py`, sans lien vérifié
+avec l'exercice qui a réellement produit la valeur affichée. Corrigée en
+dérivant les options d'`end` des faits réels du titre sélectionné plutôt
+que d'une date devinée.
+
+Total : 80 tâches.

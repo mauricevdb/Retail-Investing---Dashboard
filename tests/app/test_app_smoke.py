@@ -27,19 +27,22 @@ def _write_fixture(tmp_path: Path) -> tuple[Path, Path]:
         }
     ).write_parquet(screen_path)
 
+    # Deux exercices distincts pour le même titre (T80) : le sélecteur
+    # d'`end` doit être contraint à ces deux valeurs réellement connues,
+    # jamais une date arbitraire choisie librement.
     pl.DataFrame(
         {
-            "cik": ["9999999999"],
-            "concept": ["OperatingIncomeLoss"],
-            "taxonomy": ["us-gaap"],
-            "unit": ["USD"],
-            "end": [date(2023, 12, 31)],
-            "start": [date(2023, 1, 1)],
-            "filed": [date(2024, 2, 1)],
-            "accn": ["9999999999-24-000001"],
-            "value": [50_000_000.0],
-            "fiscal_period": ["FY"],
-            "fiscal_year": [2023],
+            "cik": ["9999999999", "9999999999"],
+            "concept": ["OperatingIncomeLoss", "OperatingIncomeLoss"],
+            "taxonomy": ["us-gaap", "us-gaap"],
+            "unit": ["USD", "USD"],
+            "end": [date(2023, 12, 31), date(2022, 12, 31)],
+            "start": [date(2023, 1, 1), date(2022, 1, 1)],
+            "filed": [date(2024, 2, 1), date(2023, 2, 1)],
+            "accn": ["9999999999-24-000001", "9999999999-23-000001"],
+            "value": [50_000_000.0, 40_000_000.0],
+            "fiscal_period": ["FY", "FY"],
+            "fiscal_year": [2023, 2022],
         }
     ).write_parquet(facts_path)
 
@@ -55,24 +58,33 @@ def test_app_smoke_screen_and_detail(tmp_path: Path, monkeypatch) -> None:
     at.run()
     assert not at.exception
 
-    # `end` est un paramètre de configuration, pas une valeur devinée depuis
-    # les données (cf. T77) : on le règle explicitement sur l'exercice
-    # réellement couvert par la fixture avant de vérifier la trace.
-    at.sidebar.date_input[0].set_value(date(2023, 12, 31)).run()
-    assert not at.exception
-
     rendered_text = " ".join(element.value for element in at.text) + " ".join(
         element.value for element in at.caption
     )
     assert "1 titre(s) retenu(s)" in rendered_text
     assert "S&P" not in rendered_text
-    # Exercice de référence (end) affiché explicitement (invariant 7) --
-    # jamais un paramètre de modélisation influençant un chiffre sans
-    # apparaître à l'écran.
-    assert "2023-12-31" in rendered_text
 
+    # Le titre est sélectionné avant l'exercice (T80) : les options d'`end`
+    # dépendent des faits du titre choisi, pas l'inverse.
     at.selectbox[0].select("TEST").run()
     assert not at.exception
+
+    # `end` est contraint aux deux exercices réellement présents dans les
+    # faits de ce titre -- jamais une date libre devinée ou arbitraire
+    # (invariant 7, cf. T80 : le décalage entre l'`end` choisi et l'`end`
+    # réel d'une valeur affichée rendait sa trace dénuée de sens).
+    end_options = at.sidebar.selectbox[0].options
+    assert set(end_options) == {"2023-12-31", "2022-12-31"}
+    assert not at.sidebar.date_input  # plus de sélecteur libre
+
+    at.sidebar.selectbox[0].select(date(2023, 12, 31)).run()
+    assert not at.exception
+
+    rendered_text = " ".join(element.value for element in at.text) + " ".join(
+        element.value for element in at.caption
+    )
+    # Exercice de référence (end) affiché explicitement (invariant 7).
+    assert "2023-12-31" in rendered_text
 
     trace_text = " ".join(element.value for element in at.code)
     # Le composant tracé de l'EBIT doit remonter jusqu'au fait déposé :
@@ -82,3 +94,11 @@ def test_app_smoke_screen_and_detail(tmp_path: Path, monkeypatch) -> None:
     assert "2023, 12, 31" in trace_text  # end -- repr(date(2023, 12, 31))
     assert "2024, 2, 1" in trace_text  # filed -- repr(date(2024, 2, 1))
     assert "9999999999-24-000001" in trace_text  # accn
+
+    # Choisir l'autre exercice connu retrace un chiffre différent, cohérent
+    # avec ce même exercice -- jamais une valeur figée sur le premier choix.
+    at.sidebar.selectbox[0].select(date(2022, 12, 31)).run()
+    assert not at.exception
+    trace_text_2022 = " ".join(element.value for element in at.code)
+    assert "2022, 12, 31" in trace_text_2022
+    assert "9999999999-23-000001" in trace_text_2022

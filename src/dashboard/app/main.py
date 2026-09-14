@@ -36,15 +36,6 @@ except ScreenResultsUnavailableError as error:
 
 t: date = screen["date"][0]
 
-# `end` (fin d'exercice) n'est porté par aucun fichier persisté -- c'est un
-# paramètre du run (pipeline.ingest.run_from_network), pas une donnée par
-# titre (cf. T77, point tranché avant implémentation). Paramètre de
-# modélisation au sens de l'invariant 7 amendé : jamais codé en dur,
-# toujours affiché là où il influence un chiffre.
-default_end = date(t.year, 12, 31)
-end: date = st.sidebar.date_input("Exercice de référence (end)", value=default_end)
-st.caption(f"Exercice de référence utilisé pour la trace détaillée : {end}")
-
 st.text(render_screen_text(retained_count=screen.height))
 st.dataframe(screen)
 
@@ -53,6 +44,22 @@ if tickers:
     selected = st.selectbox("Titre à détailler", tickers)
     selected_row = screen.filter(pl.col("ticker") == selected).row(0, named=True)
     facts = read_facts_for_cik(fundamentals_path, selected_row["cik"])
+
+    # `end` (fin d'exercice) n'est porté par aucun fichier persisté -- c'est
+    # un paramètre du run (pipeline.ingest.run_from_network), pas une donnée
+    # par titre (cf. T77). Un sélecteur libre laissait interroger un
+    # exercice sans aucun rapport avec les faits réels du titre choisi,
+    # rendant la trace obtenue dénuée de sens sans le signaler (T80,
+    # invariant 7) : les options proposées sont donc contraintes aux
+    # exercices réellement présents dans les faits de ce titre, jamais une
+    # date arbitraire.
+    available_ends = sorted(facts["end"].unique().to_list(), reverse=True)
+    if not available_ends:
+        st.error(f"Aucun exercice connu pour {selected} dans les faits persistés.")
+        st.stop()
+
+    end: date = st.sidebar.selectbox("Exercice de référence (end)", available_ends)
+    st.caption(f"Exercice de référence utilisé pour la trace détaillée : {end}")
 
     for indicator in _INDICATORS:
         result = trace_indicator(
