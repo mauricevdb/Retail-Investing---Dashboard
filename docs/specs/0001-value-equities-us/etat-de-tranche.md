@@ -50,6 +50,19 @@ théorique que réel à l'échelle où la tranche opère.
 - **Une dizaine de bridges de repli pour six indicateurs** — surface
   d'erreur de correspondance de tags plus large qu'un calcul à source
   unique ; chaque bridge est testé isolément et trace le tag utilisé.
+- **Ford reste non calculable pour la dette malgré T76.** Son bilan réel
+  tague la dette sous `us-gaap:DebtAndCapitalLeaseObligations`, ajoutée en
+  repli de dernier recours dans `debt_bridge` (T76, vérifié par test). Mais
+  la donnée `companyfacts` de Ford pour ce concept s'arrête réellement en
+  2020 dans l'API SEC, alors que le dépôt le plus récent l'utilise bien
+  (vérifié en inspectant le fichier de rendu de la SEC elle-même,
+  `R5.htm`) : ce n'est pas un défaut du code, la donnée récente n'est
+  simplement pas exposée par cette API pour cet émetteur — hypothèse non
+  confirmée d'une qualification dimensionnelle par segment
+  (Ford Credit / reste du groupe) que la vue plate de `companyfacts`
+  n'expose pas. D'autres émetteurs à filiale de financement captive
+  (constructeurs automobiles, équipementiers) pourraient présenter la même
+  lacune.
 
 ## Garde-fous en arbitrage (jamais assignés à une tâche)
 
@@ -63,15 +76,20 @@ théorique que réel à l'échelle où la tranche opère.
 
 ## Ce que la tranche n'a jamais exercé
 
-- **`pipeline.ingest.run_from_network` (T75) n'a jamais été exécuté contre
-  le vrai réseau.** Le point d'entrée qui compose les cinq `fetch_*` et
-  alimente `pipeline.daily_run` existe et est testé, mais uniquement avec
-  des transports factices, par construction (invariant 9) : aucune suite
-  automatisée ne l'exécute contre EDGAR/EODHD réels, et personne ne l'a
-  encore fait manuellement. Ce que le vrai réseau a effectivement validé,
-  ce sont les contrats individuels des clients et des cinq `fetch_*`
-  (quatre tests de contact, T19-T20), pas leur composition de bout en
-  bout ni le comportement à plusieurs titres.
+- **`pipeline.ingest.run_from_network` (T75) n'est toujours exécuté contre
+  le vrai réseau que manuellement, jamais par la suite automatisée**
+  (invariant 9 : le vrai réseau reste réservé aux tests de contact et à
+  l'exécution manuelle). Depuis T75, il a été lancé à la main sur plusieurs
+  titres réels aux caractéristiques volontairement variées : Caterpillar
+  (bilan complet), JPMorgan Chase (exclusion SIC finance), Prospect Capital
+  (fonds réglementé, SIC vide), BP (émetteur IFRS pur), Apple (exercice
+  fiscal non calendaire), Alphabet (double classe d'actions). Trois bugs
+  réels trouvés et corrigés en chemin (`entity_type`, `rank()` sur
+  indicateur non calculable, colonne `date` manquante avant l'écriture
+  dans `universe_history`), plus un quatrième sur JPMorgan (inférence de
+  schéma Polars sur un historique de dépôts volumineux). Ça reste un
+  usage manuel, ponctuel, sur un titre à la fois — jamais plusieurs titres
+  dans le même run, jamais à l'échelle du bassin réel.
 - **4 tests de contact existent** (`test_edgar_contact_company_tickers_reachable`,
   `test_eodhd_contact_bulk_endpoint_reachable`,
   `test_eodhd_bulk_prices_honors_requested_date`,

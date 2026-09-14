@@ -60,6 +60,18 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   sur pratiquement tout émetteur réel. Corrigé : `period_of_report` reste
   explicitement `None` pour ce dépôt, jamais une date devinée (invariant
   7). Test étendu avec un cas mixte (10-K daté, 8-K sans période).
+- **Deuxième bug réel trouvé en ingestion manuelle** (T75, test sur
+  JPMorgan Chase, choisie pour son volume de dépôts) :
+  `pl.DataFrame(rows)` n'infère le type d'une colonne que sur un
+  échantillon limité de lignes (100 par défaut). Un émetteur qui dépose
+  beaucoup (8-K, Form 4...) a souvent plus de 100 dépôts sans période de
+  rapport avant le premier dépôt périodique dans l'historique « recent » —
+  Polars échoue alors en rencontrant la première vraie date plus loin
+  (`ComputeError: could not append value ... to the builder`), invisible
+  sur la fixture synthétique T1 (2 dépôts seulement). Corrigé : schéma de
+  colonnes déclaré explicitement plutôt qu'inféré. Nouveau test :
+  `test_edgar_submissions_filings_beyond_schema_inference_sample` (150
+  dépôts, dont 148 sans période avant les deux dépôts périodiques).
 
 ### T4 — Parser le code SIC et la nature de l'émetteur
 - **Objectif** : produire `sic_codes.parquet` (sic, sic_description,
@@ -1360,6 +1372,54 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Terminée quand** : les trois tests passent, aucun appel réseau réel.
 - **Dépend de** : T14, T15, T16, T17, T18, T63.
 
+### T76 — Repli sur un total de dette combiné (`DebtAndCapitalLeaseObligations`)
+- **Objectif** : découvert en testant Ford (T75, profil « tag de dette hors
+  chaîne de repli connue ») : `debt_bridge.resolve()` renvoie `(None,
+  None)` à chaque date récente vérifiée, alors que Ford porte une dette
+  réelle très significative. Le vrai bilan de Ford (dernier 10-Q,
+  vérifié via le fichier R5.htm rendu par la SEC) tague sa dette sous
+  `us-gaap:DebtAndCapitalLeaseObligations` (49 319 millions $ au dernier
+  trimestre), un tag que `debt_bridge` ne connaît pas. Particularité
+  importante : ce tag représente un **total combiné** court terme + long
+  terme (« Amount of short-term and long-term debt and lease obligation »),
+  pas une composante « long terme » isolée — il ne doit donc pas rejoindre
+  la chaîne de repli de `_resolve_long_term` (ce qui risquerait de compter
+  deux fois la portion courante si elle se résolvait par ailleurs), mais
+  servir de repli de dernier recours pour `resolve()` dans son ensemble,
+  utilisé seulement si les trois composantes (long terme, courante,
+  emprunts court terme) ne renvoient rien du tout.
+- **Avertissement à vérifier pendant l'implémentation** : la donnée
+  `companyfacts` de Ford pour ce concept s'arrête en 2020 dans l'API SEC
+  malgré sa présence confirmée dans le dépôt réel le plus récent — cause
+  non identifiée avec certitude (possible qualification dimensionnelle
+  par segment, ou latence de synchronisation côté SEC). Le correctif peut
+  donc ne pas suffire à rendre Ford calculable dans l'immédiat : à
+  vérifier empiriquement après implémentation, et à signaler explicitement
+  si le cas persiste (jamais en note de fin de tâche, cf. règle « Fin de
+  tâche » du skill spec-build).
+- **Fichiers** : `src/dashboard/calc/debt_bridge.py`,
+  `tests/calc/test_debt_bridge.py` (étendu).
+- **Test** : un émetteur dont les trois composantes existantes sont
+  absentes mais qui porte `DebtAndCapitalLeaseObligations` doit résoudre
+  sa dette à cette valeur ; un émetteur dont au moins une composante
+  existante se résout ne doit jamais additionner `DebtAndCapitalLeaseObligations`
+  par-dessus (non-double-comptage).
+- **Critères de la spec couverts** : aucun directement (prérequis du
+  critère 11, renforce T29).
+- **Terminée quand** : le test passe.
+- **Dépend de** : T29.
+- **Statut** : le correctif est implémenté et testé (`debt_bridge.resolve`
+  et `trace` retombent sur `DebtAndCapitalLeaseObligations` sans jamais le
+  double-compter), mais **ne rend pas Ford calculable**, vérifié après
+  implémentation : `debt_bridge.resolve()` renvoie toujours `(None, None)`
+  pour Ford à `2025-12-31`, `2026-03-31` et `2026-06-30`. Cause confirmée :
+  la donnée `companyfacts` de Ford pour `DebtAndCapitalLeaseObligations`
+  s'arrête réellement en 2020 dans l'API SEC — ce n'est pas un défaut du
+  code, la donnée récente n'est simplement pas exposée par cette API pour
+  cet émetteur (hypothèse : qualification dimensionnelle par segment,
+  jamais confirmée). Consigné comme dette assumée dans
+  `etat-de-tranche.md` plutôt que laissé en note de fin de tâche.
+
 ## Vérification de couverture
 
 ### Critères de la spec
@@ -1507,4 +1567,11 @@ production. C'est le premier assemblage de bout en bout qui parte de
 données réseau réelles (via des transports factices en test) plutôt que
 de DataFrames déjà résolus fournis par l'appelant.
 
-Total : 75 tâches.
+T76 est une tâche corrective issue de tests manuels sur des titres réels
+aux caractéristiques volontairement variées (T75, méthode par profils) :
+Ford a révélé qu'un émetteur au bilan bien réel peut rester non calculable
+si sa dette est taguée sous un concept hors de la chaîne de repli connue —
+exactement le risque déjà nommé dans plan.md, jamais observé
+concrètement jusqu'ici.
+
+Total : 76 tâches.
