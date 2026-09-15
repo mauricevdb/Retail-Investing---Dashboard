@@ -2013,5 +2013,14 @@ bibliothèque.
 - **Terminée quand** : les trois tests passent (le test de contact
   manuellement, `uv run pytest -m contact`).
 - **Dépend de** : T11, T13.
+- **Statut** : faite. Les trois tests passent, y compris
+  `test_edgar_frames_contact_reachable` contre le vrai
+  `data.sec.gov` (période `CY2024Q1I`, forme de la réponse vérifiée,
+  aucune valeur précise). Suite par défaut inchangée (86 passed, 5
+  deselected), suite de contact étendue (5 passed, dont le nouveau test).
 
-Total : 83 tâches (T83 rédigée, non implémentée).
+T83 est faite. Premier maillon construit et vérifié contre le vrai
+service ; le classement par capitalisation approchée et son câblage dans
+`pipeline.ingest` restent à spécifier séparément.
+
+Total : 83 tâches.

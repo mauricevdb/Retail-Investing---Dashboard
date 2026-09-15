@@ -1,0 +1,29 @@
+{
+  "taxonomy": "dei",
+  "tag": "EntityCommonStockSharesOutstanding",
+  "ccp": "CY2024Q1I",
+  "uom": "shares",
+  "label": "Entity Common Stock, Shares Outstanding",
+  "description": "Indicate number of shares or other units outstanding of each of registrant's classes of capital or common stock or other ownership interests.",
+  "pts": 2,
+  "data": [
+    {
+      "accn": "0001104659-24-037408",
+      "cik": 1,
+      "entityName": "ALPHA CORP",
+      "loc": "US-IL",
+      "start": null,
+      "end": "2024-02-29",
+      "val": 35427056
+    },
+    {
+      "accn": "0001628280-24-020011",
+      "cik": 2,
+      "entityName": "BETA HOLDINGS INC",
+      "loc": "US-IL",
+      "start": null,
+      "end": "2024-03-31",
+      "val": 1739633759
+    }
+  ]
+}
