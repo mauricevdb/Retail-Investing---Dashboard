@@ -186,15 +186,26 @@ trouvé ou de temps, pas des cas dont l'existence serait ignorée :
   `_derive_shares_pit` (un appel Python par titre, non vectorisé) prend
   concrètement ~20 secondes à cette échelle, en mémoire pure — compatible
   avec un usage quotidien, mais confirme le coût jusqu'ici seulement
-  théorique. Reste non fait : la découverte automatique d'un bassin de
-  candidats réel non filtré au préalable (potentiellement des milliers
-  d'appels EDGAR pour classer par capitalisation avant de couper à
-  ~900-1100), signalée comme un chantier distinct pendant T81 sans être
-  traitée. Effet de bord observé en exécutant la suite complète après
+  théorique. Effet de bord observé en exécutant la suite complète après
   l'ajout de cette fixture, plus lourde : `tests/app/test_app_smoke.py`
   (T77/T80) dépassait occasionnellement le délai fixe de 3 s qu'`AppTest`
   s'accorde par défaut (jamais en isolation) — corrigé par T82 (délai
   explicite de 15 s).
+- **Découverte automatique du bassin construite et câblée (T83-T85, ADR
+  0005), jamais exercée contre le vrai réseau.** `pipeline.ingest.run_from_network`
+  sait désormais classer un bassin par capitalisation approchée (API
+  frames de SEC EDGAR + bulk EODHD, un appel chacun plutôt qu'un par
+  candidat) et n'ingérer réellement que les candidats retenus après
+  coupure — vérifié uniquement par transports factices. Deux limites
+  assumées, documentées dans l'ADR : l'API frames ne porte aucune date de
+  dépôt, donc un garde-fou de 120 jours entre la fin de période et `t`
+  approxime la sécurité point-in-time (jamais une garantie absolue par
+  émetteur) ; les données de frames ne servent jamais à un chiffre
+  affiché, seulement au classement. Reste à faire : un vrai lancement
+  réseau avec `frame_period` renseigné, jamais tenté (même statut que
+  T75 avant sa première vérification manuelle) — le coût réel en appels
+  et en temps à l'échelle du bassin complet reste à mesurer en pratique,
+  pas seulement en théorie.
 - **Écran rendu depuis T77/T78, mais seulement vérifié à la main sur un
   seul titre.** `src/dashboard/app/main.py` existe désormais (le point
   d'entrée a dû être placé dans le paquet `app/`, pas à côté sous

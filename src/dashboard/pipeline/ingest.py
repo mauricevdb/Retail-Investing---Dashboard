@@ -3,8 +3,10 @@ from pathlib import Path
 
 import polars as pl
 
+from dashboard.calc.candidate_pool import rank_candidates
 from dashboard.ingestion.edgar_client import EdgarClient
 from dashboard.ingestion.edgar_facts import fetch_company_facts
+from dashboard.ingestion.edgar_frames import fetch_shares_outstanding_frame
 from dashboard.ingestion.edgar_submissions import fetch_submissions
 from dashboard.ingestion.edgar_tickers import fetch_company_tickers
 from dashboard.ingestion.eodhd_actions import fetch_bulk_actions
@@ -26,6 +28,7 @@ def run_from_network(
     hier_membership: set[str],
     ciks: list[str] | None = None,
     tickers: list[str] | None = None,
+    frame_period: str | None = None,
     thresholds: dict[str, tuple[float | None, float | None]] | None = None,
     screen_history_path: Path | None = None,
     fundamentals_history_path: Path | None = None,
@@ -35,14 +38,27 @@ def run_from_network(
     own_history_by_cik: dict[str, list[tuple[int, float]]] | None = None,
     since_year: int = 2011,
 ) -> str | None:
-    if (ciks is None) == (tickers is None):
+    if sum(mode is not None for mode in (ciks, tickers, frame_period)) != 1:
         raise IngestionSelectionError(
-            "fournir exactement une liste : ciks ou tickers, jamais les deux ni aucune"
+            "fournir exactement une méthode de sélection : ciks, tickers ou "
+            "frame_period, jamais deux ni aucune"
         )
 
     ticker_cik = fetch_company_tickers(edgar_client, as_of=t)
+    # Le bulk de prix sert aussi bien au classement approché (frame_period)
+    # qu'au calcul des indicateurs plus bas -- un seul appel, jamais deux,
+    # quel que soit le mode de sélection.
+    _prices_raw, prices_adj = fetch_bulk_prices(eodhd_client, t)
 
-    if ciks is not None:
+    if frame_period is not None:
+        # Découverte automatique du bassin (T83-T85, ADR 0005) : seuls les
+        # candidats retenus après classement par capitalisation approchée
+        # sont réellement ingérés ci-dessous -- jamais le bassin entier.
+        shares_frame = fetch_shares_outstanding_frame(edgar_client, period=frame_period)
+        ranked = rank_candidates(shares_frame, ticker_cik, prices_adj, t, n=n, buffer=buffer)
+        selected = ticker_cik.filter(pl.col("cik").is_in(ranked["cik"].to_list()))
+        missing: set[str] = set()
+    elif ciks is not None:
         selected = ticker_cik.filter(pl.col("cik").is_in(ciks))
         missing = set(ciks) - set(selected["cik"].to_list())
     else:
@@ -62,7 +78,6 @@ def run_from_network(
     sic_codes = pl.concat(sic_rows).join(selected.select(["cik", "ticker"]), on="cik")
     facts = pl.concat(facts_frames)
 
-    _prices_raw, prices_adj = fetch_bulk_prices(eodhd_client, t)
     # Récupérées pour de vrai (T75), non consommées par daily_run dont la
     # signature reste figée -- signalé, pas masqué (cf. tasks.md T75).
     fetch_bulk_actions(eodhd_client, t)

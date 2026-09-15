@@ -2100,5 +2100,21 @@ bassin construit et testé isolément ; le câblage dans
   `test_ingest_from_network.py` n'est modifié dans son comportement
   (seul un nouveau test est ajouté).
 - **Dépend de** : T75, T83, T84.
+- **Statut** : faite. Les 4 tests de `test_ingest_from_network.py` passent
+  (les 3 existants inchangés dans leur comportement, plus le nouveau) ;
+  suite complète 89 passed. Vérifié explicitement : sur la fixture à deux
+  candidats de capitalisation approchée très différente, seul le gagnant
+  est réellement ingéré (`fetch_submissions`/`fetch_company_facts`) — les
+  URLs du perdant n'apparaissent jamais dans les appels du transport EDGAR
+  factice, qui lève une erreur explicite pour toute URL non attendue.
+  `fetch_bulk_prices` n'est appelé qu'une fois, réutilisé pour le
+  classement et pour le calcul des indicateurs.
 
-Total : 85 tâches (T85 rédigée, non implémentée).
+T85 est faite. Dernier maillon du chantier de découverte automatique du
+bassin (T83, T84, ADR 0005) : `run_from_network` sélectionne et n'ingère
+réellement que les candidats retenus après classement par capitalisation
+approchée, jamais le bassin entier. Le chantier ouvert après T81 est
+refermé — reste à l'exercer un jour contre le vrai réseau, à l'échelle
+réelle, en usage manuel (même statut que T75 vis-à-vis du réseau réel).
+
+Total : 85 tâches.

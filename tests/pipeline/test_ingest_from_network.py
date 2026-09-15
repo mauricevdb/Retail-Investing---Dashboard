@@ -51,6 +51,141 @@ class RoutingEodhdTransport:
         return self.prices
 
 
+class DiscoveryEdgarTransport:
+    """Sert company_tickers, les dépôts/faits d'Alpha (CIK 1) et une frame
+    de faits en circulation -- lève explicitement pour toute autre URL,
+    preuve que Beta (CIK 2) n'est jamais interrogée une fois écartée par
+    le classement (T85)."""
+
+    def __init__(self, frame_response: dict):
+        with open(GOLDEN / "edgar_company_tickers.json", encoding="utf-8") as f:
+            self.tickers = json.load(f)
+        with open(GOLDEN / "edgar_submissions_0000000001.json", encoding="utf-8") as f:
+            self.submissions = json.load(f)
+        with open(GOLDEN / "edgar_companyfacts_0000000001.json", encoding="utf-8") as f:
+            self.facts = json.load(f)
+        self.frame_response = frame_response
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, headers: dict):
+        self.calls.append(url)
+        if "company_tickers.json" in url:
+            return self.tickers
+        if "submissions/CIK0000000001.json" in url:
+            return self.submissions
+        if "companyfacts/CIK0000000001.json" in url:
+            return self.facts
+        if "/frames/" in url:
+            return self.frame_response
+        raise AssertionError(f"URL EDGAR inattendue : {url}")
+
+
+class DiscoveryEodhdTransport:
+    """Cours bulk pour Alpha (AAAA, mêmes valeurs que la fixture partagée)
+    et Beta (BBBB, cours très inférieur) -- construit ici plutôt que dans
+    tests/golden/, pour ne jamais toucher la fixture partagée par d'autres
+    tests."""
+
+    def __init__(self):
+        with open(GOLDEN / "eodhd_bulk_actions_2024-02-15.json", encoding="utf-8") as f:
+            self.actions = json.load(f)
+        self.prices = [
+            {
+                "code": "AAAA",
+                "date": "2024-02-14",
+                "open": 148.0,
+                "high": 151.0,
+                "low": 147.5,
+                "close": 150.0,
+                "adjusted_close": 75.0,
+                "volume": 1_200_000,
+            },
+            {
+                "code": "AAAA",
+                "date": "2024-02-15",
+                "open": 76.0,
+                "high": 77.0,
+                "low": 75.0,
+                "close": 76.5,
+                "adjusted_close": 76.5,
+                "volume": 2_500_000,
+            },
+            {
+                "code": "BBBB",
+                "date": "2024-02-15",
+                "open": 1.0,
+                "high": 1.0,
+                "low": 1.0,
+                "close": 1.0,
+                "adjusted_close": 1.0,
+                "volume": 1_000,
+            },
+        ]
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, params: dict):
+        self.calls.append(url)
+        if "type=splits" in url:
+            return self.actions
+        return self.prices
+
+
+def test_run_from_network_discovers_candidates_via_frame_period(tmp_path: Path) -> None:
+    # Actions en circulation identiques pour Alpha (CIK 1) et Beta (CIK 2),
+    # mais un cours bulk EODHD très inférieur pour Beta (ci-dessus) :
+    # capitalisation approchée d'Alpha très supérieure. n=1/buffer=0 ne
+    # retient donc qu'Alpha -- Beta ne doit jamais être ingérée pour de
+    # vrai (invariant 10 : chaque appel EDGAR a un coût, la découverte doit
+    # réellement limiter le bassin, pas seulement le classement final).
+    frame_response = {
+        "data": [
+            {"cik": 1, "end": "2023-06-30", "val": 100_000_000},
+            {"cik": 2, "end": "2023-06-30", "val": 100_000_000},
+        ]
+    }
+    edgar_transport = DiscoveryEdgarTransport(frame_response)
+    eodhd_transport = DiscoveryEodhdTransport()
+    edgar_client = EdgarClient(
+        user_agent="RI Dashboard test@example.com", transport=edgar_transport
+    )
+    eodhd_client = EodhdClient(api_key="fake-eodhd-key", transport=eodhd_transport)
+
+    t = date(2024, 2, 15)
+    end = date(2023, 12, 31)
+    universe_history_path = tmp_path / "universe_membership.parquet"
+    screen_history_path = tmp_path / "screen_results.parquet"
+
+    view_text = run_from_network(
+        edgar_client=edgar_client,
+        eodhd_client=eodhd_client,
+        t=t,
+        end=end,
+        universe_history_path=universe_history_path,
+        hier_membership=set(),
+        frame_period="CY2023Q2I",
+        thresholds={},
+        screen_history_path=screen_history_path,
+        n=1,
+        buffer=0,
+        plausible_range=(0, 1),
+    )
+
+    assert view_text is not None
+
+    membership = pl.read_parquet(universe_history_path)
+    assert membership.filter(pl.col("in_universe")).height == 1
+    assert membership.filter(pl.col("in_universe"))["ticker"].to_list() == ["AAAA"]
+
+    written = pl.read_parquet(screen_history_path)
+    assert written.height == 1
+    assert written.row(0, named=True)["cik"] == "0000000001"
+
+    # Beta (CIK 2) n'a jamais été interrogée pour de vrai -- seulement
+    # classée via la frame, jamais sélectionnée pour l'ingestion complète.
+    assert not any("CIK0000000002" in call for call in edgar_transport.calls)
+    assert any("/frames/" in call for call in edgar_transport.calls)
+
+
 def test_run_from_network_ingests_and_feeds_daily_run(tmp_path: Path) -> None:
     edgar_transport = RoutingEdgarTransport()
     eodhd_transport = RoutingEodhdTransport()
