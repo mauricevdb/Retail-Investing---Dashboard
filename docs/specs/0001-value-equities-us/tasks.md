@@ -1965,4 +1965,53 @@ T82 est faite. Fragilité de harnais de test signalée pendant T81, corrigée
 par un délai `AppTest` explicite plutôt que le défaut de 3 s de la
 bibliothèque.
 
-Total : 82 tâches.
+### T83 — Client EDGAR frames : premier maillon de la découverte automatique du bassin
+- **Objectif** : `pipeline.ingest.run_from_network` (T75) exige une liste
+  explicite de `ciks`/`tickers` — rien ne sait aujourd'hui découvrir les
+  ~900-1100 candidats à classer par capitalisation sans les connaître
+  d'avance. Une ingestion complète du bassin réel (T81, signalé comme
+  chantier distinct) supposerait, en l'état, un appel `fetch_company_facts`
+  par candidat rien que pour connaître ses actions en circulation et le
+  classer — potentiellement des milliers d'appels EDGAR à 10 req/s
+  (invariant 10), inenvisageable pour un traitement quotidien.
+  **Vérifié en direct avant d'écrire cette tâche** : l'API « frames » de
+  SEC EDGAR (`https://data.sec.gov/api/xbrl/frames/{taxonomy}/{tag}/{unit}/{period}.json`)
+  renvoie un concept XBRL donné pour *tous* les émetteurs l'ayant déposé
+  sur une période donnée, en un seul appel. Exemple réel interrogé :
+  `dei/EntityCommonStockSharesOutstanding/shares/CY2024Q1I` → 4960
+  émetteurs (AAR Corp, Abbott Laboratories, ...), chacun avec `cik`,
+  `entityName`, `end`, `val`. Combiné au bulk EODHD (déjà un seul appel
+  pour tous les tickers US, T17), ça permettrait d'approximer la
+  capitalisation de tout le bassin réel sans appel par CIK — le classement
+  et la coupure au rang cible resteraient à construire séparément
+  (chantier plus large, non traité ici).
+- **Fichiers** : `src/dashboard/ingestion/edgar_frames.py`,
+  `tests/unit/test_edgar_frames.py`, `tests/unit/test_edgar_frames_fetch.py`,
+  `tests/contact/test_edgar_frames_contact.py`,
+  `tests/golden/raw/edgar_frames_shares_outstanding.json` (nouvel
+  instantané figé).
+- **Test** :
+  - `test_parse_shares_outstanding_frame` — sur l'instantané figé, chaque
+    entrée produit une ligne `(cik, end, value)` ; `cik` complété à 10
+    chiffres comme dans `edgar_tickers` (T2).
+  - `test_fetch_shares_outstanding_frame_calls_client_and_parses` — client
+    factice appelé une fois sur l'URL attendue pour un taxonomie/tag/unité/
+    période donnés ; résultat identique à `parse_shares_outstanding_frame`
+    appliqué directement à l'instantané figé.
+  - `test_edgar_frames_contact_reachable` (marqueur `contact`, invariant 9)
+    — appelle réellement l'endpoint frames pour une période récente et
+    vérifie uniquement l'accessibilité et la forme de la réponse (clés
+    `cik`, `end`, `val` présentes), jamais une valeur précise.
+- **Explicitement hors périmètre** : choisir quelle période correspond à
+  un `t` donné, combiner avec le bulk EODHD pour une capitalisation
+  approchée, classer et couper au rang cible, et câbler tout ça dans
+  `pipeline.ingest` — chacun un pas distinct du même chantier, à spécifier
+  une fois ce premier client validé.
+- **Critères de la spec couverts** : aucun directement — prérequis d'un
+  futur mécanisme de découverte du bassin, pas encore un comportement
+  observable de l'écran.
+- **Terminée quand** : les trois tests passent (le test de contact
+  manuellement, `uv run pytest -m contact`).
+- **Dépend de** : T11, T13.
+
+Total : 83 tâches (T83 rédigée, non implémentée).
