@@ -1861,4 +1861,51 @@ avec l'exercice qui a réellement produit la valeur affichée. Corrigée en
 dérivant les options d'`end` des faits réels du titre sélectionné plutôt
 que d'une date devinée.
 
-Total : 80 tâches.
+### T81 — Vérifier `calc.universe`/`pipeline.daily_run` à l'échelle du bassin réel
+- **Objectif** : `etat-de-tranche.md` documentait depuis T75 que rien n'avait
+  jamais tourné à l'échelle du bassin réel (~900-1100 titres) : chaque
+  vérification manuelle porte sur un titre à la fois, et chaque test
+  automatisé utilise une poignée de titres avec `plausible_range` réduit à
+  la main (`(1, 10)`, `(0, 1)`...). Trois choses précises n'ont jamais été
+  exercées ensemble : (1) le calcul réel du percentile sectoriel (groupe
+  ≥ 10 titres, critère 20) — seul le repli `< 10` est testé partout,
+  jusque dans le test de bout en bout de T63/T71-T73 ; (2) l'hystérésis du
+  rang de coupure (T36) sur un bassin de la taille cible, pas une poignée
+  de titres ; (3) `calc.universe`/`pipeline.daily_run` appelés avec les
+  valeurs par défaut de production (`n=900, buffer=100,
+  plausible_range=(700, 1100)`) plutôt qu'une plage réduite pour la
+  fixture — jamais fait, y compris dans les tests déjà existants. Décidé
+  avec l'utilisateur : fixture synthétique (~1000 titres, hors réseau,
+  invariant 9), pas un vrai run réseau sur le bassin réel — la découverte
+  automatique d'un bassin de candidats non filtré au préalable
+  (potentiellement des milliers d'appels EDGAR à 10 req/s pour classer par
+  capitalisation avant de couper) reste un chantier distinct, non traité
+  ici.
+- **Fichiers** : `tests/pipeline/test_daily_run_at_scale.py` (nouveau).
+  Aucun changement de code de production anticipé — tâche de vérification
+  ; si elle révèle un défaut réel, il sera corrigé dans une tâche
+  corrective séparée plutôt que mélangé ici (même principe que T75→T76).
+- **Test** : `test_daily_run_at_scale_default_plausible_range_and_real_sector_percentile` —
+  ~1000 titres synthétiques générés programmatiquement (capitalisations
+  boursières toutes distinctes pour un classement déterministe, répartis
+  sur au moins cinq divisions SIC éligibles avec ≥ 10 titres chacune,
+  EV/EBIT calculable pour la quasi-totalité). `run_daily` appelé avec les
+  valeurs par défaut de `n`, `buffer` et `plausible_range` (jamais
+  réduites pour la fixture) : vérifie que l'univers résultant respecte la
+  plage par défaut sans lever `UniverseImplausibleSizeError`, que
+  l'hystérésis retient un ensemble cohérent avec l'appartenance antérieure
+  fournie, et qu'au moins un titre affiche un `pct_sector` réellement
+  calculé (non `None`), jamais seulement le repli. Le temps d'exécution
+  est mesuré et affiché à titre diagnostique, sans assertion stricte de
+  performance (hors-tests de spec.md), seulement un plafond très large
+  pour détecter un blocage réel plutôt qu'une lenteur relative.
+- **Critères de la spec couverts** : #20 (percentile sectoriel réel,
+  jusqu'ici jamais exercé que par son repli), #24 (hystérésis à l'échelle
+  cible) — renforcement, pas nouvelle couverture : les deux étaient déjà
+  couverts par T51/T36 à petite échelle.
+- **Terminée quand** : le test passe (ou, s'il révèle un défaut réel à
+  cette échelle, le défaut est diagnostiqué et signalé avant toute
+  correction, jamais corrigé silencieusement dans cette même tâche).
+- **Dépend de** : T36, T51, T63, T71, T73.
+
+Total : 81 tâches (T81 rédigée, non implémentée).
