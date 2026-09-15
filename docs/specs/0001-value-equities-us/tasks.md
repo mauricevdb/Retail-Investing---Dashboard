@@ -2066,4 +2066,39 @@ T84 est faite. Deuxième maillon du chantier de découverte automatique du
 bassin construit et testé isolément ; le câblage dans
 `pipeline.ingest.run_from_network` reste à spécifier séparément.
 
-Total : 84 tâches.
+### T85 — Câbler la découverte automatique du bassin dans `run_from_network`
+- **Objectif** : dernier maillon du chantier de découverte automatique du
+  bassin (T83, T84, ADR 0005). `pipeline.ingest.run_from_network` gagne un
+  troisième mode de sélection, `frame_period`, mutuellement exclusif avec
+  `ciks`/`tickers` (jamais deux, jamais aucun des trois). Quand fourni :
+  récupère la période de frames demandée
+  (`ingestion.edgar_frames.fetch_shares_outstanding_frame`), le bulk EODHD
+  du jour (déjà récupéré par ailleurs, avancé plus tôt dans la fonction
+  pour servir aussi au classement), classe le bassin par capitalisation
+  approchée (`calc.candidate_pool.rank_candidates`, garde-fou des 120
+  jours de l'ADR 0005 appliqué automatiquement), et n'ingère réellement
+  (`fetch_submissions`, `fetch_company_facts`) que les candidats retenus
+  après coupure à `n + buffer` — jamais le bassin entier. `daily_run` garde
+  sa signature actuelle, comme pour T75 : cette tâche compose, ne réécrit
+  rien de déjà testé.
+- **Fichiers** : `src/dashboard/pipeline/ingest.py`,
+  `tests/pipeline/test_ingest_from_network.py` (étendu).
+- **Test** : `test_run_from_network_discovers_candidates_via_frame_period` —
+  deux candidats connus des fixtures existantes (Alpha/AAAA, dépôts
+  complets ; Beta/BBBB, déjà présente dans `edgar_company_tickers.json`)
+  avec des actions en circulation de frames égales mais un cours bulk
+  EODHD très inférieur pour Beta ; `n=1, buffer=0` ne retient qu'Alpha.
+  Vérifie que le résultat (univers, `screen_results`) ne porte qu'Alpha,
+  **et** que les URLs de dépôts/faits de Beta (CIK 2) n'apparaissent
+  jamais dans les appels du transport EDGAR factice — la preuve que la
+  découverte limite réellement les appels réseau, pas seulement le
+  classement final.
+- **Critères de la spec couverts** : aucun directement — compose des
+  modules déjà couverts individuellement (T75, T83, T84), sur le principe
+  de T7/T63.
+- **Terminée quand** : le test passe, aucun test existant de
+  `test_ingest_from_network.py` n'est modifié dans son comportement
+  (seul un nouveau test est ajouté).
+- **Dépend de** : T75, T83, T84.
+
+Total : 85 tâches (T85 rédigée, non implémentée).
