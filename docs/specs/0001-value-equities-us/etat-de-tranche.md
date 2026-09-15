@@ -177,11 +177,25 @@ trouvé ou de temps, pas des cas dont l'existence serait ignorée :
   `contact` et exclus par défaut (invariant 9), exécutés manuellement avec
   succès contre les vrais services. Ça ne couvre qu'un seul CIK/ticker
   (Alpha/AAAA) et une poignée de dates ; aucune volumétrie réaliste.
-- **Aucun test à l'échelle du bassin réel.** `calc.universe` cible un
-  univers de l'ordre de 900 à 1100 titres ; toutes les fixtures en
-  comptent au plus une dizaine. Le coût de `pipeline.daily_run._derive_shares_pit`
-  (un appel Python par titre, non vectorisé) n'a jamais été mesuré à
-  cette échelle.
+- **Test à l'échelle du bassin réel fait (T81), mais en fixture synthétique,
+  jamais en vrai réseau.** `calc.universe`/`pipeline.daily_run` ont été
+  exercés une première fois avec les valeurs par défaut de production
+  (`n=900, buffer=100, plausible_range=(700, 1100)`) sur ~1000 titres
+  synthétiques : aucun défaut trouvé, hystérésis et percentile sectoriel
+  réel (groupe ≥ 10, jusqu'ici seul le repli était testé) corrects.
+  `_derive_shares_pit` (un appel Python par titre, non vectorisé) prend
+  concrètement ~20 secondes à cette échelle, en mémoire pure — compatible
+  avec un usage quotidien, mais confirme le coût jusqu'ici seulement
+  théorique. Reste non fait : la découverte automatique d'un bassin de
+  candidats réel non filtré au préalable (potentiellement des milliers
+  d'appels EDGAR pour classer par capitalisation avant de couper à
+  ~900-1100), signalée comme un chantier distinct pendant T81 sans être
+  traitée. Effet de bord observé en exécutant la suite complète après
+  l'ajout de cette fixture, plus lourde : `tests/app/test_app_smoke.py`
+  (T77/T80) dépasse occasionnellement le délai fixe de 3 s qu'`AppTest`
+  s'accorde par défaut (jamais en isolation) — fragilité préexistante du
+  harnais de test Streamlit, révélée mais pas causée par T81, non
+  corrigée.
 - **Écran rendu depuis T77/T78, mais seulement vérifié à la main sur un
   seul titre.** `src/dashboard/app/main.py` existe désormais (le point
   d'entrée a dû être placé dans le paquet `app/`, pas à côté sous

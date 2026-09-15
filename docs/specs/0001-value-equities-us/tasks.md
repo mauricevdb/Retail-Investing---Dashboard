@@ -1907,5 +1907,28 @@ que d'une date devinée.
   cette échelle, le défaut est diagnostiqué et signalé avant toute
   correction, jamais corrigé silencieusement dans cette même tâche).
 - **Dépend de** : T36, T51, T63, T71, T73.
+- **Statut** : le test passe du premier coup, sur la fixture décrite —
+  aucun défaut de logique révélé à cette échelle (`calc.universe`,
+  l'hystérésis et le percentile sectoriel réel se comportent comme
+  attendu avec les valeurs par défaut de production). Chiffre concret
+  obtenu, remplaçant le « jamais mesuré » d'`etat-de-tranche.md` :
+  **~20 secondes** pour `run_daily` sur 1000 titres, en mémoire pure
+  (sans aucun réseau) — compatible avec une consultation quotidienne
+  (hors-tests de spec.md), mais confirme concrètement que le coût
+  documenté de `_derive_shares_pit` (un appel Python par titre, non
+  vectorisé) est réel, pas seulement théorique. Effet de bord observé,
+  non corrigé ici (hors périmètre) : la suite complète devient assez
+  plus lourde pour occasionnellement faire dépasser à
+  `tests/app/test_app_smoke.py` le délai fixe de 3 s qu'`AppTest`
+  s'accorde par défaut (`RuntimeError: AppTest script run timed out`,
+  observé une fois sur plusieurs exécutions, jamais en isolation) — une
+  fragilité préexistante du harnais de test Streamlit, révélée mais pas
+  causée par cette tâche, signalée plutôt que corrigée silencieusement.
 
-Total : 81 tâches (T81 rédigée, non implémentée).
+T81 est faite. Premier passage de `calc.universe`/`pipeline.daily_run` aux
+valeurs par défaut de production sur une fixture à l'échelle cible : aucun
+défaut trouvé, mais un chiffre réel remplace la conjecture — ~20 s pour
+1000 titres en mémoire pure, confirmant concrètement (pas seulement en
+théorie) le coût non vectorisé de `_derive_shares_pit`.
+
+Total : 81 tâches.
