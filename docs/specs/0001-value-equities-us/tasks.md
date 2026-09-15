@@ -2023,4 +2023,38 @@ T83 est faite. Premier maillon construit et vérifié contre le vrai
 service ; le classement par capitalisation approchée et son câblage dans
 `pipeline.ingest` restent à spécifier séparément.
 
-Total : 83 tâches.
+### T84 — Classer le bassin par capitalisation approchée (frames + bulk EODHD)
+- **Objectif** : deuxième maillon du chantier de découverte automatique du
+  bassin (T83, ADR 0005). `calc.candidate_pool.rank_candidates` combine les
+  actions en circulation issues de l'API frames
+  (`ingestion.edgar_frames`), la correspondance ticker/CIK
+  (`ingestion.edgar_tickers`) et le dernier cours connu du bulk EODHD
+  (`ingestion.eodhd_prices`) pour approximer la capitalisation de tout le
+  bassin candidat et couper au rang cible (`n + buffer`, mêmes valeurs par
+  défaut que `calc.universe`). Applique le garde-fou de l'ADR 0005 : la
+  période de frames fournie doit avoir sa fin (`end`) antérieure à `t` d'au
+  moins 120 jours, sinon échec explicite plutôt qu'un classement sur une
+  donnée pas encore garantie publique.
+- **Fichiers** : `src/dashboard/calc/candidate_pool.py`,
+  `tests/calc/test_candidate_pool.py`.
+- **Test** : `test_rank_candidates_approximates_market_cap_and_cuts_at_rank` —
+  une poignée de candidats synthétiques (actions en circulation distinctes
+  via une fixture au format d'`edgar_frames`, correspondance ticker/CIK,
+  cours distincts) classés par capitalisation approchée (actions × dernier
+  cours connu ≤ `t`), coupés à `n + buffer`. `test_rank_candidates_rejects_frame_too_recent` —
+  une période de frames dont la fin est à moins de 120 jours de `t` lève
+  une erreur explicite (`FramePeriodTooRecentError`), aucun classement
+  produit.
+- **Explicitement hors périmètre** : câbler ce classement dans
+  `pipeline.ingest.run_from_network` pour sélectionner automatiquement
+  `ciks`/`tickers` au lieu de les recevoir explicitement — changement de
+  comportement du point d'entrée réel, à spécifier et tester séparément
+  une fois ce module validé isolément (même principe que T25-T31 avant
+  T71).
+- **Critères de la spec couverts** : aucun directement — prérequis du
+  mécanisme de découverte du bassin, pas encore un comportement observable
+  de l'écran.
+- **Terminée quand** : les deux tests passent.
+- **Dépend de** : T2, T17, T83.
+
+Total : 84 tâches (T84 rédigée, non implémentée).
