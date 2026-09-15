@@ -50,6 +50,78 @@ théorique que réel à l'échelle où la tranche opère.
 - **Une dizaine de bridges de repli pour six indicateurs** — surface
   d'erreur de correspondance de tags plus large qu'un calcul à source
   unique ; chaque bridge est testé isolément et trace le tag utilisé.
+- **Ford reste non calculable pour la dette malgré T76.** Son bilan réel
+  tague la dette sous `us-gaap:DebtAndCapitalLeaseObligations`, ajoutée en
+  repli de dernier recours dans `debt_bridge` (T76, vérifié par test). Mais
+  la donnée `companyfacts` de Ford pour ce concept s'arrête réellement en
+  2020 dans l'API SEC, alors que le dépôt le plus récent l'utilise bien
+  (vérifié en inspectant le fichier de rendu de la SEC elle-même,
+  `R5.htm`) : ce n'est pas un défaut du code, la donnée récente n'est
+  simplement pas exposée par cette API pour cet émetteur — hypothèse non
+  confirmée d'une qualification dimensionnelle par segment
+  (Ford Credit / reste du groupe) que la vue plate de `companyfacts`
+  n'expose pas. D'autres émetteurs à filiale de financement captive
+  (constructeurs automobiles, équipementiers) pourraient présenter la même
+  lacune.
+
+## Méthodologie de test par profils réels (clôturée)
+
+Huit caractéristiques distinctives ont été testées manuellement contre le
+vrai réseau via `pipeline.ingest.run_from_network` (T75), chacune choisie
+pour exercer une hypothèse différente sur la disponibilité ou la forme
+réelle des données :
+
+1. **Bilan complet** (Caterpillar) — cas de base, tous les tags primaires
+   présents. Recoupé chiffre par chiffre contre le 10-K/DEF-14A réel.
+2. **Exclusion SIC finance** (JPMorgan Chase) — a révélé le bug
+   `entity_type` (T34).
+3. **Fonds réglementé, SIC vide** (Prospect Capital) — a révélé le
+   traitement du SIC absent comme signal d'exclusion (T34).
+4. **Émetteur IFRS pur** (BP) — exclusion par taxonomie, sans bug trouvé.
+5. **Exercice fiscal non calendaire** (Apple) — sans bug trouvé.
+6. **Double classe d'actions** (Alphabet) — a confirmé la sous-estimation
+   documentée de `calc.shares_bridge` (ci-dessus), sans bug nouveau.
+7. **Tag de dette hors chaîne de repli connue** (Ford) — a mené à T76 ;
+   Ford reste non calculable pour une raison distincte, documentée
+   ci-dessus.
+8. **Vrai retraitement 10-K/A** (Advanced Drainage Systems / WMS) —
+   confirme, pour la première fois sur une donnée réelle et non une
+   fixture synthétique, que le point-in-time (invariant 2) fonctionne :
+   `OperatingIncomeLoss` pour l'exercice clos au 2016-03-31 est passé de
+   84 593 000 $ (10-K du 2016-09-15) à 94 334 000 $ (10-K/A du
+   2017-01-10, +11,5 %) ; `ev_ebit` calculé par `run_from_network` bascule
+   exactement à la date attendue, vérifié par `verify_ingest.py`. En
+   cherchant ce cas, un candidat réel écarté (Electronics For Imaging,
+   délisté depuis 2019) a révélé que `run_from_network` ne peut
+   sélectionner aucun émetteur absent de `company_tickers.json`, même par
+   CIK direct — limite distincte du ticker/CIK périmé déjà documenté plus
+   haut (celui-ci porte sur une absence totale, pas une correspondance
+   obsolète).
+
+Quatre bugs réels trouvés et corrigés au total sur ces huit profils (listés
+plus haut, section « Ce que la tranche n'a jamais exercé »).
+
+**Caractéristiques distinctives connues mais non testées** — des cas
+identifiés pendant cette méthodologie, jamais exercés faute de candidat
+trouvé ou de temps, pas des cas dont l'existence serait ignorée :
+
+- **Dépôt tardif** (`NT 10-K`, prorogation Rule 12b-25) — un émetteur qui
+  dépose son 10-K après l'échéance réglementaire normale. Testerait si le
+  pipeline gère correctement une fenêtre `filed` inhabituellement longue
+  après `end`, jamais recherché.
+- **Introduction récente en bourse, sans historique depuis 2011** — un
+  émetteur dont le premier dépôt est postérieur à 2011 testerait
+  concrètement `calc.percentiles`/`test_own_history_percentile_and_years`
+  (critère 19) sur une vraie profondeur d'historique courte, pas seulement
+  sur la fixture synthétique d'Alpha-like construite pour T49.
+- **Titre délisté en cours de route** — un émetteur présent dans l'univers
+  à un `t` donné puis radié (rachat, faillite, retrait volontaire) entre
+  deux traitements quotidiens réels. Contrairement au cas d'Electronics
+  For Imaging ci-dessus (jamais entré dans aucun run, absent de
+  `company_tickers.json` dès le départ), ce cas testerait le critère 21
+  (« ses fondamentaux et son historique de screen restent intacts ») sur
+  une vraie sortie d'univers survenue en cours d'usage réel, jamais
+  seulement sur la fixture synthétique de T60.
 
 ## Garde-fous en arbitrage (jamais assignés à une tâche)
 
@@ -63,15 +135,41 @@ théorique que réel à l'échelle où la tranche opère.
 
 ## Ce que la tranche n'a jamais exercé
 
-- **`pipeline.ingest.run_from_network` (T75) n'a jamais été exécuté contre
-  le vrai réseau.** Le point d'entrée qui compose les cinq `fetch_*` et
-  alimente `pipeline.daily_run` existe et est testé, mais uniquement avec
-  des transports factices, par construction (invariant 9) : aucune suite
-  automatisée ne l'exécute contre EDGAR/EODHD réels, et personne ne l'a
-  encore fait manuellement. Ce que le vrai réseau a effectivement validé,
-  ce sont les contrats individuels des clients et des cinq `fetch_*`
-  (quatre tests de contact, T19-T20), pas leur composition de bout en
-  bout ni le comportement à plusieurs titres.
+- **`pipeline.ingest.run_from_network` (T75) n'est toujours exécuté contre
+  le vrai réseau que manuellement, jamais par la suite automatisée**
+  (invariant 9 : le vrai réseau reste réservé aux tests de contact et à
+  l'exécution manuelle). Depuis T75, il a été lancé à la main sur plusieurs
+  titres réels aux caractéristiques volontairement variées : Caterpillar
+  (bilan complet), JPMorgan Chase (exclusion SIC finance), Prospect Capital
+  (fonds réglementé, SIC vide), BP (émetteur IFRS pur), Apple (exercice
+  fiscal non calendaire), Alphabet (double classe d'actions), Ford
+  (tag de dette hors chaîne de repli connue, T76), Advanced Drainage
+  Systems / WMS (vrai retraitement 10-K/A). Quatre bugs réels trouvés et
+  corrigés en chemin (`entity_type`, `rank()` sur indicateur non
+  calculable, colonne `date` manquante avant l'écriture dans
+  `universe_history`, inférence de schéma Polars sur un historique de
+  dépôts volumineux). Ça reste un usage manuel, ponctuel, sur un titre à
+  la fois — jamais plusieurs titres dans le même run, jamais à l'échelle
+  du bassin réel.
+- **Le point-in-time (invariant 2) a été vérifié sur un vrai retraitement
+  réel, pas seulement sur des fixtures synthétiques.** Advanced Drainage
+  Systems (CIK 1604028, ticker WMS) a déposé un 10-K/A le 2017-01-10 qui
+  retraite réellement `OperatingIncomeLoss` pour l'exercice clos au
+  2016-03-31 : 84 593 000 $ dans le 10-K original (déposé 2016-09-15) vs
+  94 334 000 $ dans le 10-K/A (+11,5 %, vérifié en comparant les faits
+  XBRL des deux dépôts sur `(concept, start, end)` identiques — 45
+  concepts diffèrent réellement, dont le résultat net et le BPA). En
+  exécutant `run_from_network` avec le même `end` et deux `t` différents
+  (avant et après le 2017-01-10), `ev_ebit` bascule exactement de la
+  valeur originale à la valeur retraitée, avec le `filed` attendu dans
+  chaque cas — confirmé par `verify_ingest.py`. Point notable en chemin :
+  un candidat de retraitement écarté (Electronics For Imaging, CIK
+  867374) est un vrai cas réel mais est délisté depuis 2019 et n'apparaît
+  plus dans `company_tickers.json` ; `run_from_network` ne peut sélectionner
+  aucun émetteur qui en est absent, même par CIK direct, ce qui exclut
+  structurellement tout émetteur radié du marché — une limite distincte
+  du ticker_cik périmé déjà documenté plus haut (celui-ci porte sur une
+  correspondance obsolète, pas sur une absence totale).
 - **4 tests de contact existent** (`test_edgar_contact_company_tickers_reachable`,
   `test_eodhd_contact_bulk_endpoint_reachable`,
   `test_eodhd_bulk_prices_honors_requested_date`,
@@ -84,9 +182,29 @@ théorique que réel à l'échelle où la tranche opère.
   comptent au plus une dizaine. Le coût de `pipeline.daily_run._derive_shares_pit`
   (un appel Python par titre, non vectorisé) n'a jamais été mesuré à
   cette échelle.
-- **Pas d'écran.** `src/dashboard/app.py`, référencé par la commande
-  `uv run streamlit run` de CLAUDE.md, n'existe pas. Rien de cette tranche
-  n'a jamais été rendu dans un navigateur.
+- **Écran rendu depuis T77/T78, mais seulement vérifié à la main sur un
+  seul titre.** `src/dashboard/app/main.py` existe désormais (le point
+  d'entrée a dû être placé dans le paquet `app/`, pas à côté sous
+  `app.py`, à cause d'une collision de noms avec `app.screen_view`/
+  `app.detail_view` — CLAUDE.md amendé en conséquence). Vérifié en
+  navigateur réel contre la vraie sortie d'`ingest_run.py` (WMS) : l'écran
+  de synthèse et la vue détail s'exécutent tous deux sans exception une
+  fois `fundamentals_raw.parquet` persisté (T78). Reste non exercé : un
+  usage à l'échelle du bassin réel (~900-1100 titres), la navigation entre
+  plusieurs titres dans la même session, et tout ce que « l'ergonomie et
+  la lisibilité de l'interface » couvrirait (explicitement hors-tests de
+  spec.md).
+- **DuckDB et `fundamentals_raw.parquet` sont désormais utilisés
+  réellement (T77, T78)**, comblant l'écart qui existait entre la stack
+  déclarée par CLAUDE.md et le schéma déclaré par plan.md d'une part, et
+  le code réel de l'autre. Ce genre d'écart — un module ou un fichier
+  déclaré mais jamais relié à un point d'exécution réel — a maintenant été
+  vu quatre fois sur cette tranche (T14-T18, T71, T77, T78) : le contrôle
+  de couverture de tasks.md ne le détecte que lorsqu'un module de plan.md
+  ne trouve aucune tâche, jamais quand une tâche existe mais que sa
+  promesse de bout en bout (fichier réellement écrit, fonction réellement
+  appelée en production) n'a jamais été vérifiée contre autre chose qu'une
+  fixture.
 - **`calc.divergence` et `calc.streak` ne sont appelés par aucun code de
   production.** Testés isolément sur des séries construites pour
   l'occasion ; `pipeline.daily_run` ne les invoque jamais, faute d'un

@@ -63,6 +63,7 @@ def test_run_from_network_ingests_and_feeds_daily_run(tmp_path: Path) -> None:
     end = date(2023, 12, 31)
     universe_history_path = tmp_path / "universe_membership.parquet"
     screen_history_path = tmp_path / "screen_results.parquet"
+    fundamentals_history_path = tmp_path / "fundamentals_raw.parquet"
 
     view_text = run_from_network(
         edgar_client=edgar_client,
@@ -74,6 +75,7 @@ def test_run_from_network_ingests_and_feeds_daily_run(tmp_path: Path) -> None:
         ciks=["0000000001"],
         thresholds={},
         screen_history_path=screen_history_path,
+        fundamentals_history_path=fundamentals_history_path,
         plausible_range=(0, 1),
     )
 
@@ -97,6 +99,12 @@ def test_run_from_network_ingests_and_feeds_daily_run(tmp_path: Path) -> None:
     row = written.row(0, named=True)
     assert row["cik"] == "0000000001"
     assert row["ev_ebit"] == pytest.approx(15.23)
+
+    # fundamentals_raw.parquet est réellement persisté (T78) -- jusqu'ici
+    # facts ne vivait qu'en mémoire pour la durée du run.
+    fundamentals = pl.read_parquet(fundamentals_history_path)
+    assert fundamentals.height > 0
+    assert set(fundamentals["cik"].to_list()) == {"0000000001"}
 
     # Les cinq fetch_* ont bien été appelés.
     assert any("company_tickers.json" in c for c in edgar_transport.calls)

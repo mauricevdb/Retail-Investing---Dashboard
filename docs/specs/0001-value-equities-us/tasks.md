@@ -51,6 +51,27 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   critère 9, prouvé en T61).
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
+- **Statut** : bug réel trouvé en ingestion manuelle (T75, premier essai
+  contre le vrai EDGAR, hors suite automatisée) : `reportDate` est une
+  chaîne vide pour tout dépôt sans période de rapport (8-K, proxy,
+  déclaration d'initié...) — l'API SEC renvoie `''`, jamais un champ
+  absent, ce que la fixture synthétique T1 ne reproduisait pas.
+  `parse_filings` plantait (`ValueError: Invalid isoformat string: ''`)
+  sur pratiquement tout émetteur réel. Corrigé : `period_of_report` reste
+  explicitement `None` pour ce dépôt, jamais une date devinée (invariant
+  7). Test étendu avec un cas mixte (10-K daté, 8-K sans période).
+- **Deuxième bug réel trouvé en ingestion manuelle** (T75, test sur
+  JPMorgan Chase, choisie pour son volume de dépôts) :
+  `pl.DataFrame(rows)` n'infère le type d'une colonne que sur un
+  échantillon limité de lignes (100 par défaut). Un émetteur qui dépose
+  beaucoup (8-K, Form 4...) a souvent plus de 100 dépôts sans période de
+  rapport avant le premier dépôt périodique dans l'historique « recent » —
+  Polars échoue alors en rencontrant la première vraie date plus loin
+  (`ComputeError: could not append value ... to the builder`), invisible
+  sur la fixture synthétique T1 (2 dépôts seulement). Corrigé : schéma de
+  colonnes déclaré explicitement plutôt qu'inféré. Nouveau test :
+  `test_edgar_submissions_filings_beyond_schema_inference_sample` (150
+  dépôts, dont 148 sans période avant les deux dépôts périodiques).
 
 ### T4 — Parser le code SIC et la nature de l'émetteur
 - **Objectif** : produire `sic_codes.parquet` (sic, sic_description,
@@ -64,6 +85,10 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   critères 14, 23, prouvés en T34).
 - **Terminée quand** : le test passe sur la fixture T1.
 - **Dépend de** : T1.
+- **Statut** : le parseur lui-même n'a jamais été en cause. Ses assertions
+  sur Alpha/Gamma vérifiaient une valeur `entity_type` fictive
+  (`"operating company"`), corrigée en `"operating"` (la vraie valeur SEC)
+  en même temps que le bug qu'elle cachait, trouvé et corrigé en T34.
 
 ### T5 — Ingérer les fondamentaux, rejeter les émetteurs IFRS
 - **Objectif** : produire `fundamentals_raw.parquet` à partir de
@@ -539,6 +564,31 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Critères de la spec couverts** : #14, #23.
 - **Terminée quand** : le test passe.
 - **Dépend de** : T4.
+- **Statut** : deux bugs réels trouvés en ingestion manuelle (T75, deuxième
+  essai contre le vrai EDGAR) :
+  1. `apply_exclusions` comparait `entity_type` à `"operating company"` —
+     une valeur qui n'existe nulle part dans l'API réelle. Vérifié sur
+     trois émetteurs réels : Apple (`entityType='operating'`,
+     `sic='3571'`), JPMorgan Chase (`'operating'`, `sic='6021'`, une
+     banque exclue par le SIC, pas par entity_type), SPDR S&P 500 ETF
+     Trust / SPY (`'other'`, `sic=''`). Résultat avant correction :
+     **tout émetteur réel était exclu**, y compris les éligibles. Corrigé :
+     comparaison à `"operating"`.
+  2. Un fonds réglementé réel (Prospect Capital, une BDC) a
+     `entityType='operating'` comme n'importe quelle société — seul son
+     SIC est vide (`''`), jamais un code numérique. `entity_type` seul ne
+     suffit donc pas à exclure les fonds/BDC (critère 23) : un SIC absent
+     doit être traité comme un signal d'exclusion, jamais ignoré
+     (invariant 7). `apply_exclusions` caste désormais `sic` en entier
+     sans erreur (`strict=False`) ; un SIC non numérique devient absent,
+     ce qui exclut la ligne par la logique à trois valeurs de Polars,
+     jamais un plantage ni une inclusion par défaut. Nouveau test :
+     `test_universe_exclusions_missing_sic_treated_as_non_operating`.
+     Fixtures `edgar_submissions_0000000001/02/03/06.json` corrigées
+     (`"operating company"` → `"operating"`) ; Delta/Epsilon
+     (`"investment company"`) laissées inchangées -- toujours exclues (la
+     valeur ne correspond à aucun cas réel identifié, mais reste un
+     sentinel valide pour ce test).
 
 ### T35 — Classer par capitalisation lissée sur 20 séances
 - **Objectif** : `calc.universe` calcule la capitalisation à partir des
@@ -805,6 +855,16 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Critères de la spec couverts** : #16.
 - **Terminée quand** : le test passe.
 - **Dépend de** : T52.
+- **Statut** : bug réel trouvé en ingestion manuelle (T75, troisième essai) :
+  `rank()` triait tous les titres retenus par `ev_ebit` sans exclure ceux
+  dont cet indicateur est `None` — `apply_filters` ne l'exclut que si
+  `ev_ebit` fait partie des seuils fournis, ce qui n'est pas garanti
+  (`thresholds={}` est un choix légitime : « aucun filtre »). Résultat :
+  `sorted()` plantait (`TypeError: '<' not supported between instances of
+  'NoneType' and 'float'`) dès qu'un titre réel avait un indicateur de tri
+  non calculable. Corrigé : un titre non calculable sur l'indicateur de tri
+  est exclu du classement, jamais comparé (invariant 7). Nouveau test :
+  `test_ranking_excludes_non_calculable_primary_indicator`.
 
 ## Stockage et persistance
 
@@ -985,6 +1045,22 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
   jusqu'ici jamais exercés ensemble dans un seul appel.
 - **Terminée quand** : le test passe.
 - **Dépend de** : T45, T49, T51, T52, T53, T54, T58, T62.
+- **Statut** : bug réel trouvé en ingestion manuelle (T75, quatrième
+  essai) : `run_daily` transmettait `membership` à
+  `storage.universe_history.append` sans jamais lui ajouter de colonne
+  `"date"` — `calc.universe.universe()` n'en produit aucune. Invisible
+  tant qu'un seul appel écrivait dans un fichier neuf (aucun test
+  n'appelait `run_daily` deux fois sur le même chemin, contrairement à
+  `screen_history`, pour laquelle `run_daily` ajoute bien `"date": t`
+  explicitement). Un deuxième appel réel plantait
+  (`ColumnNotFoundError: "date"`, colonne exigée par le garde anti-doublon
+  de T68) au lieu d'ajouter une deuxième ligne, comme l'exige le critère
+  22. Corrigé : `"date"` ajoutée avant l'appel, symétriquement à
+  `screen_rows`. Nouveaux tests :
+  `test_daily_run_repeated_calls_write_distinct_dates` et
+  `test_daily_run_repeated_call_same_date_rejected` (ce dernier n'avait
+  jamais exercé le garde de T68 via `run_daily`, seulement via le
+  stockage isolé).
 
 ### T64 — Traçabilité des replis
 - **Objectif** : découverte au sondage numérique de `/spec-verify`, sur un
@@ -1296,6 +1372,259 @@ miroir habituel, pour rester trivialement exclus par un filtre de chemin si
 - **Terminée quand** : les trois tests passent, aucun appel réseau réel.
 - **Dépend de** : T14, T15, T16, T17, T18, T63.
 
+### T76 — Repli sur un total de dette combiné (`DebtAndCapitalLeaseObligations`)
+- **Objectif** : découvert en testant Ford (T75, profil « tag de dette hors
+  chaîne de repli connue ») : `debt_bridge.resolve()` renvoie `(None,
+  None)` à chaque date récente vérifiée, alors que Ford porte une dette
+  réelle très significative. Le vrai bilan de Ford (dernier 10-Q,
+  vérifié via le fichier R5.htm rendu par la SEC) tague sa dette sous
+  `us-gaap:DebtAndCapitalLeaseObligations` (49 319 millions $ au dernier
+  trimestre), un tag que `debt_bridge` ne connaît pas. Particularité
+  importante : ce tag représente un **total combiné** court terme + long
+  terme (« Amount of short-term and long-term debt and lease obligation »),
+  pas une composante « long terme » isolée — il ne doit donc pas rejoindre
+  la chaîne de repli de `_resolve_long_term` (ce qui risquerait de compter
+  deux fois la portion courante si elle se résolvait par ailleurs), mais
+  servir de repli de dernier recours pour `resolve()` dans son ensemble,
+  utilisé seulement si les trois composantes (long terme, courante,
+  emprunts court terme) ne renvoient rien du tout.
+- **Avertissement à vérifier pendant l'implémentation** : la donnée
+  `companyfacts` de Ford pour ce concept s'arrête en 2020 dans l'API SEC
+  malgré sa présence confirmée dans le dépôt réel le plus récent — cause
+  non identifiée avec certitude (possible qualification dimensionnelle
+  par segment, ou latence de synchronisation côté SEC). Le correctif peut
+  donc ne pas suffire à rendre Ford calculable dans l'immédiat : à
+  vérifier empiriquement après implémentation, et à signaler explicitement
+  si le cas persiste (jamais en note de fin de tâche, cf. règle « Fin de
+  tâche » du skill spec-build).
+- **Fichiers** : `src/dashboard/calc/debt_bridge.py`,
+  `tests/calc/test_debt_bridge.py` (étendu).
+- **Test** : un émetteur dont les trois composantes existantes sont
+  absentes mais qui porte `DebtAndCapitalLeaseObligations` doit résoudre
+  sa dette à cette valeur ; un émetteur dont au moins une composante
+  existante se résout ne doit jamais additionner `DebtAndCapitalLeaseObligations`
+  par-dessus (non-double-comptage).
+- **Critères de la spec couverts** : aucun directement (prérequis du
+  critère 11, renforce T29).
+- **Terminée quand** : le test passe.
+- **Dépend de** : T29.
+- **Statut** : le correctif est implémenté et testé (`debt_bridge.resolve`
+  et `trace` retombent sur `DebtAndCapitalLeaseObligations` sans jamais le
+  double-compter), mais **ne rend pas Ford calculable**, vérifié après
+  implémentation : `debt_bridge.resolve()` renvoie toujours `(None, None)`
+  pour Ford à `2025-12-31`, `2026-03-31` et `2026-06-30`. Cause confirmée :
+  la donnée `companyfacts` de Ford pour `DebtAndCapitalLeaseObligations`
+  s'arrête réellement en 2020 dans l'API SEC — ce n'est pas un défaut du
+  code, la donnée récente n'est simplement pas exposée par cette API pour
+  cet émetteur (hypothèse : qualification dimensionnelle par segment,
+  jamais confirmée). Consigné comme dette assumée dans
+  `etat-de-tranche.md` plutôt que laissé en note de fin de tâche.
+
+### T77 — Assembler `src/dashboard/app/main.py` (point d'entrée Streamlit)
+- **Objectif** : le point d'entrée Streamlit référencé par CLAUDE.md
+  n'existe pas — rien de cette tranche n'a jamais été rendu dans un
+  navigateur. **Point tranché avant implémentation (collision de noms)** :
+  CLAUDE.md dictait à l'origine `uv run streamlit run src/dashboard/app.py`
+  (un fichier), alors que plan.md nomme les modules `app.screen_view` et
+  `app.detail_view` — ce qui suppose le paquet `src/dashboard/app/`, déjà
+  existant. Vérifié empiriquement : créer un fichier `app.py` au même
+  niveau que ce paquet rend `dashboard.app` inimportable comme paquet
+  (`ModuleNotFoundError: 'dashboard.app' is not a package`), cassant
+  `pipeline.daily_run` et tous les tests de T61/T62/T64-T66/T69. Résolu en
+  plaçant le point d'entrée **dans** le paquet plutôt qu'à côté :
+  `src/dashboard/app/main.py`, aucun import existant ne change. CLAUDE.md
+  amendé en conséquence (`uv run streamlit run src/dashboard/app/main.py`),
+  diff montré et validé avant application. `app.screen_view.render_screen_text` (T62) et
+  `app.detail_view.trace_indicator` (T61, T64-T66, T69) sont des fonctions
+  pures déjà testées, mais reçoivent toujours leurs données en paramètre
+  depuis des fixtures ou des DataFrames déjà résolus, jamais depuis un
+  fichier réellement persisté par `pipeline.daily_run`/`pipeline.ingest`,
+  lu par le mécanisme que plan.md promet : « Présentation (Streamlit,
+  lecture seule via DuckDB) ». DuckDB est une dépendance installée
+  (`pyproject.toml`) mais n'est appelé nulle part dans le dépôt — cette
+  tâche en est le premier usage réel. Deux composantes :
+  1. `storage.duckdb_reader.read_latest_screen(path)` — interroge
+     `screen_results.parquet` via DuckDB (`SELECT ... WHERE date = (SELECT
+     max(date) ...)`) et renvoie les lignes du jour de traitement le plus
+     récent en DataFrame Polars, en lecture seule — jamais une écriture,
+     jamais une valeur agrégée ou devinée si le fichier est absent ou vide
+     (invariant 7 : fichier absent ou vide propage une erreur explicite,
+     jamais un écran vide sans explication).
+  2. `src/dashboard/app/main.py` — appelle cette lecture, puis délègue tout le
+     rendu à `app.screen_view.render_screen_text` et, pour un titre
+     sélectionné, à `app.detail_view.trace_indicator`, sans dupliquer leur
+     logique (même principe de composition que T63 et T75 : assembler des
+     briques déjà testées, pas en réécrire une nouvelle version).
+- **Point tranché avant implémentation** : `trace_indicator` a besoin de
+  `end` (fin d'exercice), qu'aucun fichier persisté ne porte —
+  `screen_results.parquet` ne le contient pas (vérifié dans le schéma que
+  plan.md déclare lui-même : `date, cik, ticker, ev_ebit_ttm, ...`, aucune
+  colonne `end`), cohérent avec la limite déjà documentée depuis T75
+  (`end` est un paramètre du run, pas une donnée par titre). `end` devient
+  donc un paramètre de configuration d'`app.py` (invariant 7 amendé : un
+  paramètre de modélisation est autorisé s'il est déclaré et affiché
+  partout où il influence un chiffre) — saisi via un contrôle Streamlit
+  dans la barre latérale, jamais codé en dur, et affiché explicitement
+  au-dessus de l'écran de détail (« Exercice de référence : {end} »).
+  `t`, lui, n'a pas ce problème : chaque ligne de `screen_results.parquet`
+  porte déjà sa propre colonne `date`, c'est le `t` du run qui l'a produite.
+  Une seconde fonction de lecture est donc nécessaire :
+  `storage.duckdb_reader.read_facts_for_cik(path, cik)`, qui interroge
+  `fundamentals_raw.parquet` via DuckDB pour un seul `cik`, en lecture
+  seule — les faits bruts dont `trace_indicator` a besoin pour reconstruire
+  la chaîne de repli.
+- **Explicitement hors périmètre** : tout style, mise en page ou choix
+  ergonomique (hors-tests de spec.md : « l'ergonomie et la lisibilité de
+  l'interface ») ; la persistance elle-même (déjà couverte par T54, T55,
+  T68) ; le calcul quotidien lui-même (T57-T63, T75) — `app.py` ne fait que
+  lire ce qui a déjà été écrit par un traitement antérieur, jamais ne le
+  recalcule.
+- **Fichiers** : `src/dashboard/app/main.py`,
+  `src/dashboard/storage/duckdb_reader.py`,
+  `tests/storage/test_duckdb_reader.py`, `tests/app/test_app_smoke.py`.
+- **Test** :
+  - `test_duckdb_reader_reads_latest_day_read_only` — sur un
+    `screen_results.parquet` de fixture portant plusieurs jours, la lecture
+    renvoie exactement les lignes du jour le plus récent ; le fichier sur
+    disque est identique avant et après (aucune écriture) ; sur un chemin
+    inexistant ou un fichier vide, une exception explicite est levée,
+    jamais un DataFrame vide silencieux.
+  - `test_duckdb_reader_reads_facts_for_one_cik` — sur un
+    `fundamentals_raw.parquet` de fixture portant plusieurs émetteurs, la
+    lecture filtrée à un `cik` renvoie exactement ses faits, aucun fait
+    d'un autre émetteur ; lecture seule, mêmes garanties que ci-dessus.
+  - `test_app_smoke_screen_and_detail` — utilise
+    `streamlit.testing.v1.AppTest.from_file("src/dashboard/app/main.py")` sur un
+    répertoire de sortie de fixture (chemin injecté, jamais codé en dur) :
+    l'application démarre sans exception (`at.exception` vide) ; le
+    compteur de titres retenus est affiché, y compris sur une fixture à
+    zéro titre retenu (critère 15) ; aucune occurrence de « S&P » n'apparaît
+    dans le texte rendu (critère 26) ; l'exercice de référence configuré
+    (`end`) est affiché explicitement (invariant 7) ; sélectionner un titre
+    de la fixture fait apparaître sa trace (au moins un composant portant
+    `end`, `filed` et `accn` pour un indicateur issu d'un fait déposé —
+    critère 9).
+- **Critères de la spec couverts** : aucun nouveau directement — comme T63
+  et T75, elle referme la boucle de présentation pour des critères déjà
+  couverts individuellement au niveau fonction (#9, #15, #16, #26, #27),
+  jusqu'ici jamais rendus dans un navigateur ni lus depuis un stockage
+  réellement persisté plutôt que depuis une fixture passée en paramètre.
+- **Terminée quand** : les deux tests passent, et
+  `uv run streamlit run src/dashboard/app/main.py`, pointé sur une sortie réelle
+  de `ingest_run.py`, affiche effectivement un écran dans un navigateur —
+  vérification manuelle unique, non automatisable par nature (hors-tests
+  spec.md, « l'ergonomie et la lisibilité de l'interface »), au même titre
+  que les vérifications manuelles de T75/T76 contre le vrai réseau.
+- **Dépend de** : T54, T55, T61, T62, T64, T65, T66, T68, T69.
+- **Statut** : les deux composantes sont faites et testées (4 tests
+  `storage.duckdb_reader`, 1 test de fumée `AppTest` couvrant écran de
+  synthèse et vue détail). Vérification manuelle réelle effectuée contre la
+  vraie sortie de `ingest_run.py` (WMS, cf. `etat-de-tranche.md`) :
+  **l'écran de synthèse fonctionne** (« 1 titre(s) retenu(s) aujourd'hui »,
+  aucune mention S&P, exercice de référence configurable et affiché), mais
+  **la vue détail plante systématiquement en usage réel**
+  (`ScreenResultsUnavailableError: fichier absent :
+  ingestion_output\fundamentals_raw.parquet`). Cause confirmée par
+  recherche exhaustive : `fundamentals_raw.parquet`, dont plan.md déclare
+  le schéma complet, n'est écrit par aucun code de production —
+  `pipeline.ingest.run_from_network` et `pipeline.daily_run` gardent
+  `facts` en mémoire pour la durée du run puis le jettent, jamais persisté.
+  Invisible jusqu'ici : aucun test (y compris celui de cette tâche) n'a de
+  raison d'exercer un fichier réel — chacun fournit sa propre fixture au
+  chemin attendu. Hors périmètre de T77 (« la persistance elle-même...
+  hors périmètre ») : consigné et assigné à T78 plutôt que corrigé ici.
+
+### T78 — Persister `fundamentals_raw.parquet` depuis l'ingestion réelle
+- **Objectif** : découvert en vérifiant T77 contre la vraie sortie de
+  `ingest_run.py` : `fundamentals_raw.parquet`, dont plan.md déclare le
+  schéma complet (`cik, concept, taxonomy, unit, end, start, filed, accn,
+  value, fiscal_period, fiscal_year`, clé `(cik, concept, end, filed,
+  accn)`, ajout seul), n'est écrit par aucun code de production.
+  `pipeline.ingest.run_from_network` récupère `facts` via
+  `fetch_company_facts` et le transmet à `pipeline.daily_run.run_daily`,
+  qui l'utilise en mémoire (`_derive_shares_pit`, `indicator_status`) sans
+  jamais l'écrire sur disque. Conséquence concrète, vérifiée en direct : la
+  vue détail d'`app.py` (T77) est fonctionnelle contre toute fixture de
+  test, mais plante systématiquement contre une vraie sortie d'ingestion
+  (`ScreenResultsUnavailableError: fichier absent`). Cette tâche ajoute la
+  persistance, en ajout seul comme `screen_results.parquet`/
+  `universe_membership.parquet`, sans dédupliquer les retraitements
+  (invariant 2 : plusieurs lignes pour un même `(cik, concept, end)` avec
+  des `filed` différents sont attendues, cf. T6).
+- **Fichiers** : `src/dashboard/storage/fundamentals_history.py` (nouveau,
+  sur le modèle de `storage.screen_history`/`storage.universe_history`),
+  `src/dashboard/pipeline/ingest.py` ou `src/dashboard/pipeline/daily_run.py`
+  (point d'appel, à trancher pendant l'implémentation selon lequel des deux
+  a réellement accès à `facts` sans dépendre de l'autre), `tests/storage/
+  test_fundamentals_history.py`, `tests/pipeline/test_ingest_from_network.py`
+  (étendu).
+- **Test** : `test_fundamentals_history_append_only_no_dedup` — deux appels
+  successifs avec des `filed` différents pour le même `(cik, concept, end)`
+  produisent deux lignes distinctes, aucune écrasée (même garantie que T6,
+  au niveau de la persistance plutôt que du calcul). Étend
+  `test_run_from_network_ingests_and_feeds_daily_run` (T75) pour vérifier
+  que `fundamentals_raw.parquet` existe après l'appel et contient les
+  faits attendus.
+- **Critères de la spec couverts** : aucun nouveau directement — referme un
+  écart entre plan.md (schéma déclaré) et le code réel, dans la même
+  famille que T14-T18 (fonctions déclarées « couvertes » sans jamais avoir
+  été appelées).
+- **Terminée quand** : les tests passent, et relancer `app.py` (T77) contre
+  une vraie sortie d'`ingest_run.py` fait fonctionner la vue détail sans
+  exception — vérification manuelle, même statut que T77.
+- **Dépend de** : T75, T77.
+- **Statut** : faite et testée (`test_fundamentals_history_append_only_no_dedup`,
+  `test_run_from_network_ingests_and_feeds_daily_run` étendu). Point d'appel
+  tranché en faveur de `pipeline.daily_run` (déjà seul responsable de
+  `append_screen_history`/`append_universe_history`), avec un nouveau
+  paramètre optionnel `fundamentals_history_path` sur `run_daily` et
+  `run_from_network`, par défaut `None` : aucun test existant n'a dû être
+  modifié pour s'adapter à cette tâche, seule l'écriture réelle (T75) et le
+  nouveau test l'activent. Vérification manuelle effectuée : relancé
+  `ingest_run.py` sur WMS avec `fundamentals_history_path` renseigné —
+  `fundamentals_raw.parquet` contient 21 564 faits réels ; relancé
+  `app/main.py` (T77) pointé dessus, la vue détail s'exécute sans exception
+  (`ev_ebit`/`fcf_yield`/`net_debt_ebitda` en `non_traceable` faute d'avoir
+  réglé `end` sur le bon exercice dans l'interface, `roic` en `ok` avec le
+  repli du taux d'imposition tracé) — le plantage constaté à la fin de T77
+  a disparu.
+
+### T79 — `roic` ne doit jamais afficher « ok » sans composante issue d'un fait
+- **Objectif** : trouvé par `/spec-verify` (cinquième passage), démontré en
+  direct sur de vraies données réelles (WMS, mauvais `end` interrogé depuis
+  `app/main.py`) et sur des faits synthétiques totalement vides :
+  `app.detail_view.trace_indicator` déclare `"ok"` dès que sa liste
+  `components` n'est pas vide. Pour `roic`, un des cinq traceurs
+  (`calc.nopat.trace_tax_rate`, T69) renvoie **toujours** au moins un
+  élément — y compris son repli par défaut, quand aucune donnée fiscale
+  n'existe. Conséquence : si EBIT, dette, capitaux propres et trésorerie
+  sont **tous** introuvables, `components` contient quand même la seule
+  note de repli fiscal, et le statut reste `"ok"` au lieu de
+  `"non_traceable"` — la distinction que T65 a justement introduite pour
+  ce cas devient inatteignable pour cet indicateur précis. Un commentaire
+  de `test_non_calculable_and_non_traceable_are_distinct_statuses`
+  (« ev_ebit, et non roic, depuis T69 ») avait déjà remarqué le fait sans
+  le traiter comme un défaut à corriger.
+- **Fichiers** : `src/dashboard/app/detail_view.py`,
+  `tests/app/test_detail_view_traceability.py` (étendu).
+- **Test** : nouveau cas dans
+  `test_non_calculable_and_non_traceable_are_distinct_statuses` (ou test
+  dédié) : faits ne portant aucune des composantes de `roic` (ni EBIT, ni
+  dette, ni capitaux propres, ni trésorerie, ni donnée fiscale), `value`
+  non `None` (comme le ferait un appelant à partir d'une valeur persistée
+  à un autre `end`, cf. T77) — le statut doit être `"non_traceable"`,
+  jamais `"ok"`. Le composant de repli du taux par défaut doit rester
+  présent dans `components` (ne pas régresser T69 : le paramètre reste
+  exposé même quand le statut global est `"non_traceable"`).
+- **Critères de la spec couverts** : #9, #27 (la distinction non
+  calculable / non traçable, déjà couverte par #6/#9/#27 via T65, doit
+  tenir pour chaque indicateur, pas seulement pour ceux dont aucun traceur
+  ne divulgue un paramètre de modélisation).
+- **Terminée quand** : le test passe, et `test_every_displayed_number_traceable`/
+  `test_default_tax_rate_fallback_disclosed_in_roic_trace` (T69) restent
+  au vert sans modification.
+- **Dépend de** : T65, T69.
+
 ## Vérification de couverture
 
 ### Critères de la spec
@@ -1443,4 +1772,93 @@ production. C'est le premier assemblage de bout en bout qui parte de
 données réseau réelles (via des transports factices en test) plutôt que
 de DataFrames déjà résolus fournis par l'appelant.
 
-Total : 75 tâches.
+T76 est une tâche corrective issue de tests manuels sur des titres réels
+aux caractéristiques volontairement variées (T75, méthode par profils) :
+Ford a révélé qu'un émetteur au bilan bien réel peut rester non calculable
+si sa dette est taguée sous un concept hors de la chaîne de repli connue —
+exactement le risque déjà nommé dans plan.md, jamais observé
+concrètement jusqu'ici.
+
+T77 est faite : elle ferme le dernier maillon jamais exercé de
+l'architecture en trois couches de plan.md (ingestion → calcul →
+présentation) et le premier usage réel de DuckDB, déclaré dans la stack de
+CLAUDE.md depuis le premier jour sans qu'aucune tâche antérieure ne l'ait
+mis en œuvre — un angle mort du contrôle de couverture, qui vérifie
+tasks.md contre plan.md, jamais contre CLAUDE.md (consigné dans
+`etat-de-tranche.md`). Comme T75, elle ne couvre aucun critère numéroté
+nouveau au sens strict de l'assemblage (référence #9, #15, #16, #26, #27
+déjà couverts par les fonctions qu'elle assemble). Une collision de noms
+entre le fichier `app.py` promis par CLAUDE.md et le paquet `app/` promis
+par plan.md a forcé un amendement mineur de CLAUDE.md avant implémentation
+(diff montré et validé) : le point d'entrée réel est
+`src/dashboard/app/main.py`. Vérifiée en direct contre la vraie sortie
+d'`ingest_run.py` (WMS) : l'écran de synthèse fonctionne, la vue détail
+plante faute de `fundamentals_raw.parquet` jamais persisté par le pipeline
+réel — écart assigné à T78, pas corrigé dans T77 (hors périmètre déclaré).
+
+T78 est faite. Découverte en vérifiant T77 en conditions réelles, pas par
+`/spec-verify` : le schéma de `fundamentals_raw.parquet` que plan.md
+déclare n'avait jamais été relié à un point d'écriture réel, dans la même
+famille que le trou T14-T18 (fonctions déclarées « couvertes » sans jamais
+avoir été appelées). Persistance ajoutée dans `pipeline.daily_run`, par un
+paramètre optionnel (`fundamentals_history_path`, défaut `None`) : aucun
+test ni appelant existant n'a eu besoin d'être modifié.
+
+T79 est faite. Trouvée par `/spec-verify` (cinquième passage) : `roic`
+pouvait afficher `"ok"` sans aucune composante issue d'un fait déposé,
+parce qu'un de ses cinq traceurs (le repli du taux d'imposition, T69)
+divulgue toujours quelque chose. `trace_indicator` distingue désormais les
+composantes de fait (clé `concept`) des composantes de paramètre (clé
+`parameter`) pour décider le statut ; le paramètre reste divulgué dans les
+deux cas, T69 non régressé. Amendement au décompte total ci-dessous :
+omis par erreur lors de l'ajout de cette tâche, corrigé ici.
+
+### T80 — Contraindre `end` aux exercices réellement connus du titre sélectionné
+- **Objectif** : signalé en fin d'audit `/spec-verify` (cinquième passage),
+  non corrigé par T79 (qui traite le symptôme sur `trace_indicator`, pas la
+  cause) : dans `src/dashboard/app/main.py` (T77), `end` est un
+  `st.sidebar.date_input` en accès libre, sans aucun lien vérifié avec
+  l'`end` qui a réellement servi à calculer la valeur affichée dans
+  `screen_results.parquet`. Rien n'empêche l'utilisateur d'interroger la
+  trace d'un titre à un exercice pour lequel ce titre n'a jamais rien
+  déposé — la trace obtenue est alors correctement `"non_traceable"`
+  depuis T79, mais ça reste une réponse silencieusement dénuée de sens
+  plutôt qu'un signal explicite que l'exercice choisi n'existe pas pour ce
+  titre (invariant 7 : un paramètre de modélisation doit rester exposable
+  et cohérent, pas seulement affiché). Cette tâche remplace le sélecteur
+  libre par un choix contraint : les options d'`end` proposées pour un
+  titre sélectionné sont dérivées des `end` réellement présents dans
+  `fundamentals_raw.parquet` pour son `cik`, jamais une date arbitraire.
+  Implique de sélectionner le titre **avant** de choisir `end` dans l'ordre
+  des contrôles (actuellement l'inverse), puisque les options dépendent des
+  faits du titre choisi.
+- **Fichiers** : `src/dashboard/app/main.py`,
+  `tests/app/test_app_smoke.py` (étendu).
+- **Test** : fixture `fundamentals_raw.parquet` portant deux `end`
+  distincts pour le même CIK (par exemple deux exercices annuels
+  successifs) ; via `AppTest`, vérifier que le contrôle `end` n'propose que
+  ces deux valeurs (jamais une date hors de cet ensemble), qu'il se
+  répercute correctement sur la trace affichée pour chacune, et qu'aucune
+  valeur libre ne peut être saisie.
+- **Critères de la spec couverts** : aucun nouveau directement — renforce
+  l'invariant 7 autour du paramètre `end` introduit par T77, dans la
+  continuité de T79 (qui couvrait #9/#27 pour le même paramètre).
+- **Terminée quand** : le test passe, et `test_app_smoke_screen_and_detail`
+  (T77) reste au vert sans modification de son propre scénario.
+- **Dépend de** : T77, T79.
+- **Statut** : faite et testée. Le titre est désormais sélectionné avant
+  l'exercice ; le sélecteur `end` (déplacé en `st.sidebar.selectbox`) ne
+  propose que les `end` réellement présents dans les faits du titre choisi
+  (aucun fichier n'existe si la liste est vide : message explicite, jamais
+  un sélecteur vide silencieux). Vérifié en conditions réelles contre la
+  vraie sortie WMS : 119 exercices réels proposés (au lieu d'une date
+  libre), sélectionner le bon (2016-03-31) restaure la trace complète des
+  quatre indicateurs jusqu'aux faits déposés du 10-K/A retraité.
+
+T80 est faite. Signalée en fin d'audit `/spec-verify` (cinquième passage) :
+`end` restait un sélecteur libre dans `app/main.py`, sans lien vérifié
+avec l'exercice qui a réellement produit la valeur affichée. Corrigée en
+dérivant les options d'`end` des faits réels du titre sélectionné plutôt
+que d'une date devinée.
+
+Total : 80 tâches.

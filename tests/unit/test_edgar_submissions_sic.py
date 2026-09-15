@@ -18,13 +18,13 @@ def test_edgar_submissions_parses_sic_and_entity_type() -> None:
     alpha = parse_sic_and_entity_type(_load("0000000001"), as_of=as_of).row(0, named=True)
     assert alpha["sic"] == "3674"
     assert alpha["sic_description"] == "Semiconductors & Related Devices"
-    assert alpha["entity_type"] == "operating company"
+    assert alpha["entity_type"] == "operating"
     assert alpha["as_of"] == as_of
 
     gamma = parse_sic_and_entity_type(_load("0000000003"), as_of=as_of).row(0, named=True)
     assert gamma["sic"] == "6022"
     assert 6000 <= int(gamma["sic"]) <= 6799
-    assert gamma["entity_type"] == "operating company"
+    assert gamma["entity_type"] == "operating"
 
     delta = parse_sic_and_entity_type(_load("0000000004"), as_of=as_of).row(0, named=True)
     assert delta["sic"] == "6726"

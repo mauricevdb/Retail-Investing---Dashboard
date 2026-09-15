@@ -134,6 +134,21 @@ def test_non_calculable_and_non_traceable_are_distinct_statuses() -> None:
 
     assert non_calculable["status"] != non_traceable["status"]
 
+    # roic est différent : calc.nopat.trace_tax_rate (T69) divulgue
+    # toujours au moins un élément, y compris son repli par défaut, même
+    # pour un CIK totalement absent des faits. Sans distinguer ce
+    # composant de paramètre des composantes issues d'un fait déposé,
+    # roic ne pouvait jamais être signalé "non_traceable" -- trouvé par
+    # /spec-verify (cinquième passage), démontré sur de vraies données
+    # (WMS) interrogées au mauvais `end`. Le repli reste divulgué
+    # (invariant 7, T69), mais ça ne doit jamais suffire à déclarer le
+    # chiffre traçable (invariant 8).
+    roic_non_traceable = trace_indicator(facts, "0000009999", end, t, "roic", 0.49375)
+    assert roic_non_traceable["status"] == "non_traceable"
+    parameters = [c for c in roic_non_traceable["components"] if "parameter" in c]
+    assert len(parameters) == 1
+    assert parameters[0]["parameter"] == "default_tax_rate"
+
 
 def test_price_traceable_to_quotation_date() -> None:
     with open(GOLDEN_PRICES, encoding="utf-8") as f:

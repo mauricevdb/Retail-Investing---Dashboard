@@ -1,6 +1,6 @@
 {
   "cik": "0000000001",
-  "entityType": "operating company",
+  "entityType": "operating",
   "sic": "3674",
   "sicDescription": "Semiconductors & Related Devices",
   "tickers": ["AAAA"],

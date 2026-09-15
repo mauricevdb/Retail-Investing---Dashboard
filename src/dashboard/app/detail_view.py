@@ -30,15 +30,26 @@ def trace_indicator(
         for component in tracer(facts, cik, end, t)
     ]
 
+    # Un composant de paramètre de modélisation (ex. le repli du taux
+    # d'imposition par défaut, T69) doit toujours être divulgué quand il
+    # influence le chiffre (invariant 7), mais lui seul ne prouve jamais
+    # qu'un indicateur est traçable jusqu'à un fait déposé (invariant 8) :
+    # calc.nopat.trace_tax_rate renvoie toujours au moins un élément, même
+    # sans aucune donnée fiscale, ce qui rendait roic "ok" alors qu'EBIT,
+    # dette, capitaux propres et trésorerie pouvaient être tous introuvables
+    # (trouvé par /spec-verify, cinquième passage, T79).
+    fact_components = [component for component in components if "concept" in component]
+
     if value is None:
         # Donnée réellement absente (invariant 7, critères 6/11) : signalée
         # comme non calculable, jamais masquée ni comblée par défaut.
         status = "non_calculable"
-    elif not components:
-        # Un chiffre est affiché mais aucune composante n'a pu être remontée
-        # à un fait déposé (invariant 8, critères 9/27) : ce n'est jamais
-        # une absence de donnée, c'est une limite de l'outil, et elle doit
-        # être signalée comme telle.
+    elif not fact_components:
+        # Un chiffre est affiché mais aucune composante issue d'un fait
+        # déposé n'a pu être remontée (invariant 8, critères 9/27) : ce
+        # n'est jamais une absence de donnée, c'est une limite de l'outil,
+        # et elle doit être signalée comme telle -- même si un paramètre de
+        # modélisation, lui, a bien été divulgué.
         status = "non_traceable"
     else:
         status = "ok"

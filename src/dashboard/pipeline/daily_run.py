@@ -15,6 +15,7 @@ from dashboard.calc.sector_grouping import classify as classify_sector
 from dashboard.calc.shares_bridge import resolve as resolve_shares
 from dashboard.calc.universe import apply_exclusions, resolve_sic_as_of
 from dashboard.calc.universe import universe as compute_universe
+from dashboard.storage.fundamentals_history import append as append_fundamentals_history
 from dashboard.storage.screen_history import append as append_screen_history
 from dashboard.storage.universe_history import append as append_universe_history
 
@@ -78,6 +79,7 @@ def run_daily(
     end: date | None = None,
     thresholds: dict[str, tuple[float | None, float | None]] | None = None,
     screen_history_path: Path | None = None,
+    fundamentals_history_path: Path | None = None,
     n: int = 900,
     buffer: int = 100,
     plausible_range: tuple[int, int] = (700, 1100),
@@ -93,6 +95,11 @@ def run_daily(
         shares_pit, non_calculable_shares_tickers = _derive_shares_pit(
             shares_pit, facts, sic_codes, t
         )
+        if fundamentals_history_path is not None:
+            # Persistance réelle des faits ingérés (T78) -- jusqu'ici facts
+            # ne vivait qu'en mémoire pour la durée du run, invisible dès
+            # que le processus se terminait.
+            append_fundamentals_history(fundamentals_history_path, facts)
 
     membership = compute_universe(
         shares_pit,
@@ -104,7 +111,11 @@ def run_daily(
         buffer=buffer,
         plausible_range=plausible_range,
     )
-    append_universe_history(universe_history_path, membership)
+    # calc.universe.universe() ne porte aucune colonne "date" -- c'est ici,
+    # au moment de persister, qu'elle doit être ajoutée (même principe que
+    # screen_rows ci-dessous), pour que le garde anti-doublon (date, cik)
+    # de storage.universe_history (T68) trouve la colonne qu'il exige.
+    append_universe_history(universe_history_path, membership.with_columns(pl.lit(t).alias("date")))
 
     # Indicateurs, filtrage, classement et persistance du screen : reste
     # hors périmètre si l'appelant n'a pas encore fourni ces paramètres

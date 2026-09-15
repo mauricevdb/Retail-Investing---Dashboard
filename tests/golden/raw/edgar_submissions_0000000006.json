@@ -1,6 +1,6 @@
 {
   "cik": "0000000006",
-  "entityType": "operating company",
+  "entityType": "operating",
   "sic": "1850",
   "sicDescription": "Reserved (non standard)",
   "tickers": ["FFFF"],
