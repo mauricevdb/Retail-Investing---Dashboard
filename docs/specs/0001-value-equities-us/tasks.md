@@ -2056,5 +2056,14 @@ service ; le classement par capitalisation approchée et son câblage dans
   de l'écran.
 - **Terminée quand** : les deux tests passent.
 - **Dépend de** : T2, T17, T83.
+- **Statut** : faite. Les deux tests passent (suite complète : 88 passed,
+  5 deselected). `rank_candidates` joint frames → ticker_cik → dernier
+  cours connu ≤ `t`, calcule la capitalisation approchée, coupe à
+  `n + buffer`, et refuse explicitement une période de frames à moins de
+  120 jours de `t` (`FramePeriodTooRecentError`, ADR 0005).
 
-Total : 84 tâches (T84 rédigée, non implémentée).
+T84 est faite. Deuxième maillon du chantier de découverte automatique du
+bassin construit et testé isolément ; le câblage dans
+`pipeline.ingest.run_from_network` reste à spécifier séparément.
+
+Total : 84 tâches.
