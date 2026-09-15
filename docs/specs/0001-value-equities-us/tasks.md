@@ -1931,4 +1931,38 @@ défaut trouvé, mais un chiffre réel remplace la conjecture — ~20 s pour
 1000 titres en mémoire pure, confirmant concrètement (pas seulement en
 théorie) le coût non vectorisé de `_derive_shares_pit`.
 
-Total : 81 tâches.
+### T82 — Fiabiliser le délai d'exécution d'`AppTest` dans le test de fumée
+- **Objectif** : signalé pendant T81 — `streamlit.testing.v1.AppTest`
+  s'accorde par défaut 3 secondes pour qu'un script termine son exécution
+  (`require_widgets_deltas`), un délai fixe jamais paramétré dans
+  `tests/app/test_app_smoke.py` (T77/T80). Sous charge (suite complète,
+  après l'ajout de la fixture à ~1000 titres de T81), ce délai est
+  occasionnellement dépassé (`RuntimeError: AppTest script run timed out
+  after 3(s)`), jamais en isolation — une fragilité du harnais de test,
+  pas un défaut d'`app/main.py` lui-même (le script s'exécute correctement
+  à chaque fois, seulement pas toujours dans les 3 secondes par défaut).
+- **Fichiers** : `tests/app/test_app_smoke.py`.
+- **Test** : aucun nouveau test — `AppTest.from_file(APP_PATH,
+  default_timeout=...)` reçoit un délai explicite et large plutôt que le
+  défaut de la bibliothèque, appliqué à chacun des quatre appels `.run()`
+  du test existant. Pas un test de performance (hors-tests de spec.md),
+  seulement une marge suffisante pour ne plus dépendre de la charge
+  machine au moment de l'exécution.
+- **Critères de la spec couverts** : aucun — fiabilité de la suite de
+  tests, pas un comportement du produit.
+- **Terminée quand** : `tests/app/test_app_smoke.py` passe de façon
+  répétée y compris juste après `tests/pipeline/test_daily_run_at_scale.py`
+  (T81) dans la même exécution de suite.
+- **Dépend de** : T77, T80, T81.
+- **Statut** : faite. `AppTest.from_file(APP_PATH, default_timeout=15)`
+  s'applique aux quatre appels `.run()` du test sans les répéter
+  individuellement. Vérifié en enchaînant `test_daily_run_at_scale.py`
+  (T81) puis `test_app_smoke.py` trois fois de suite dans la même
+  exécution de suite : trois succès, plus aucune occurrence du délai
+  dépassé.
+
+T82 est faite. Fragilité de harnais de test signalée pendant T81, corrigée
+par un délai `AppTest` explicite plutôt que le défaut de 3 s de la
+bibliothèque.
+
+Total : 82 tâches.

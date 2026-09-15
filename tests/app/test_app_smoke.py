@@ -54,7 +54,11 @@ def test_app_smoke_screen_and_detail(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_SCREEN_RESULTS_PATH", str(screen_path))
     monkeypatch.setenv("DASHBOARD_FUNDAMENTALS_PATH", str(facts_path))
 
-    at = AppTest.from_file(APP_PATH)
+    # Délai explicite et large (T82) : le défaut de la bibliothèque (3 s)
+    # dépend de la charge machine au moment du test, pas de la correction
+    # du script -- observé occasionnellement dépassé sous charge, jamais
+    # en isolation.
+    at = AppTest.from_file(APP_PATH, default_timeout=15)
     at.run()
     assert not at.exception
 

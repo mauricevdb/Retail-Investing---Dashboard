@@ -192,10 +192,9 @@ trouvé ou de temps, pas des cas dont l'existence serait ignorée :
   ~900-1100), signalée comme un chantier distinct pendant T81 sans être
   traitée. Effet de bord observé en exécutant la suite complète après
   l'ajout de cette fixture, plus lourde : `tests/app/test_app_smoke.py`
-  (T77/T80) dépasse occasionnellement le délai fixe de 3 s qu'`AppTest`
-  s'accorde par défaut (jamais en isolation) — fragilité préexistante du
-  harnais de test Streamlit, révélée mais pas causée par T81, non
-  corrigée.
+  (T77/T80) dépassait occasionnellement le délai fixe de 3 s qu'`AppTest`
+  s'accorde par défaut (jamais en isolation) — corrigé par T82 (délai
+  explicite de 15 s).
 - **Écran rendu depuis T77/T78, mais seulement vérifié à la main sur un
   seul titre.** `src/dashboard/app/main.py` existe désormais (le point
   d'entrée a dû être placé dans le paquet `app/`, pas à côté sous
