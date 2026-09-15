@@ -2110,6 +2110,17 @@ bassin construit et testé isolément ; le câblage dans
   `fetch_bulk_prices` n'est appelé qu'une fois, réutilisé pour le
   classement et pour le calcul des indicateurs.
 
+  Premier lancement réel effectué après coup (`ingest_run.py`,
+  `frame_period="CY2025Q4I"`, `n=3, buffer=2`) : **Apple découverte
+  automatiquement** comme premier rang par capitalisation réelle (~4,84
+  T$), jamais choisie à la main. Indicateurs calculés une fois `end`
+  corrigé sur le vrai exercice non calendaire d'Apple (2025-12-27) :
+  EV/EBIT ≈ 95,9, ROIC ≈ 31,9 %, dette nette/EBITDA ≈ 0,80 — plausibles
+  pour un titre réel de cette nature. Confirme en conditions réelles ce
+  que T85 ne prouvait jusque-là que par transports factices. Restait
+  seulement à petite échelle (5 candidats) : un lancement au `n`/`buffer`
+  de production reste non tenté, consigné dans `etat-de-tranche.md`.
+
 T85 est faite. Dernier maillon du chantier de découverte automatique du
 bassin (T83, T84, ADR 0005) : `run_from_network` sélectionne et n'ingère
 réellement que les candidats retenus après classement par capitalisation
