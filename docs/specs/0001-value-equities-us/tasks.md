@@ -2391,5 +2391,14 @@ découverte automatique du bassin ouvert après T81.
   somme de quatre trimestres seuls cohérente, jamais une valeur mêlant un
   cumul.
 - **Dépend de** : T43.
+- **Statut** : faite. `ttm()` exclut désormais tout fait dont la durée
+  (`end - start`) dépasse 100 jours, écartant les cumuls YTD tout en
+  gardant les vrais trimestres. Fixture existante étendue avec des `start`
+  réalistes (absents jusqu'ici) ; nouveau test reproduisant exactement le
+  cas FISV. Les deux passent, suite complète 97 passed. Revérifié contre
+  les vraies données déjà ingérées : toujours résoluble pour 22/25 titres
+  (le correctif n'exclut pas de vrais trimestres), FISV donne désormais
+  une valeur déterministe (5,065 Md$, cohérente avec son EBIT annuel de
+  5,818 Md$) au lieu d'un choix arbitraire entre deux valeurs réelles.
 
-Total : 90 tâches (T90 rédigée, non implémentée).
+Total : 90 tâches.
