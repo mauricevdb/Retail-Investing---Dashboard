@@ -252,8 +252,12 @@ def test_run_from_network_ingests_and_feeds_daily_run(tmp_path: Path) -> None:
 def test_run_from_network_propagates_source_failure(tmp_path: Path) -> None:
     edgar_transport = RoutingEdgarTransport(fail_on="companyfacts")
     eodhd_transport = RoutingEodhdTransport()
+    # sleep factice (T87) : cet échec déclenche désormais des tentatives
+    # avant de remonter -- jamais un vrai temps d'attente dans la suite.
     edgar_client = EdgarClient(
-        user_agent="RI Dashboard test@example.com", transport=edgar_transport
+        user_agent="RI Dashboard test@example.com",
+        transport=edgar_transport,
+        sleep=lambda seconds: None,
     )
     eodhd_client = EodhdClient(api_key="fake-eodhd-key", transport=eodhd_transport)
 

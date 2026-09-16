@@ -2217,5 +2217,21 @@ oubli qu'à T79).
   observable.
 - **Terminée quand** : les tests passent pour les deux clients.
 - **Dépend de** : T11, T12, T13.
+- **Statut** : faite. `EdgarClient`/`EodhdClient` acceptent désormais
+  `retries` (2 par défaut, 3 tentatives au total) et `retry_delay` (1 s),
+  réutilisant le mécanisme d'attente déjà injectable de T11 ; `EodhdClient`
+  gagne son premier paramètre `sleep` (n'en avait aucun avant). Les 4
+  nouveaux tests passent (2 par client). Effet de bord corrigé au passage :
+  deux tests existants (`test_run_from_network_propagates_source_failure`,
+  `test_no_api_key_in_logs_or_errors`) construisaient un `EodhdClient`
+  sans horloge factice — leur scénario d'échec déclenchait désormais un
+  vrai `time.sleep` de 2 s à chaque exécution, corrigé en injectant
+  `sleep=lambda seconds: None`. Suite complète 94 passed (aucun vrai délai
+  ajouté), suite de contact 5 passed (comportement réel inchangé).
 
-Total : 87 tâches (T87 rédigée, non implémentée).
+T87 est faite. Trouvée en tentant deux fois le lancement réel à l'échelle
+de production, chaque fois interrompu par une panne réseau transitoire
+différente. Reste à vérifier : un nouveau lancement réel complet, pour
+confirmer que le retry suffit en pratique face à ce type d'incident.
+
+Total : 87 tâches.

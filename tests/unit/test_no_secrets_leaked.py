@@ -32,7 +32,9 @@ def test_no_api_key_in_logs_or_errors(caplog) -> None:
     with pytest.raises(EdgarClientError) as edgar_exc_info:
         edgar_client.get_json(url_with_secret)
 
-    eodhd_client = EodhdClient(api_key=secret, transport=FailingTransport(raw_failure))
+    eodhd_client = EodhdClient(
+        api_key=secret, transport=FailingTransport(raw_failure), sleep=lambda seconds: None
+    )
     with pytest.raises(EodhdClientError) as eodhd_exc_info:
         eodhd_client.get_json(url_with_secret)
 
