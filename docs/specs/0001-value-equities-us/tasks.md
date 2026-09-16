@@ -2336,8 +2336,14 @@ oubli qu'à T79 et T86).
   toujours `n`/`buffer` sans changement. Le test passe (les trois candidats
   ingérés malgré un `buffer` d'univers à 0), suite complète 96 passed.
 
-T89 est faite. Reste à vérifier en conditions réelles avec une marge
-suffisamment large (à choisir empiriquement au regard des ~38 %
-d'attrition mesurés) pour retomber dans la plage plausible par défaut.
+T89 est faite. Vérifiée en conditions réelles avec `discovery_buffer=800`
+(~1700 candidats réels ingérés) : univers final à **800 titres**, dans la
+plage plausible par défaut (700-1100) — exactement `n - buffer` attendu
+pour un démarrage à froid. Premier lancement complet et correct de bout en
+bout à l'échelle de production réelle, 25 titres classés (plafond du
+critère 16), sur des émetteurs réels plausibles (Fiserv, Western Union,
+APA Corp, Herbalife, Nabors, Constellium, Lear, Ingredion, PulteGroup...)
+avec des multiples EV/EBIT cohérents (4,6 à 7,0). Referme le chantier de
+découverte automatique du bassin ouvert après T81.
 
 Total : 89 tâches.

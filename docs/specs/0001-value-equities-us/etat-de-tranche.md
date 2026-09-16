@@ -218,12 +218,23 @@ trouvé ou de temps, pas des cas dont l'existence serait ignorée :
   quatre correctifs, un cinquième lancement donne un univers à **618**,
   exactement le chiffre qu'un diagnostic indépendant avait calculé sans le
   défaut — confirmant qu'aucun artefact ne reste. Le solde (618 < 700)
-  n'est plus un défaut : c'est l'attrition réelle par exclusion SIC
+  n'était plus un défaut : l'attrition réelle par exclusion SIC
   (finance/assurance/immobilier, fonds — mesurée à ~38 % des 1000
-  candidats retenus par la coupure) qui dépasse la marge de découverte
-  actuelle (`n + buffer = 1000`). Élargir cette marge (paramètre, pas
-  correctif) reste à faire si un univers dans la plage (700-1100) est
-  voulu à cette date précise.
+  candidats retenus par la coupure) dépassait la marge de découverte
+  d'alors (`n + buffer = 1000`), confondue avec la marge d'hystérésis de
+  l'univers final.
+
+  **T89** sépare ces deux marges (`discovery_buffer`, distinct de
+  `buffer`) ; un sixième lancement réel, avec `discovery_buffer=800`
+  (~1700 candidats réels ingérés), donne un univers à **800 titres** —
+  dans la plage plausible par défaut (700-1100), exactement `n - buffer`
+  attendu pour un démarrage à froid. Premier lancement complet et correct
+  de bout en bout à l'échelle de production réelle : 25 titres classés
+  (plafond du critère 16) sur des émetteurs réels plausibles (Fiserv,
+  Western Union, APA Corp, Herbalife, Nabors, Constellium, Lear,
+  Ingredion, PulteGroup...), multiples EV/EBIT cohérents (4,6 à 7,0). Le
+  chantier de découverte automatique du bassin, ouvert après T81, est
+  refermé.
 
   Deux limites assumées, documentées dans l'ADR : l'API frames ne porte
   aucune date de dépôt, donc un garde-fou de 120 jours entre la fin de
