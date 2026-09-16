@@ -2128,4 +2128,42 @@ approchée, jamais le bassin entier. Le chantier ouvert après T81 est
 refermé — reste à l'exercer un jour contre le vrai réseau, à l'échelle
 réelle, en usage manuel (même statut que T75 vis-à-vis du réseau réel).
 
-Total : 85 tâches.
+### T86 — Dédupliquer par CIK avant de couper le classement de candidats
+- **Objectif** : trouvé en tentant le premier lancement réel de T85 à
+  l'échelle de production (`n=900, buffer=100`) : l'univers final n'a
+  retenu que 560 titres, hors de la plage plausible (700-1100), alors que
+  l'ingestion complète (~1000 candidats) avait réussi sans erreur.
+  Diagnostiqué en rejouant `calc.candidate_pool.rank_candidates` sur les
+  vraies données du jour (frames `CY2025Q4I`, `company_tickers.json`, bulk
+  EODHD réels) : le classement retourné porte 1000 **lignes** mais
+  seulement 813 **CIK distincts**. Cause racine confirmée :
+  `ingestion.edgar_tickers.parse_company_tickers` produit plusieurs lignes
+  pour un même CIK quand un émetteur a plusieurs tickers cotés (classes
+  d'actions multiples, ex. GOOG/GOOGL) — 10 422 lignes pour seulement
+  8 022 CIK distincts dans `company_tickers.json` au moment du test. La
+  jointure `shares_frame ⋈ ticker_cik` de `rank_candidates` démultiplie
+  alors ces émetteurs : chaque ticker supplémentaire d'un même CIK
+  consomme sa propre place dans le classement et sa propre coupure à
+  `n + buffer`, au détriment d'émetteurs distincts qui auraient dû être
+  retenus à la place. `rank_candidates` coupe donc `n + buffer`
+  **lignes**, jamais garanties `n + buffer` **émetteurs distincts** —
+  exactement la cause du déficit observé (1000 lignes, seulement 813
+  émetteurs, puis 560 après les exclusions réelles de `calc.universe`).
+- **Fichiers** : `src/dashboard/calc/candidate_pool.py`,
+  `tests/calc/test_candidate_pool.py` (étendu).
+- **Test** : `test_rank_candidates_deduplicates_by_cik_before_cutoff` — un
+  CIK synthétique porteur de deux tickers (deux classes d'actions, prix
+  différents) et deux CIK à un seul ticker chacun ; avec `n=1, buffer=1`,
+  le classement doit retenir exactement deux **émetteurs distincts** (le
+  CIK multi-tickers une seule fois, sur son ticker de capitalisation la
+  plus élevée), jamais deux lignes pour le même CIK consommant les deux
+  places disponibles.
+- **Critères de la spec couverts** : aucun directement — corrige un défaut
+  réel du mécanisme de découverte du bassin (T84), jamais exercé sur des
+  données réelles avant ce lancement.
+- **Terminée quand** : le test passe, et un nouveau lancement réel à
+  l'échelle de production (`n=900, buffer=100`) produit un univers dans la
+  plage plausible par défaut.
+- **Dépend de** : T84, T85.
+
+Total : 86 tâches (T86 rédigée, non implémentée).
