@@ -2278,5 +2278,12 @@ confirmer que le retry suffit en pratique face à ce type d'incident.
   fois dans `fundamentals_raw.parquet` par nombre d'appels réseau (à
   vérifier manuellement, hors suite automatisée).
 - **Dépend de** : T75, T85, T86.
+- **Statut** : code fait et testé. Mode `frame_period` : `selected` reprend
+  directement `ranked.select(["cik", "ticker"])` (déjà dédupliqué par
+  CIK, T86), sans refiltrer `ticker_cik`. Mode `ciks` :
+  `selected.unique(subset=["cik"], keep="first")` ajouté après le calcul
+  des CIK manquants. Chaque test vérifié faux avant correctif (2 appels
+  au lieu d'1) puis vrai après. Suite complète 95 passed. Vérification
+  manuelle contre le vrai réseau en cours.
 
 Total : 88 tâches (T88 rédigée, non implémentée).

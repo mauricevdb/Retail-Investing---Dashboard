@@ -60,6 +60,12 @@ class DiscoveryEdgarTransport:
     def __init__(self, frame_response: dict):
         with open(GOLDEN / "edgar_company_tickers.json", encoding="utf-8") as f:
             self.tickers = json.load(f)
+        # CIK 1 porte un second ticker, comme Freddie Mac et ses séries
+        # d'actions préférentielles (T88) -- sans prix associé dans le bulk
+        # EODHD, pour prouver que la seule présence de ce ticker dans
+        # company_tickers ne doit jamais, à elle seule, déclencher une
+        # deuxième ingestion réelle du même CIK.
+        self.tickers["4"] = {"cik_str": 1, "ticker": "AAAZ", "title": "Alpha Preferred"}
         with open(GOLDEN / "edgar_submissions_0000000001.json", encoding="utf-8") as f:
             self.submissions = json.load(f)
         with open(GOLDEN / "edgar_companyfacts_0000000001.json", encoding="utf-8") as f:
@@ -184,6 +190,77 @@ def test_run_from_network_discovers_candidates_via_frame_period(tmp_path: Path) 
     # classée via la frame, jamais sélectionnée pour l'ingestion complète.
     assert not any("CIK0000000002" in call for call in edgar_transport.calls)
     assert any("/frames/" in call for call in edgar_transport.calls)
+
+    # CIK 1 (Alpha) porte deux tickers dans company_tickers (AAAA, AAAZ) --
+    # une seule ingestion réelle doit avoir lieu, jamais une par ticker
+    # (T88), même si AAAZ n'a jamais été retenue par le classement.
+    submissions_calls = [c for c in edgar_transport.calls if "submissions/CIK0000000001" in c]
+    facts_calls = [c for c in edgar_transport.calls if "companyfacts/CIK0000000001" in c]
+    assert len(submissions_calls) == 1
+    assert len(facts_calls) == 1
+
+
+class MultiTickerEdgarTransport:
+    """company_tickers liste le CIK 1 sous deux tickers (comme Freddie Mac
+    et ses séries d'actions préférentielles, T88) -- compte les appels
+    dépôts/faits pour ce CIK afin de prouver qu'une seule ingestion réelle
+    a lieu, jamais une par ticker."""
+
+    def __init__(self):
+        with open(GOLDEN / "edgar_submissions_0000000001.json", encoding="utf-8") as f:
+            self.submissions = json.load(f)
+        with open(GOLDEN / "edgar_companyfacts_0000000001.json", encoding="utf-8") as f:
+            self.facts = json.load(f)
+        self.tickers = {
+            "0": {"cik_str": 1, "ticker": "AAAA", "title": "Alpha Operating Co"},
+            "1": {"cik_str": 1, "ticker": "AAAZ", "title": "Alpha Operating Co (Preferred)"},
+        }
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, headers: dict):
+        self.calls.append(url)
+        if "company_tickers.json" in url:
+            return self.tickers
+        if "submissions/CIK0000000001.json" in url:
+            return self.submissions
+        if "companyfacts/CIK0000000001.json" in url:
+            return self.facts
+        raise AssertionError(f"URL EDGAR inattendue : {url}")
+
+
+def test_run_from_network_ciks_mode_fetches_multi_ticker_cik_once(tmp_path: Path) -> None:
+    edgar_transport = MultiTickerEdgarTransport()
+    eodhd_transport = RoutingEodhdTransport()
+    edgar_client = EdgarClient(
+        user_agent="RI Dashboard test@example.com", transport=edgar_transport
+    )
+    eodhd_client = EodhdClient(api_key="fake-eodhd-key", transport=eodhd_transport)
+
+    t = date(2024, 2, 15)
+    end = date(2023, 12, 31)
+    universe_history_path = tmp_path / "universe_membership.parquet"
+    screen_history_path = tmp_path / "screen_results.parquet"
+
+    run_from_network(
+        edgar_client=edgar_client,
+        eodhd_client=eodhd_client,
+        t=t,
+        end=end,
+        universe_history_path=universe_history_path,
+        hier_membership=set(),
+        ciks=["0000000001"],
+        thresholds={},
+        screen_history_path=screen_history_path,
+        plausible_range=(0, 1),
+    )
+
+    submissions_calls = [c for c in edgar_transport.calls if "submissions/CIK0000000001" in c]
+    facts_calls = [c for c in edgar_transport.calls if "companyfacts/CIK0000000001" in c]
+    assert len(submissions_calls) == 1
+    assert len(facts_calls) == 1
+
+    membership = pl.read_parquet(universe_history_path)
+    assert membership.height == 1
 
 
 def test_run_from_network_ingests_and_feeds_daily_run(tmp_path: Path) -> None:

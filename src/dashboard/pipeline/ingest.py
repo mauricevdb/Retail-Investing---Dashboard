@@ -54,13 +54,22 @@ def run_from_network(
         # Découverte automatique du bassin (T83-T85, ADR 0005) : seuls les
         # candidats retenus après classement par capitalisation approchée
         # sont réellement ingérés ci-dessous -- jamais le bassin entier.
+        # `ranked` porte déjà exactly un ticker par CIK (le plus capitalisé,
+        # T86) -- le reprendre tel quel plutôt que refiltrer ticker_cik par
+        # appartenance au CIK, qui redonnerait tous ses tickers (T88 : un
+        # même CIK peut porter des dizaines de tickers, ex. Freddie Mac et
+        # ses séries d'actions préférentielles).
         shares_frame = fetch_shares_outstanding_frame(edgar_client, period=frame_period)
         ranked = rank_candidates(shares_frame, ticker_cik, prices_adj, t, n=n, buffer=buffer)
-        selected = ticker_cik.filter(pl.col("cik").is_in(ranked["cik"].to_list()))
+        selected = ranked.select(["cik", "ticker"])
         missing: set[str] = set()
     elif ciks is not None:
         selected = ticker_cik.filter(pl.col("cik").is_in(ciks))
         missing = set(ciks) - set(selected["cik"].to_list())
+        # Un CIK demandé peut porter plusieurs tickers dans company_tickers
+        # (même cause qu'au-dessus, T88) : un seul retenu, jamais une
+        # ingestion réelle répétée pour le même émetteur.
+        selected = selected.unique(subset=["cik"], keep="first")
     else:
         selected = ticker_cik.filter(pl.col("ticker").is_in(tickers))
         missing = set(tickers) - set(selected["ticker"].to_list())
