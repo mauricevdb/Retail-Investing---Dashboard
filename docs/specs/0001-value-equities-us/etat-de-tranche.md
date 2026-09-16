@@ -192,25 +192,44 @@ trouvé ou de temps, pas des cas dont l'existence serait ignorée :
   s'accorde par défaut (jamais en isolation) — corrigé par T82 (délai
   explicite de 15 s).
 - **Découverte automatique du bassin construite, câblée et confirmée en
-  conditions réelles (T83-T85, ADR 0005), à petite échelle.**
+  conditions réelles (T83-T88, ADR 0005), y compris à l'échelle cible.**
   `pipeline.ingest.run_from_network` classe un bassin par capitalisation
   approchée (API frames de SEC EDGAR + bulk EODHD, un appel chacun plutôt
   qu'un par candidat) et n'ingère réellement que les candidats retenus
-  après coupure. Premier lancement réel effectué (`frame_period=CY2025Q4I`,
-  `n=3, buffer=2`, 5 candidats réels classés) : **Apple découverte
-  automatiquement comme premier rang par capitalisation réelle** (~4,84
-  T$, cohérent), indicateurs réels calculés une fois `end` corrigé sur son
-  vrai exercice non calendaire (2025-12-27, pas une date calendaire
-  supposée) — EV/EBIT ≈ 95,9, ROIC ≈ 31,9 %, dette nette/EBITDA ≈ 0,80.
-  Reste non fait : un lancement à l'échelle cible (~900-1100, `n=900,
-  buffer=100`), jamais tenté — le coût réel en appels et en temps à cette
-  échelle reste à mesurer en pratique, pas seulement en théorie (T81 ne
-  l'a mesuré qu'en fixture synthétique, sans le réseau réel). Deux limites
-  assumées, documentées dans l'ADR : l'API frames ne porte aucune date de
-  dépôt, donc un garde-fou de 120 jours entre la fin de période et `t`
-  approxime la sécurité point-in-time (jamais une garantie absolue par
-  émetteur) ; les données de frames ne servent jamais à un chiffre
-  affiché, seulement au classement.
+  après coupure. Premier lancement réel à petite échelle
+  (`frame_period=CY2025Q4I`, `n=3, buffer=2`, 5 candidats réels classés) :
+  **Apple découverte automatiquement comme premier rang par capitalisation
+  réelle** (~4,84 T$, cohérent), indicateurs réels calculés une fois `end`
+  corrigé sur son vrai exercice non calendaire (2025-12-27, pas une date
+  calendaire supposée) — EV/EBIT ≈ 95,9, ROIC ≈ 31,9 %, dette nette/EBITDA
+  ≈ 0,80.
+
+  Lancement à l'échelle cible (`n=900, buffer=100`) tenté quatre fois,
+  chaque échec diagnostiqué et corrigé avant de retenter — jamais une
+  hypothèse non vérifiée : (1) univers à 560 titres, cause identifiée et
+  corrigée (T86, jointure `rank_candidates` non dédupliquée par CIK — un
+  émetteur à plusieurs classes d'actions consommait plusieurs places à la
+  coupure) ; (2-3) deux pannes réseau transitoires différentes ont
+  interrompu la boucle de ~2000 appels sans rien persister, corrigées par
+  un retry borné (T87) ; (4) univers encore à 673-674, cause identifiée et
+  corrigée (T88, un second point de démultiplication par CIK dans
+  `pipeline.ingest` lui-même — Freddie Mac et ses séries d'actions
+  préférentielles apparaissaient 625 fois dans `sic_codes`). Après ces
+  quatre correctifs, un cinquième lancement donne un univers à **618**,
+  exactement le chiffre qu'un diagnostic indépendant avait calculé sans le
+  défaut — confirmant qu'aucun artefact ne reste. Le solde (618 < 700)
+  n'est plus un défaut : c'est l'attrition réelle par exclusion SIC
+  (finance/assurance/immobilier, fonds — mesurée à ~38 % des 1000
+  candidats retenus par la coupure) qui dépasse la marge de découverte
+  actuelle (`n + buffer = 1000`). Élargir cette marge (paramètre, pas
+  correctif) reste à faire si un univers dans la plage (700-1100) est
+  voulu à cette date précise.
+
+  Deux limites assumées, documentées dans l'ADR : l'API frames ne porte
+  aucune date de dépôt, donc un garde-fou de 120 jours entre la fin de
+  période et `t` approxime la sécurité point-in-time (jamais une garantie
+  absolue par émetteur) ; les données de frames ne servent jamais à un
+  chiffre affiché, seulement au classement.
 - **Écran rendu depuis T77/T78, mais seulement vérifié à la main sur un
   seul titre.** `src/dashboard/app/main.py` existe désormais (le point
   d'entrée a dû être placé dans le paquet `app/`, pas à côté sous

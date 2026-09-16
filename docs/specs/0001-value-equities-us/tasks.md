@@ -2283,7 +2283,16 @@ confirmer que le retry suffit en pratique face à ce type d'incident.
   CIK, T86), sans refiltrer `ticker_cik`. Mode `ciks` :
   `selected.unique(subset=["cik"], keep="first")` ajouté après le calcul
   des CIK manquants. Chaque test vérifié faux avant correctif (2 appels
-  au lieu d'1) puis vrai après. Suite complète 95 passed. Vérification
-  manuelle contre le vrai réseau en cours.
+  au lieu d'1) puis vrai après. Suite complète 95 passed.
+
+  Vérification manuelle contre le vrai réseau faite : univers final à
+  **618** — exactement le chiffre que le diagnostic propre (sans le
+  défaut de démultiplication) avait calculé séparément avant ce correctif.
+  Confirme que T86 et T88 couvraient ensemble la totalité de l'écart
+  observé, aucun artefact restant. Le solde (618 < 700) n'est plus un
+  défaut : c'est l'attrition réelle par exclusion SIC (~38 % des 1000
+  candidats, mesurée) qui dépasse la marge de découverte actuelle
+  (`n + buffer = 1000`) — un paramètre à ajuster, pas un bug, consigné
+  dans `etat-de-tranche.md`.
 
 Total : 88 tâches (T88 rédigée, non implémentée).
