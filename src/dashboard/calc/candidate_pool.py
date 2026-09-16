@@ -43,5 +43,20 @@ def rank_candidates(
         (pl.col("value") * pl.col("close_adj")).alias("approx_market_cap")
     )
 
-    ranked = merged.sort("approx_market_cap", descending=True).with_row_index(name="rank", offset=1)
+    # Un émetteur à plusieurs tickers (classes d'actions multiples, ex.
+    # GOOG/GOOGL) porte plusieurs lignes après la jointure ci-dessus --
+    # chacune consommerait sa propre place à la coupure sans cette étape,
+    # au détriment d'émetteurs distincts qui auraient dû être retenus à la
+    # place (trouvé en tentant un vrai lancement à l'échelle de production,
+    # T85/T86). Un seul CIK par ligne avant de classer et couper : celle de
+    # capitalisation la plus haute.
+    deduplicated = (
+        merged.sort("approx_market_cap", descending=True)
+        .group_by("cik", maintain_order=True)
+        .first()
+    )
+
+    ranked = deduplicated.sort("approx_market_cap", descending=True).with_row_index(
+        name="rank", offset=1
+    )
     return ranked.filter(pl.col("rank") <= n + buffer)

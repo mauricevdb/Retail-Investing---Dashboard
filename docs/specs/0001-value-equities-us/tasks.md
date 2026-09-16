@@ -2165,5 +2165,15 @@ réelle, en usage manuel (même statut que T75 vis-à-vis du réseau réel).
   l'échelle de production (`n=900, buffer=100`) produit un univers dans la
   plage plausible par défaut.
 - **Dépend de** : T84, T85.
+- **Statut** : faite. `rank_candidates` regroupe par CIK (capitalisation la
+  plus haute conservée) avant de classer et couper, en une étape
+  supplémentaire avant la coupure existante. Les 3 tests passent, suite
+  complète 90 passed. Revérifié directement contre les vraies données du
+  jour (frames `CY2025Q4I`, `company_tickers.json`, bulk EODHD réels,
+  `n=900, buffer=100`) : **1000 lignes, 1000 CIK distincts** — contre 1000
+  lignes pour seulement 813 CIK distincts avant le correctif. Un nouveau
+  lancement réel complet (coûteux, ~2000 appels SEC) reste à faire pour
+  confirmer que l'univers final retombe dans la plage plausible par
+  défaut, non refait dans cette tâche.
 
 Total : 86 tâches (T86 rédigée, non implémentée).
