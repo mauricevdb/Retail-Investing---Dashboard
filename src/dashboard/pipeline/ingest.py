@@ -34,6 +34,7 @@ def run_from_network(
     fundamentals_history_path: Path | None = None,
     n: int = 900,
     buffer: int = 100,
+    discovery_buffer: int | None = None,
     plausible_range: tuple[int, int] = (700, 1100),
     own_history_by_cik: dict[str, list[tuple[int, float]]] | None = None,
     since_year: int = 2011,
@@ -59,8 +60,18 @@ def run_from_network(
         # appartenance au CIK, qui redonnerait tous ses tickers (T88 : un
         # même CIK peut porter des dizaines de tickers, ex. Freddie Mac et
         # ses séries d'actions préférentielles).
+        # La marge de découverte (combien de candidats sont réellement
+        # ingérés) et la marge de l'univers final (hystérésis de
+        # calc.universe) sont deux paramètres distincts (T89) : l'attrition
+        # réelle par exclusion SIC (finance/assurance/immobilier, fonds)
+        # dépasse largement ce qu'un buffer d'hystérésis a vocation à
+        # absorber. Repli sur `buffer` si non fourni, pour ne rien changer
+        # au comportement par défaut.
+        effective_discovery_buffer = buffer if discovery_buffer is None else discovery_buffer
         shares_frame = fetch_shares_outstanding_frame(edgar_client, period=frame_period)
-        ranked = rank_candidates(shares_frame, ticker_cik, prices_adj, t, n=n, buffer=buffer)
+        ranked = rank_candidates(
+            shares_frame, ticker_cik, prices_adj, t, n=n, buffer=effective_discovery_buffer
+        )
         selected = ranked.select(["cik", "ticker"])
         missing: set[str] = set()
     elif ciks is not None:

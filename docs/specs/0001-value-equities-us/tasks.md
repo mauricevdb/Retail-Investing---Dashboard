@@ -2329,5 +2329,15 @@ oubli qu'à T79 et T86).
 - **Terminée quand** : le test passe, et les tests existants de
   `test_ingest_from_network.py` restent inchangés dans leur comportement.
 - **Dépend de** : T85, T86, T88.
+- **Statut** : faite. `discovery_buffer: int | None = None` ajouté à
+  `run_from_network` ; replié sur `buffer` si non fourni (comportement par
+  défaut inchangé), sinon utilisé à la place de `buffer` pour la seule
+  coupure de `rank_candidates` -- `calc.universe`/l'hystérésis reçoivent
+  toujours `n`/`buffer` sans changement. Le test passe (les trois candidats
+  ingérés malgré un `buffer` d'univers à 0), suite complète 96 passed.
 
-Total : 89 tâches (T89 rédigée, non implémentée).
+T89 est faite. Reste à vérifier en conditions réelles avec une marge
+suffisamment large (à choisir empiriquement au regard des ~38 %
+d'attrition mesurés) pour retomber dans la plage plausible par défaut.
+
+Total : 89 tâches.

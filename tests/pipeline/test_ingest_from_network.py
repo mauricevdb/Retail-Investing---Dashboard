@@ -200,6 +200,126 @@ def test_run_from_network_discovers_candidates_via_frame_period(tmp_path: Path) 
     assert len(facts_calls) == 1
 
 
+class WideDiscoveryEdgarTransport:
+    """Sert company_tickers et les dépôts/faits réels d'Alpha (CIK 1), Beta
+    (CIK 2) et Gamma (CIK 3) -- une marge de découverte plus large que la
+    marge finale de l'univers (T89) doit permettre aux trois d'être
+    réellement ingérés, même si un seul devient membre de l'univers."""
+
+    def __init__(self, frame_response: dict):
+        with open(GOLDEN / "edgar_company_tickers.json", encoding="utf-8") as f:
+            self.tickers = json.load(f)
+        self.submissions = {}
+        self.facts = {}
+        for cik in ("0000000001", "0000000002", "0000000003"):
+            with open(GOLDEN / f"edgar_submissions_{cik}.json", encoding="utf-8") as f:
+                self.submissions[cik] = json.load(f)
+            with open(GOLDEN / f"edgar_companyfacts_{cik}.json", encoding="utf-8") as f:
+                self.facts[cik] = json.load(f)
+        self.frame_response = frame_response
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, headers: dict):
+        self.calls.append(url)
+        if "company_tickers.json" in url:
+            return self.tickers
+        for cik, payload in self.submissions.items():
+            if f"submissions/CIK{cik}.json" in url:
+                return payload
+        for cik, payload in self.facts.items():
+            if f"companyfacts/CIK{cik}.json" in url:
+                return payload
+        if "/frames/" in url:
+            return self.frame_response
+        raise AssertionError(f"URL EDGAR inattendue : {url}")
+
+
+class WideDiscoveryEodhdTransport:
+    """Cours bulk pour Alpha (AAAA, le plus haut), Beta (BBBB) et Gamma
+    (CCCC, le plus bas) -- capitalisations approchées nettement distinctes
+    pour un classement déterministe sur les trois."""
+
+    def __init__(self):
+        with open(GOLDEN / "eodhd_bulk_actions_2024-02-15.json", encoding="utf-8") as f:
+            self.actions = json.load(f)
+        self.prices = [
+            {
+                "code": ticker,
+                "date": "2024-02-15",
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "adjusted_close": price,
+                "volume": 1_000,
+            }
+            for ticker, price in (("AAAA", 100.0), ("BBBB", 10.0), ("CCCC", 1.0))
+        ]
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, params: dict):
+        self.calls.append(url)
+        if "type=splits" in url:
+            return self.actions
+        return self.prices
+
+
+def test_run_from_network_discovery_buffer_wider_than_universe_buffer(tmp_path: Path) -> None:
+    # Actions en circulation identiques pour Alpha/Beta/Gamma, capitalisations
+    # très distinctes via le prix (ci-dessus) : Alpha (100) > Beta (10) >
+    # Gamma (1). n=1, buffer=0 -- l'univers final ne retient qu'Alpha. Mais
+    # discovery_buffer=2 doit tout de même faire ingérer réellement les
+    # trois (coupure de découverte à n + discovery_buffer = 3), preuve que
+    # la marge de découverte et la marge de l'univers final sont désormais
+    # deux paramètres distincts (T89).
+    frame_response = {
+        "data": [
+            {"cik": 1, "end": "2023-06-30", "val": 100_000_000},
+            {"cik": 2, "end": "2023-06-30", "val": 100_000_000},
+            {"cik": 3, "end": "2023-06-30", "val": 100_000_000},
+        ]
+    }
+    edgar_transport = WideDiscoveryEdgarTransport(frame_response)
+    eodhd_transport = WideDiscoveryEodhdTransport()
+    edgar_client = EdgarClient(
+        user_agent="RI Dashboard test@example.com", transport=edgar_transport
+    )
+    eodhd_client = EodhdClient(api_key="fake-eodhd-key", transport=eodhd_transport)
+
+    t = date(2024, 2, 15)
+    end = date(2023, 12, 31)
+    universe_history_path = tmp_path / "universe_membership.parquet"
+    screen_history_path = tmp_path / "screen_results.parquet"
+
+    run_from_network(
+        edgar_client=edgar_client,
+        eodhd_client=eodhd_client,
+        t=t,
+        end=end,
+        universe_history_path=universe_history_path,
+        hier_membership=set(),
+        frame_period="CY2023Q2I",
+        thresholds={},
+        screen_history_path=screen_history_path,
+        n=1,
+        buffer=0,
+        discovery_buffer=2,
+        plausible_range=(0, 3),
+    )
+
+    # Les trois ont bien été ingérées pour de vrai, malgré une marge
+    # d'univers finale (buffer=0) qui n'en aurait laissé passer aucune de
+    # plus qu'Alpha à la découverte.
+    for cik in ("0000000001", "0000000002", "0000000003"):
+        assert any(f"submissions/CIK{cik}" in c for c in edgar_transport.calls)
+        assert any(f"companyfacts/CIK{cik}" in c for c in edgar_transport.calls)
+
+    # L'univers final, lui, reste gouverné par buffer=0 -- Alpha seule.
+    membership = pl.read_parquet(universe_history_path)
+    assert membership.filter(pl.col("in_universe")).height == 1
+    assert membership.filter(pl.col("in_universe"))["ticker"].to_list() == ["AAAA"]
+
+
 class MultiTickerEdgarTransport:
     """company_tickers liste le CIK 1 sous deux tickers (comme Freddie Mac
     et ses séries d'actions préférentielles, T88) -- compte les appels
