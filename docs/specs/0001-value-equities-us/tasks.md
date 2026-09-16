@@ -2234,4 +2234,49 @@ de production, chaque fois interrompu par une panne réseau transitoire
 différente. Reste à vérifier : un nouveau lancement réel complet, pour
 confirmer que le retry suffit en pratique face à ce type d'incident.
 
-Total : 87 tâches.
+### T88 — Dédupliquer `selected` par CIK avant la boucle d'ingestion réelle
+- **Objectif** : trouvé en instrumentant `pipeline.ingest.run_from_network`
+  pour comprendre pourquoi l'univers réel (673-674 titres) ne correspondait
+  à aucun chiffre théorique cohérent après T86. Preuve concrète : dans
+  `sic_codes` réellement construit par le pipeline, **Freddie Mac (CIK
+  0001026214) apparaît 625 fois** — `company_tickers.json` liste des
+  dizaines de tickers pour ce seul CIK (action ordinaire et de nombreuses
+  séries d'actions préférentielles : FMCC, FMCCT, FMCCG...). Cause
+  racine : `selected = ticker_cik.filter(pl.col("cik").is_in(ranked["cik"]...))`
+  (mode `frame_period`) et `selected = ticker_cik.filter(pl.col("cik").is_in(ciks))`
+  (mode `ciks`) filtrent la table `ticker_cik` **complète, non
+  dédupliquée**, par appartenance au CIK — récupérant tous les tickers
+  d'un même CIK, pas un seul. T86 avait corrigé ce défaut uniquement à
+  l'intérieur de `calc.candidate_pool.rank_candidates` ; cette
+  reconstruction séparée dans `pipeline.ingest`, utilisée pour piloter la
+  boucle de récupération réelle, n'avait jamais été corrigée. Conséquences
+  démontrées : `fetch_submissions`/`fetch_company_facts` étaient appelées
+  une fois par ticker du CIK plutôt qu'une fois par CIK (jusqu'à 625
+  appels réseau redondants pour un seul émetteur), `fundamentals_raw.parquet`
+  se retrouvait gonflé de copies dupliquées des mêmes faits, et le
+  dénombrement final de l'univers (via la jointure de `rank_by_smoothed_market_cap`
+  sur des tickers dupliqués) devenait incohérent avec toute reconstruction
+  propre à un ticker par CIK. Le mode `tickers` n'est pas concerné : un
+  ticker est déjà une clé unique dans `company_tickers.json`.
+- **Fichiers** : `src/dashboard/pipeline/ingest.py`,
+  `tests/pipeline/test_ingest_from_network.py` (étendu).
+- **Test** : `test_run_from_network_ciks_mode_fetches_multi_ticker_cik_once` —
+  un CIK synthétique porteur de deux tickers dans `company_tickers.json`
+  (comme Freddie Mac), sélectionné via `ciks=`. Vérifie que
+  `fetch_submissions`/`fetch_company_facts` ne sont appelées qu'une seule
+  fois pour ce CIK (jamais deux), et que `screen_results`/`universe_membership`
+  ne portent qu'une seule ligne pour lui. `test_run_from_network_discovers_candidates_via_frame_period`
+  (T85, étendu) : le candidat gagnant porte lui aussi deux tickers dans la
+  fixture ; vérifie que le ticker retenu pour l'ingestion réelle est
+  exactement celui que `rank_candidates` a choisi (la capitalisation la
+  plus haute), jamais un autre ticker du même CIK choisi arbitrairement.
+- **Critères de la spec couverts** : aucun directement — corrige un défaut
+  réel de `pipeline.ingest`, jamais exercé sur un CIK réel à tickers
+  multiples avant ce lancement à l'échelle de production.
+- **Terminée quand** : les tests passent, et un nouveau lancement réel à
+  l'échelle de production ne montre plus aucun CIK apparaissant plus d'une
+  fois dans `fundamentals_raw.parquet` par nombre d'appels réseau (à
+  vérifier manuellement, hors suite automatisée).
+- **Dépend de** : T75, T85, T86.
+
+Total : 88 tâches (T88 rédigée, non implémentée).
