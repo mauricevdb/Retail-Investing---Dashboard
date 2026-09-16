@@ -2176,4 +2176,46 @@ réelle, en usage manuel (même statut que T75 vis-à-vis du réseau réel).
   confirmer que l'univers final retombe dans la plage plausible par
   défaut, non refait dans cette tâche.
 
-Total : 86 tâches (T86 rédigée, non implémentée).
+T86 est faite (compteur ci-dessous omis par erreur, corrigé ici — même
+oubli qu'à T79).
+
+### T87 — Résilience réseau : retry sur échec transitoire (EDGAR/EODHD)
+- **Objectif** : deux tentatives réelles consécutives du lancement à
+  l'échelle de production (`n=900, buffer=100`, après T86) ont échoué au
+  milieu de la boucle de ~2000 appels SEC, chacune pour une panne
+  transitoire différente (`Remote end closed connection without response`,
+  puis `getaddrinfo failed` — une DNS). Les deux fois, rien n'a été
+  persisté : l'échec survient avant tout point d'écriture, jamais
+  seulement une valeur devinée ou masquée (invariant 7 tenu), mais tout le
+  travail réseau déjà accompli est perdu. `EdgarClient.get_json`/
+  `EodhdClient.get_json` (T11, T12) propagent aujourd'hui toute exception
+  de transport immédiatement, sans repli — correct pour un échec réel et
+  durable, mais sur une boucle de cette longueur, un incident purement
+  transitoire (une connexion sur des milliers) suffit à annuler tout le
+  lancement. Cette tâche ajoute un nombre borné de tentatives avec un
+  délai entre elles, injectable et testable comme le reste du client
+  (transport/horloge/attente déjà injectables) — jamais une attente
+  indéfinie, jamais une tentative de plus après épuisement du compte.
+- **Fichiers** : `src/dashboard/ingestion/edgar_client.py`,
+  `src/dashboard/ingestion/eodhd_client.py`,
+  `tests/unit/test_edgar_client.py` (étendu),
+  `tests/unit/test_eodhd_client.py` (étendu).
+- **Test** : pour chaque client — transport factice qui échoue deux fois
+  puis réussit : `get_json` renvoie la valeur de succès, le transport a
+  été appelé exactement trois fois (attente injectée, jamais un vrai
+  `time.sleep`, comme T11). Transport factice qui échoue toujours :
+  `get_json` lève toujours l'exception du client (`EdgarClientError`/
+  `EodhdClientError`) une fois les tentatives épuisées, jamais une
+  tentative supplémentaire ni une valeur par défaut.
+- **Explicitement hors périmètre** : persister progressivement les
+  candidats déjà ingérés avant un échec (« checkpointing »), pour ne
+  jamais perdre le travail déjà accompli même si les tentatives
+  s'épuisent — question distincte, plus large, à traiter séparément si le
+  retry seul ne suffit pas en pratique.
+- **Critères de la spec couverts** : aucun directement — renforce
+  l'invariant 10 (robustesse du débit limité) sans en changer le contrat
+  observable.
+- **Terminée quand** : les tests passent pour les deux clients.
+- **Dépend de** : T11, T12, T13.
+
+Total : 87 tâches (T87 rédigée, non implémentée).
