@@ -2295,4 +2295,39 @@ confirmer que le retry suffit en pratique face à ce type d'incident.
   (`n + buffer = 1000`) — un paramètre à ajuster, pas un bug, consigné
   dans `etat-de-tranche.md`.
 
-Total : 88 tâches (T88 rédigée, non implémentée).
+T88 est faite (compteur ci-dessous omis par erreur, corrigé ici — même
+oubli qu'à T79 et T86).
+
+### T89 — Élargir la marge de découverte pour compenser l'attrition SIC réelle
+- **Objectif** : confirmé après T86/T87/T88 sur données réelles, sans plus
+  aucun artefact : la coupure de découverte (`rank_candidates`, `n + buffer`)
+  et la taille finale de l'univers (`calc.universe`, mêmes `n`/`buffer`)
+  utilisent aujourd'hui la même marge. Or l'attrition réelle par exclusion
+  SIC (finance/assurance/immobilier, fonds) mesurée sur le bassin réel est
+  d'environ 38 % — bien au-delà de ce qu'un `buffer` de 100 peut absorber :
+  avec `n=900, buffer=100`, 1000 candidats découverts ne donnent que ~618
+  émetteurs réellement éligibles, sous la plage plausible par défaut
+  (700-1100). La marge qui protège l'univers final du bruit quotidien des
+  cours (T36, hystérésis) n'a pas vocation à absorber aussi l'exclusion
+  SIC en amont — ce sont deux marges différentes, jamais distinguées
+  jusqu'ici. Cette tâche ajoute un paramètre de découverte séparé,
+  affichable et jamais codé en dur (invariant 7), sans toucher au
+  comportement de `calc.universe`/l'hystérésis elle-même.
+- **Fichiers** : `src/dashboard/pipeline/ingest.py`,
+  `tests/pipeline/test_ingest_from_network.py` (étendu).
+- **Test** : `test_run_from_network_uses_wider_discovery_buffer_than_universe_buffer` —
+  avec `buffer=1` (marge de l'univers final) et `discovery_buffer=5` (marge
+  de découverte), vérifie que `rank_candidates` est appelé avec une
+  coupure à `n + 5`, jamais `n + 1`, alors que l'hystérésis finale de
+  `calc.universe` continue d'utiliser `buffer=1` sans changement. Un appel
+  sans `discovery_buffer` explicite doit reproduire exactement le
+  comportement actuel (repli sur `buffer`), pour ne casser aucun test
+  existant.
+- **Critères de la spec couverts** : aucun directement — paramètre de
+  modélisation pour le mécanisme de découverte du bassin (T83-T88), pas un
+  comportement du produit fini.
+- **Terminée quand** : le test passe, et les tests existants de
+  `test_ingest_from_network.py` restent inchangés dans leur comportement.
+- **Dépend de** : T85, T86, T88.
+
+Total : 89 tâches (T89 rédigée, non implémentée).
