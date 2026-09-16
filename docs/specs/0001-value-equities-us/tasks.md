@@ -2346,4 +2346,50 @@ APA Corp, Herbalife, Nabors, Constellium, Lear, Ingredion, PulteGroup...)
 avec des multiples EV/EBIT cohérents (4,6 à 7,0). Referme le chantier de
 découverte automatique du bassin ouvert après T81.
 
-Total : 89 tâches.
+### T90 — `calc.ttm` doit distinguer le trimestre seul du cumul depuis le début d'exercice
+- **Objectif** : trouvé pendant `/spec-verify` (sixième passage) en vérifiant
+  si `calc.ttm`/`calc.normalized_5y` (T43) seraient réellement câblables
+  dans le pipeline réel pour combler le critère 12, jamais satisfait par
+  l'écran généré malgré la couverture affichée. Sur les vraies données
+  déjà ingérées (25 titres, lancement de production), `calc.ttm` se
+  résout pour 22/25 titres (88 %) — encourageant — mais en inspectant le
+  détail réel de FISV, `OperatingIncomeLoss` porte deux valeurs
+  différentes pour le même `(end, filed, fiscal_period)` :
+  ```
+  start=2025-01-01, end=2025-09-30, fp=Q3, val=4 527 000 000  (cumul 9 mois)
+  start=2025-07-01, end=2025-09-30, fp=Q3, val=1 436 000 000  (trimestre seul)
+  ```
+  Confirmé en récupérant le JSON brut de SEC EDGAR (`companyfacts`) : un
+  dépôt 10-Q publie systématiquement à la fois la valeur du trimestre seul
+  et le cumul depuis le début de l'exercice pour un même concept de
+  compte de résultat, partageant `end`/`filed`/`fp` mais avec un `start`
+  différent. `calc.ttm.ttm()` ne filtre et ne trie jamais sur `start` — sa
+  déduplication (`.unique(subset=["end"], keep="first")`) choisit entre
+  les deux de façon incidente, jamais signalée, avec un risque réel de
+  sommer un mélange trimestre/cumul plutôt que quatre vrais trimestres
+  (invariant 7 : ce serait un chiffre faux, pas seulement une approximation).
+- **Fichiers** : `src/dashboard/calc/ttm.py`,
+  `tests/calc/test_ttm_and_5y.py` (étendu, ou nouveau fichier dédié).
+- **Test** : `test_ttm_excludes_year_to_date_cumulative_facts` — fixture
+  reproduisant exactement le cas FISV (un concept portant, pour un même
+  trimestre, une entrée cumulée depuis le début d'exercice et une entrée
+  du trimestre seul, `start` différent) sur quatre trimestres : `ttm()`
+  doit sommer les quatre valeurs de trimestre seul, jamais inclure une
+  valeur cumulée, même si elle est plus récente ou apparaît en premier
+  dans les données.
+- **Explicitement hors périmètre** : câbler `ttm()`/`normalized_5y()` dans
+  `calc.ebit_bridge`/`calc.ratios`/`pipeline.daily_run` pour que le critère
+  12 soit enfin satisfait par l'écran réel, et corriger `normalized_5y`
+  pour qu'il calcule la médiane du ratio EV/EBIT (prix et actions en
+  circulation historiques) plutôt que la médiane d'un concept brut — deux
+  tâches distinctes, décidées séparément après ce correctif.
+- **Critères de la spec couverts** : aucun directement — corrige un défaut
+  latent de `calc.ttm`, jamais exercé sur des faits trimestriels réels
+  avant ce lancement de production.
+- **Terminée quand** : le test passe, et rejouer `calc.ttm.ttm()` sur les
+  vraies données déjà ingérées (FISV, `OperatingIncomeLoss`) donne une
+  somme de quatre trimestres seuls cohérente, jamais une valeur mêlant un
+  cumul.
+- **Dépend de** : T43.
+
+Total : 90 tâches (T90 rédigée, non implémentée).
