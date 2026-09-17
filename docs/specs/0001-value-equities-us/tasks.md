@@ -2595,4 +2595,44 @@ séparément.
   son message normal d'absence de résultat de screen, cf. tâche
   corrective distincte pour `ingestion_output/` non versionné).
 
-Total : 93 tâches, toutes implémentées et confirmées.
+### T94 — Dérive `end`/`frame_period` de `t` automatiquement (remplace les valeurs codées en dur)
+- **Objectif** : trouvé en préparant un rafraîchissement automatique
+  programmé des données déployées (option choisie avec l'utilisateur :
+  commit automatique dans le dépôt après chaque lancement planifié,
+  suite au constat que `ingestion_output/` n'est jamais versionné et
+  que Streamlit Cloud n'a donc aucune donnée réelle après T93).
+  `ingest_run.py` (script manuel, non versionné) code en dur `t`, `end`
+  et `frame_period` pour un seul essai ponctuel (T89) : ces trois valeurs
+  ne peuvent jamais être figées dans un script destiné à tourner seul, sans
+  intervention, à intervalles réguliers.
+  `t` doit venir de `calc.market_calendar.last_session` (déjà existant,
+  jamais utilisé en dehors des tests) — jamais `date.today()` nu
+  (invariant 5). `end` (exercice annuel de référence pour la trace
+  détaillée, T77/T80/T92) doit être le dernier 31 décembre strictement
+  antérieur à `t` — hypothèse d'exercice calendaire déjà assumée par
+  `ingest_run.py`, non remise en cause ici. `frame_period` (période de
+  classement du bassin, ADR 0005) doit être le dernier trimestre
+  calendaire dont la fin précède `t` d'au moins 120 jours, au format
+  `CY{année}Q{trimestre}I` déjà attendu par `calc.candidate_pool` et
+  `ingestion.edgar_frames`.
+- **Fichiers** : nouveau `src/dashboard/pipeline/production_schedule.py`
+  (ou nom équivalent), `tests/pipeline/test_production_schedule.py`
+  (nouveau).
+- **Test** : `test_derive_end_is_last_full_calendar_year` — pour plusieurs
+  `t` synthétiques couvrant différents mois de l'année (janvier, juin,
+  décembre), `end` renvoyé est toujours le dernier 31 décembre strictement
+  antérieur à `t`, jamais l'année en cours.
+  `test_derive_frame_period_respects_120_day_lag` — pour les mêmes `t`,
+  le `frame_period` renvoyé correspond à un trimestre calendaire dont la
+  fin est à au moins 120 jours de `t`, jamais un trimestre plus récent qui
+  violerait le seuil de l'ADR 0005 (vérifié en reconstruisant la date de
+  fin attendue à partir de la chaîne renvoyée et en comparant l'écart).
+- **Critères de la spec couverts** : aucun directement — infrastructure de
+  production, condition préalable à un rafraîchissement automatique sans
+  intervention manuelle.
+- **Terminée quand** : les tests passent, et `ingest_run.py` est remplacé
+  par un script versionné qui appelle cette dérivation au lieu de valeurs
+  codées en dur (vérifié par un lancement réel unique, comme pour T89).
+- **Dépend de** : `calc.market_calendar` (existant), T83-T89 (bassin), ADR 0005.
+
+Total : 94 tâches (T94 rédigée, non implémentée).
