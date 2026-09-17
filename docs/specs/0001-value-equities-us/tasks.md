@@ -2526,5 +2526,21 @@ séparément.
 - **Terminée quand** : le test passe, et rejouer la vraie sortie de
   production (FISV) affiche par défaut `2025-12-31`, pas `2026-07-31`.
 - **Dépend de** : T77, T80.
+- **Statut** : faite. Premier correctif (`fiscal_period == "FY"`) validé
+  par le test mais insuffisant sur les vraies données : revérifié en
+  direct sur FISV, le défaut retombait sur `2026-02-13`, provenant
+  d'`EntityCommonStockSharesOutstanding` (un fait de couverture,
+  instantané, `start` absent) lui aussi étiqueté `fiscal_period = "FY"`.
+  Un second correctif (`start is not null`) s'est révélé également
+  insuffisant : un autre concept réel, de durée trimestrielle
+  (`start`/`end` distants d'environ 92 jours), porte aussi l'étiquette
+  `fiscal_period = "FY"`. Même piège que T90 : l'étiquette ne garantit
+  jamais la durée réelle du fait. Correctif final retenu, vérifié en
+  direct sur FISV : filtrer sur la durée réelle (`end - start` entre 350
+  et 380 jours, `start` non nul), sans jamais se fier à `fiscal_period`.
+  Suite complète au vert (102 passed), lint propre sur les fichiers
+  touchés. Rejoué contre la vraie sortie de production : FISV affiche
+  désormais par défaut `2025-12-31`, et `fcf_yield`/`roic`/
+  `net_debt_ebitda` sont bien `"ok"` (traçables) par défaut.
 
-Total : 92 tâches (T92 rédigée, non implémentée).
+Total : 92 tâches, toutes implémentées.

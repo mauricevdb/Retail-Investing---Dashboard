@@ -280,6 +280,18 @@ trouvé ou de temps, pas des cas dont l'existence serait ignorée :
   reste totalement inappelé : il calcule la médiane d'un concept brut, pas
   celle du ratio EV/EBIT que le critère 12 exige littéralement — une
   refonte, pas un simple câblage, non traitée.
+- **Le champ XBRL `fiscal_period` ne garantit jamais la durée réelle d'un
+  fait, et ce constat s'est répété deux fois sur cette tranche (T90, T92).**
+  T90 : un dépôt trimestriel peut porter à la fois la valeur du seul
+  trimestre et le cumul depuis le début d'exercice sous la même étiquette
+  `fiscal_period`. T92, sur les mêmes données réelles (FISV) : un fait de
+  couverture instantané (`EntityCommonStockSharesOutstanding`, `start`
+  absent) et un fait réellement trimestriel se sont tous deux trouvés
+  étiquetés `fiscal_period = "FY"`. Dans les deux cas, seul le calcul direct
+  de la durée (`end - start`) s'est révélé fiable ; l'étiquette seule ne
+  l'est jamais. Motif désormais reconnu comme récurrent pour toute future
+  tâche qui filtrerait des faits XBRL par nature de période plutôt que par
+  durée mesurée.
 - **Le calcul réel du percentile sectoriel (groupe ≥ 10 titres) n'a jamais
   été exercé.** Seul le repli (groupe < 10, critère 20) est testé, dans
   `calc.percentiles` comme dans le test de bout en bout de

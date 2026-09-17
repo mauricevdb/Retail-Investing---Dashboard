@@ -58,7 +58,27 @@ if tickers:
         st.error(f"Aucun exercice connu pour {selected} dans les faits persistés.")
         st.stop()
 
-    end: date = st.sidebar.selectbox("Exercice de référence (end)", available_ends)
+    # Le plus récent, toutes natures de faits confondues, n'a aucun rapport
+    # garanti avec l'exercice réellement utilisé pour calculer les valeurs
+    # déjà affichées dans le tableau -- constaté en direct sur FISV (T92) :
+    # un fait de couverture (actions en circulation, instantané) porte
+    # aussi fiscal_period="FY" à une date proche du dépôt, pas la fin
+    # d'exercice ; un autre concept, réel mais rare, porte fiscal_period="FY"
+    # alors que sa vraie durée est trimestrielle. Jamais confiance dans
+    # l'étiquette seule (même principe que T90) : la durée réelle
+    # (`end - start`) doit être proche d'un an, ni un fait instantané
+    # (`start` absent) ni un fait de durée plus courte mal étiqueté.
+    annual_facts = facts.filter(
+        pl.col("start").is_not_null()
+        & ((pl.col("end") - pl.col("start")).dt.total_days() >= 350)
+        & ((pl.col("end") - pl.col("start")).dt.total_days() <= 380)
+    )
+    annual_ends = sorted(annual_facts["end"].unique().to_list(), reverse=True)
+    default_index = available_ends.index(annual_ends[0]) if annual_ends else 0
+
+    end: date = st.sidebar.selectbox(
+        "Exercice de référence (end)", available_ends, index=default_index
+    )
     st.caption(f"Exercice de référence utilisé pour la trace détaillée : {end}")
 
     for indicator in _INDICATORS:

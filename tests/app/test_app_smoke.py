@@ -106,3 +106,61 @@ def test_app_smoke_screen_and_detail(tmp_path: Path, monkeypatch) -> None:
     trace_text_2022 = " ".join(element.value for element in at.code)
     assert "2022, 12, 31" in trace_text_2022
     assert "9999999999-23-000001" in trace_text_2022
+
+
+def test_app_smoke_end_defaults_to_most_recent_annual_period(tmp_path: Path, monkeypatch) -> None:
+    # Reproduit le cas réel FISV (T92, premier aperçu sur la vraie sortie de
+    # production) : un exercice annuel plus ancien coexiste avec un exercice
+    # trimestriel plus récent pour le même titre. Le défaut doit rester
+    # l'exercice annuel -- jamais le trimestriel plus récent mais sans
+    # rapport garanti avec les valeurs déjà calculées et affichées dans le
+    # tableau (invariant 7 : un défaut trompeur rendait roic/net_debt_ebitda
+    # faussement "non_traceable").
+    screen_path = tmp_path / "screen_results.parquet"
+    facts_path = tmp_path / "fundamentals_raw.parquet"
+
+    pl.DataFrame(
+        {
+            "date": [date(2024, 8, 1)],
+            "cik": ["9999999999"],
+            "ticker": ["TEST"],
+            "ev_ebit": [10.5],
+            "fcf_yield": [None],
+            "roic": [None],
+            "net_debt_ebitda": [None],
+            "pct_own_history": [None],
+            "pct_sector": [None],
+            "currency": ["USD"],
+            "rank": [1],
+        }
+    ).write_parquet(screen_path)
+
+    pl.DataFrame(
+        {
+            "cik": ["9999999999", "9999999999"],
+            "concept": ["OperatingIncomeLoss", "OperatingIncomeLoss"],
+            "taxonomy": ["us-gaap", "us-gaap"],
+            "unit": ["USD", "USD"],
+            "end": [date(2023, 12, 31), date(2024, 6, 30)],
+            "start": [date(2023, 1, 1), date(2024, 4, 1)],
+            "filed": [date(2024, 2, 1), date(2024, 8, 7)],
+            "accn": ["9999999999-24-000001", "9999999999-24-000002"],
+            "value": [50_000_000.0, 15_000_000.0],
+            "fiscal_period": ["FY", "Q2"],
+            "fiscal_year": [2023, 2024],
+        }
+    ).write_parquet(facts_path)
+
+    monkeypatch.setenv("DASHBOARD_SCREEN_RESULTS_PATH", str(screen_path))
+    monkeypatch.setenv("DASHBOARD_FUNDAMENTALS_PATH", str(facts_path))
+
+    at = AppTest.from_file(APP_PATH, default_timeout=15)
+    at.run()
+    assert not at.exception
+
+    at.selectbox[0].select("TEST").run()
+    assert not at.exception
+
+    # L'exercice trimestriel (2024-06-30) est plus récent, mais le défaut
+    # doit rester l'exercice annuel (2023-12-31).
+    assert at.sidebar.selectbox[0].value == date(2023, 12, 31)
