@@ -1,9 +1,20 @@
 import os
+import sys
 from datetime import date
 from pathlib import Path
 
 import polars as pl
 import streamlit as st
+
+# `streamlit run` exécute ce fichier comme un script neuf, jamais comme un
+# module d'un package installé (pyproject.toml porte [tool.uv]
+# package = false, décision assumée). Sans ceci, `dashboard` n'est
+# importable que si PYTHONPATH=src est positionné à la main -- ce que
+# Streamlit Cloud ne permet pas de faire avant l'import du script (T93,
+# ModuleNotFoundError constaté au premier déploiement réel).
+_SRC_DIR = str(Path(__file__).resolve().parents[2])
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 from dashboard.app.detail_view import trace_indicator
 from dashboard.app.screen_view import render_screen_text

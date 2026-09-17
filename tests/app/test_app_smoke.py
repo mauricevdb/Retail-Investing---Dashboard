@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -164,3 +167,37 @@ def test_app_smoke_end_defaults_to_most_recent_annual_period(tmp_path: Path, mon
     # L'exercice trimestriel (2024-06-30) est plus récent, mais le défaut
     # doit rester l'exercice annuel (2023-12-31).
     assert at.sidebar.selectbox[0].value == date(2023, 12, 31)
+
+
+def test_main_importable_without_external_pythonpath(tmp_path: Path) -> None:
+    # Reproduit le blocage réel de déploiement Streamlit Cloud (T93) :
+    # `dashboard` n'est importable que si `src/` est sur `sys.path`, et
+    # rien d'autre que PYTHONPATH ne le garantissait (pyproject.toml porte
+    # `[tool.uv] package = false`). pytest masque le problème en plaçant
+    # lui-même `src/` sur son propre sys.path (`pythonpath = ["src"]`),
+    # tout comme AppTest exécute `main.py` dans ce même process -- jamais
+    # dans un process neuf comme le fait réellement `streamlit run`, en
+    # local ou sur Streamlit Cloud. Un vrai sous-processus, avec
+    # PYTHONPATH explicitement absent et un `cwd` sans rapport avec le
+    # dépôt (pour prouver que la résolution vient de `__file__`, jamais du
+    # répertoire courant), est seul fidèle à ce que l'utilisateur exécute
+    # réellement.
+    screen_path, facts_path = _write_fixture(tmp_path)
+
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env["DASHBOARD_SCREEN_RESULTS_PATH"] = str(screen_path)
+    env["DASHBOARD_FUNDAMENTALS_PATH"] = str(facts_path)
+
+    result = subprocess.run(
+        [sys.executable, APP_PATH],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert "ModuleNotFoundError" not in result.stderr, result.stderr
+    assert result.returncode == 0, result.stderr

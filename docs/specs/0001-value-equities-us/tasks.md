@@ -2582,5 +2582,17 @@ séparément.
   le déploiement réel sur Streamlit Cloud (confirmé par l'utilisateur, hors
   portée des tests automatisés) ne lève plus `ModuleNotFoundError`.
 - **Dépend de** : T77 (point d'entrée Streamlit), T80/T82 (AppTest existant).
+- **Statut** : code fait et testé. Reproduit avant correctif (le test
+  échoue avec le vrai `ModuleNotFoundError`, en sous-processus neuf, sans
+  `PYTHONPATH`). Correctif : `main.py` ajoute lui-même le répertoire `src/`
+  (dérivé de `__file__`, jamais du répertoire courant) en tête de
+  `sys.path` avant d'importer quoi que ce soit de `dashboard`. Suite
+  complète au vert (103 passed), lint propre. Revérifié en direct : la
+  commande documentée par CLAUDE.md (`uv run streamlit run
+  src/dashboard/app/main.py`, sans `PYTHONPATH`) démarre désormais sans
+  erreur. Reste à confirmer par l'utilisateur sur le vrai déploiement
+  Streamlit Cloud (hors portée des tests automatisés et de cet
+  environnement).
 
-Total : 93 tâches (T93 rédigée, non implémentée).
+Total : 93 tâches, toutes implémentées (T93 en attente de confirmation du
+déploiement réel Streamlit Cloud par l'utilisateur).
