@@ -1,12 +1,13 @@
 import json
 import urllib.parse
 import urllib.request
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dashboard.ingestion.edgar_client import EdgarClient
 from dashboard.ingestion.eodhd_client import EodhdClient
 from dashboard.pipeline.ingest import run_from_network
+from dashboard.pipeline.production_schedule import derive_end, derive_frame_period, derive_t
 
 
 def read_env(key: str) -> str:
@@ -39,21 +40,29 @@ eodhd_client = EodhdClient(api_key=read_env("EODHD_API_KEY"), transport=eodhd_tr
 output_dir = Path("ingestion_output")
 output_dir.mkdir(exist_ok=True)
 
+# t/end/frame_period dérivés automatiquement (T94, T95) -- plus aucune
+# valeur codée en dur : ce script doit pouvoir tourner seul, à intervalles
+# réguliers, sans intervention (invariant 5 : jamais date.today() nu), et
+# ne jamais viser une séance pas encore fermée ni publiée (T95).
+t = derive_t(datetime.now(UTC))
+end = derive_end(t)
+frame_period = derive_frame_period(t)
+
 view_text = run_from_network(
     edgar_client=edgar_client,
     eodhd_client=eodhd_client,
-    t=date(2026, 9, 15),  # aujourd'hui -- premier essai à l'échelle de production
-    end=date(2025, 12, 31),  # exercice calendaire -- la majorité des grandes capis US
+    t=t,
+    end=end,
     universe_history_path=output_dir / "universe_membership.parquet",
     hier_membership=set(),
-    frame_period="CY2025Q4I",  # vérifié en direct : 2638 entrées réelles
+    frame_period=frame_period,
     thresholds={},  # aucun seuil : tout titre calculable est retenu
     screen_history_path=output_dir / "screen_results.parquet",
     fundamentals_history_path=output_dir / "fundamentals_raw.parquet",
     n=900,
     buffer=100,  # marge de l'univers final -- hystérésis, inchangée (T89)
-    discovery_buffer=800,  # marge de découverte élargie -- ~1700 candidats
-    # réels ingérés, pour compenser l'attrition SIC réelle (~38 % mesurée)
+    discovery_buffer=800,  # marge de découverte élargie -- compense
+    # l'attrition SIC réelle (~38 % mesurée, T88-T89)
     plausible_range=(700, 1100),  # plage par défaut de production, non réduite
 )
 

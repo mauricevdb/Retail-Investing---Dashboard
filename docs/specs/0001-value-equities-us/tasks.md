@@ -2634,6 +2634,16 @@ séparément.
   par un script versionné qui appelle cette dérivation au lieu de valeurs
   codées en dur (vérifié par un lancement réel unique, comme pour T89).
 - **Dépend de** : `calc.market_calendar` (existant), T83-T89 (bassin), ADR 0005.
+- **Statut** : faite. Les deux tests passent, `ingest_run.py` versionné
+  appelle désormais `derive_end`/`derive_frame_period` (et `derive_t`,
+  T95) au lieu de valeurs codées en dur -- vérifié en direct (`t=2026-
+  09-17` donnait `end=2025-12-31`, `frame_period=CY2026Q1I`, cohérent
+  avec la règle des 120 jours). Premier lancement réel révélant un bug de
+  calendrier distinct (T95, `t` visait le jour même avant l'ouverture) --
+  corrigé séparément. Le lancement réel complet reste ensuite bloqué par
+  une instabilité réseau (panne DNS transitoire répétée sur la longue
+  boucle séquentielle), sans rapport avec la dérivation de T94 elle-même
+  -- cf. T96 (reprise sur échec).
 
 ### T95 — `t` ne doit jamais viser la séance du jour même, pas encore publiée
 - **Objectif** : trouvé en tentant le premier lancement réel du script
@@ -2674,5 +2684,80 @@ séparément.
   `ingest_run.py` (à n'importe quelle heure) ne lève plus
   `ColumnNotFoundError` sur `prices_adj`.
 - **Dépend de** : T94, `calc.market_calendar` (existant).
+- **Statut** : faite. Les 4 tests passent (103 → 107 passed sur la suite
+  complète), lint propre. `derive_t` vérifié en direct : lancé à 08:57 UTC
+  (avant l'ouverture de Wall Street), dérive désormais `t=2026-09-16` (une
+  séance déjà close) au lieu du jour même. Trois lancements réels
+  consécutifs ont ensuite échoué, mais tous sur `EdgarClientError`
+  (panne DNS transitoire), plus jamais sur `ColumnNotFoundError` — le
+  défaut de calendrier propre à T95 est bien corrigé ; la résilience
+  réseau sur une longue boucle séquentielle est un problème distinct,
+  cf. T96.
 
-Total : 95 tâches (T95 rédigée, non implémentée).
+### T96 — Reprise sur échec de la boucle d'ingestion réelle (checkpoint)
+- **Objectif** : trouvé en tentant de relancer réellement T95 : trois
+  lancements consécutifs ont échoué sur `EdgarClientError` (panne DNS
+  transitoire, `getaddrinfo failed`), à trois endroits différents de la
+  boucle séquentielle sur les candidats retenus
+  (`pipeline.ingest.run_from_network`, boucle `fetch_submissions`/
+  `fetch_company_facts`, ~1700 candidats à l'échelle de production). T87
+  a déjà borné le nombre de tentatives par requête (2 retries, 1 s de
+  délai), mais ce n'est jamais suffisant en soi sur une boucle assez
+  longue : une seule requête malchanceuse, même avec une probabilité
+  d'échec très faible, suffit à annuler tout le travail déjà accompli,
+  faute de point de reprise. Déjà signalé comme limite connue lors de
+  T87 (rien n'était alors persisté avant l'échec), jamais traité depuis.
+  Correctif retenu : chaque CIK dont `fetch_submissions`/
+  `fetch_company_facts` réussissent est persisté dans un fichier de
+  reprise (Parquet, cohérent avec l'invariant 2) au fur et à mesure,
+  jamais seulement à la fin de la boucle. Un lancement qui redémarre
+  avec le même `checkpoint_dir` retrouve les CIK déjà obtenus et ne les
+  refetch jamais -- seuls les CIK manquants sont réellement requêtés.
+  Le fichier de reprise est scindé par `t` (nom de fichier portant la
+  date), pour ne jamais réutiliser par erreur une reprise d'un autre
+  jour : `sic_row` porte une colonne `as_of` qui doit refléter le `t`
+  réel de l'exécution qui aboutit, jamais celui d'une tentative
+  antérieure sous un autre `t` (invariant 1). Une fois la boucle
+  complète (tous les CIK obtenus, par reprise ou fraîchement requêtés)
+  et `run_daily` exécuté avec succès, le fichier de reprise de ce `t`
+  est supprimé -- il n'a plus d'utilité, les résultats durables vivent
+  déjà dans `fundamentals_history_path`/`screen_history_path`/
+  `universe_history_path`.
+  Écriture par lot plutôt qu'à chaque CIK (coût d'écriture Parquet
+  croissant avec la taille déjà accumulée sur ~1700 candidats) : tous
+  les 25 CIK nouvellement obtenus (`checkpoint_every`, paramètre
+  explicite, jamais codé en dur sans nom -- invariant 7), au prix de
+  perdre au plus 25 CIK de travail en cas d'échec entre deux écritures,
+  jamais la boucle entière.
+  Paramètre additif (`checkpoint_dir: Path | None = None`) : absent, le
+  comportement actuel de `run_from_network` reste inchangé, aucun
+  fichier de reprise n'est créé -- cohérent avec le principe déjà
+  appliqué à `discovery_buffer` (T89).
+- **Fichiers** : `src/dashboard/pipeline/ingest.py`,
+  `tests/pipeline/test_ingest_from_network.py` (étendu).
+- **Test** : `test_run_from_network_resumes_after_partial_failure` --
+  un client factice dont le transport lève une exception après N appels
+  réussis ; le premier appel à `run_from_network` avec `checkpoint_dir`
+  propage bien l'exception (jamais silencieuse), mais le fichier de
+  reprise contient déjà les CIK traités avant l'échec. Un second appel,
+  avec un client qui réussirait pour les CIK restants mais qui lèverait
+  une exception s'il était sollicité pour un CIK déjà présent dans le
+  fichier de reprise (preuve qu'il n'est jamais refetché), aboutit et
+  produit exactement le même résultat qu'un lancement ininterrompu sur
+  les mêmes données.
+  `test_run_from_network_deletes_checkpoint_after_success` -- un
+  lancement complet et réussi ne laisse aucun fichier de reprise pour ce
+  `t` derrière lui.
+  `test_run_from_network_ignores_checkpoint_from_a_different_t` -- un
+  fichier de reprise existant pour un autre `t` n'est jamais réutilisé,
+  jamais une erreur non plus (simplement ignoré, tout est refetché).
+- **Critères de la spec couverts** : aucun directement -- infrastructure
+  de résilience, condition préalable à un rafraîchissement automatique
+  fiable sans intervention manuelle (option validée avec l'utilisateur :
+  rafraîchissement programmé, commit automatique dans le dépôt).
+- **Terminée quand** : les tests passent, et un vrai lancement de
+  production, interrompu puis relancé avec le même `checkpoint_dir`,
+  aboutit sans jamais refetcher les CIK déjà obtenus.
+- **Dépend de** : T87 (retry par requête), T94/T95 (`ingest_run.py`).
+
+Total : 96 tâches (T96 rédigée, non implémentée).
