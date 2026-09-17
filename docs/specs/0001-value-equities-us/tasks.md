@@ -2759,5 +2759,23 @@ séparément.
   production, interrompu puis relancé avec le même `checkpoint_dir`,
   aboutit sans jamais refetcher les CIK déjà obtenus.
 - **Dépend de** : T87 (retry par requête), T94/T95 (`ingest_run.py`).
+- **Statut** : faite. Bug distinct découvert en écrivant le test de
+  reprise : `selected.unique(subset=["cik"], keep="first")` (mode `ciks`)
+  n'avait jamais `maintain_order=True`, rendant l'ordre de traitement des
+  CIK non déterministe -- le test de reprise devenait alors intermittent
+  (le CIK en échec pouvait être traité avant ou après le CIK déjà
+  checkpointé selon l'exécution), symptôme observé y compris en isolation
+  totale du test. Corrigé (même précaution déjà appliquée ailleurs dans
+  `calc.candidate_pool`, jamais ici). Les 2 tests passent de façon stable
+  (10 exécutions consécutives sans échec après correctif), suite complète
+  109 passed, lint propre.
+  Vérifié en conditions réelles sur la production : `ingest_run.py`
+  câble désormais `checkpoint_dir`. Le réseau est resté instable sur toute
+  la session (panne DNS transitoire répétée) -- 5 lancements consécutifs
+  ont échoué, mais la progression réelle a été préservée à chaque fois
+  (0 → 275 → 425 → 600 → 850 CIK cumulés, jamais de refetch), et le 6ᵉ
+  lancement a abouti : 25 titres retenus pour le nouveau jour, dossier de
+  reprise vide après succès (supprimé), historique de screen portant
+  désormais deux dates distinctes. Exactement le comportement voulu.
 
-Total : 96 tâches (T96 rédigée, non implémentée).
+Total : 96 tâches, toutes implémentées et confirmées.

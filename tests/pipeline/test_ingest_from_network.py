@@ -477,6 +477,189 @@ def test_run_from_network_propagates_source_failure(tmp_path: Path) -> None:
     assert not universe_history_path.exists()
 
 
+class FailsOnSecondCikEdgarTransport:
+    """Sert les dépôts/faits réels d'Alpha (CIK 1) et Beta (CIK 2), mais
+    lève pour toute requête touchant Beta -- simule la panne réseau réelle
+    trouvée en tentant un vrai lancement de production (T96) : une seule
+    requête malchanceuse, au milieu d'une longue boucle, ne doit plus
+    jamais annuler le travail déjà accompli."""
+
+    def __init__(self):
+        with open(GOLDEN / "edgar_company_tickers.json", encoding="utf-8") as f:
+            self.tickers = json.load(f)
+        with open(GOLDEN / "edgar_submissions_0000000001.json", encoding="utf-8") as f:
+            self.submissions = {"0000000001": json.load(f)}
+        with open(GOLDEN / "edgar_companyfacts_0000000001.json", encoding="utf-8") as f:
+            self.facts = {"0000000001": json.load(f)}
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, headers: dict):
+        self.calls.append(url)
+        if "company_tickers.json" in url:
+            return self.tickers
+        if "CIK0000000002" in url:
+            raise ConnectionError("boom")
+        if "submissions/CIK0000000001.json" in url:
+            return self.submissions["0000000001"]
+        if "companyfacts/CIK0000000001.json" in url:
+            return self.facts["0000000001"]
+        raise AssertionError(f"URL EDGAR inattendue : {url}")
+
+
+class AssertsNoRefetchEdgarTransport:
+    """Sert les dépôts/faits réels d'Alpha (CIK 1) et Beta (CIK 2) -- lève
+    si jamais sollicitée pour Alpha, preuve qu'un CIK déjà présent dans le
+    fichier de reprise n'est jamais refetché après une interruption."""
+
+    def __init__(self):
+        with open(GOLDEN / "edgar_company_tickers.json", encoding="utf-8") as f:
+            self.tickers = json.load(f)
+        self.submissions = {}
+        self.facts = {}
+        for cik in ("0000000001", "0000000002"):
+            with open(GOLDEN / f"edgar_submissions_{cik}.json", encoding="utf-8") as f:
+                self.submissions[cik] = json.load(f)
+            with open(GOLDEN / f"edgar_companyfacts_{cik}.json", encoding="utf-8") as f:
+                self.facts[cik] = json.load(f)
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, headers: dict):
+        self.calls.append(url)
+        if "company_tickers.json" in url:
+            return self.tickers
+        if "CIK0000000001" in url:
+            raise AssertionError("CIK déjà obtenu avant l'échec, ne doit jamais être refetché")
+        for cik, payload in self.submissions.items():
+            if f"submissions/CIK{cik}.json" in url:
+                return payload
+        for cik, payload in self.facts.items():
+            if f"companyfacts/CIK{cik}.json" in url:
+                return payload
+        raise AssertionError(f"URL EDGAR inattendue : {url}")
+
+
+def test_run_from_network_resumes_after_partial_failure(tmp_path: Path) -> None:
+    eodhd_transport = RoutingEodhdTransport()
+    checkpoint_dir = tmp_path / "checkpoint"
+    universe_history_path = tmp_path / "universe_membership.parquet"
+    screen_history_path = tmp_path / "screen_results.parquet"
+    t = date(2024, 2, 15)
+    end = date(2023, 12, 31)
+
+    failing_edgar_client = EdgarClient(
+        user_agent="RI Dashboard test@example.com",
+        transport=FailsOnSecondCikEdgarTransport(),
+        sleep=lambda seconds: None,
+    )
+    eodhd_client = EodhdClient(api_key="fake-eodhd-key", transport=eodhd_transport)
+
+    with pytest.raises(EdgarClientError):
+        run_from_network(
+            edgar_client=failing_edgar_client,
+            eodhd_client=eodhd_client,
+            t=t,
+            end=end,
+            universe_history_path=universe_history_path,
+            hier_membership=set(),
+            ciks=["0000000001", "0000000002"],
+            thresholds={},
+            screen_history_path=screen_history_path,
+            plausible_range=(0, 2),
+            checkpoint_dir=checkpoint_dir,
+            checkpoint_every=1,
+        )
+
+    # Rien n'a été écrit dans les sorties finales -- seul le point de
+    # reprise porte le travail déjà accompli (invariant 7 : pas de repli
+    # silencieux, l'échec reste un échec tant que le lancement n'aboutit
+    # pas réellement).
+    assert not universe_history_path.exists()
+    checkpoint_files = list(checkpoint_dir.glob("*.parquet"))
+    assert len(checkpoint_files) == 2  # sic + facts pour ce t
+
+    resuming_transport = AssertsNoRefetchEdgarTransport()
+    resuming_edgar_client = EdgarClient(
+        user_agent="RI Dashboard test@example.com",
+        transport=resuming_transport,
+    )
+
+    view_text = run_from_network(
+        edgar_client=resuming_edgar_client,
+        eodhd_client=eodhd_client,
+        t=t,
+        end=end,
+        universe_history_path=universe_history_path,
+        hier_membership=set(),
+        ciks=["0000000001", "0000000002"],
+        thresholds={},
+        screen_history_path=screen_history_path,
+        plausible_range=(0, 2),
+        checkpoint_dir=checkpoint_dir,
+        checkpoint_every=1,
+    )
+
+    assert view_text is not None
+    # CIK 2 (Beta) a bien été requêté pour de vrai après la reprise --
+    # CIK 1 (Alpha), déjà obtenu avant l'échec, ne l'a jamais été à nouveau
+    # (AssertsNoRefetchEdgarTransport aurait levé dans le cas contraire).
+    assert any("CIK0000000002" in c for c in resuming_transport.calls)
+    membership = pl.read_parquet(universe_history_path)
+    assert membership.height >= 1
+
+    # Un lancement complet et réussi ne laisse aucun fichier de reprise
+    # derrière lui pour ce t -- il n'a plus d'utilité.
+    assert list(checkpoint_dir.glob("*.parquet")) == []
+
+
+def test_run_from_network_ignores_checkpoint_from_a_different_t(tmp_path: Path) -> None:
+    checkpoint_dir = tmp_path / "checkpoint"
+    checkpoint_dir.mkdir()
+    # Fichier de reprise laissé par un lancement d'un autre jour -- ne doit
+    # jamais être réutilisé (invariant 1 : `as_of` doit refléter le vrai
+    # `t` du lancement qui aboutit, jamais celui d'une tentative antérieure
+    # sous un autre `t`), ni provoquer d'erreur : simplement ignoré.
+    stale_t = date(2024, 1, 1)
+    pl.DataFrame(
+        {
+            "cik": ["0000000001"],
+            "sic": ["0000"],
+            "sic_description": ["stale"],
+            "entity_type": ["stale"],
+            "as_of": [stale_t],
+        }
+    ).write_parquet(checkpoint_dir / f"sic_checkpoint_{stale_t.isoformat()}.parquet")
+    pl.DataFrame({"cik": ["0000000001"]}).write_parquet(
+        checkpoint_dir / f"facts_checkpoint_{stale_t.isoformat()}.parquet"
+    )
+
+    edgar_transport = RoutingEdgarTransport()
+    eodhd_transport = RoutingEodhdTransport()
+    edgar_client = EdgarClient(
+        user_agent="RI Dashboard test@example.com", transport=edgar_transport
+    )
+    eodhd_client = EodhdClient(api_key="fake-eodhd-key", transport=eodhd_transport)
+
+    universe_history_path = tmp_path / "universe_membership.parquet"
+
+    run_from_network(
+        edgar_client=edgar_client,
+        eodhd_client=eodhd_client,
+        t=date(2024, 2, 15),
+        end=date(2023, 12, 31),
+        universe_history_path=universe_history_path,
+        hier_membership=set(),
+        ciks=["0000000001"],
+        plausible_range=(0, 1),
+        checkpoint_dir=checkpoint_dir,
+    )
+
+    # Le fichier de reprise périmé n'a jamais été consulté : le seul CIK
+    # demandé a bien été requêté pour de vrai, pas simplement repris tel
+    # quel depuis le fichier d'un autre jour.
+    assert any("submissions/CIK0000000001" in c for c in edgar_transport.calls)
+    assert any("companyfacts/CIK0000000001" in c for c in edgar_transport.calls)
+
+
 def test_run_from_network_rejects_ambiguous_or_unknown_selection(tmp_path: Path) -> None:
     edgar_client = EdgarClient(
         user_agent="RI Dashboard test@example.com", transport=RoutingEdgarTransport()

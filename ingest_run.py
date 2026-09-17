@@ -64,6 +64,9 @@ view_text = run_from_network(
     discovery_buffer=800,  # marge de découverte élargie -- compense
     # l'attrition SIC réelle (~38 % mesurée, T88-T89)
     plausible_range=(700, 1100),  # plage par défaut de production, non réduite
+    checkpoint_dir=output_dir / "checkpoint",  # reprise sur échec (T96) :
+    # une panne réseau isolée, sur ~1700 candidats, ne doit plus jamais
+    # annuler tout le travail déjà accompli.
 )
 
 print(view_text)

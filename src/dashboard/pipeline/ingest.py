@@ -19,6 +19,32 @@ class IngestionSelectionError(Exception):
     pass
 
 
+def _checkpoint_paths(checkpoint_dir: Path, t: date) -> tuple[Path, Path]:
+    return (
+        checkpoint_dir / f"sic_checkpoint_{t.isoformat()}.parquet",
+        checkpoint_dir / f"facts_checkpoint_{t.isoformat()}.parquet",
+    )
+
+
+def _load_checkpoint(checkpoint_dir: Path, t: date) -> tuple[pl.DataFrame, pl.DataFrame] | None:
+    sic_path, facts_path = _checkpoint_paths(checkpoint_dir, t)
+    # Scindé par t (invariant 1) : un fichier de reprise d'un autre jour
+    # n'est jamais réutilisé -- ses colonnes `as_of` refléteraient un t
+    # différent de celui du lancement en cours. Simplement ignoré, jamais
+    # une erreur (T96).
+    if sic_path.exists() and facts_path.exists():
+        return pl.read_parquet(sic_path), pl.read_parquet(facts_path)
+    return None
+
+
+def _write_checkpoint(
+    checkpoint_dir: Path, t: date, sic_rows: list[pl.DataFrame], facts_frames: list[pl.DataFrame]
+) -> None:
+    sic_path, facts_path = _checkpoint_paths(checkpoint_dir, t)
+    pl.concat(sic_rows).write_parquet(sic_path)
+    pl.concat(facts_frames).write_parquet(facts_path)
+
+
 def run_from_network(
     edgar_client: EdgarClient,
     eodhd_client: EodhdClient,
@@ -38,6 +64,8 @@ def run_from_network(
     plausible_range: tuple[int, int] = (700, 1100),
     own_history_by_cik: dict[str, list[tuple[int, float]]] | None = None,
     since_year: int = 2011,
+    checkpoint_dir: Path | None = None,
+    checkpoint_every: int = 25,
 ) -> str | None:
     if sum(mode is not None for mode in (ciks, tickers, frame_period)) != 1:
         raise IngestionSelectionError(
@@ -80,7 +108,12 @@ def run_from_network(
         # Un CIK demandé peut porter plusieurs tickers dans company_tickers
         # (même cause qu'au-dessus, T88) : un seul retenu, jamais une
         # ingestion réelle répétée pour le même émetteur.
-        selected = selected.unique(subset=["cik"], keep="first")
+        # `maintain_order=True` (T96) : sans lui, l'ordre des lignes après
+        # `unique()` n'est pas garanti par Polars -- l'ordre de traitement
+        # des CIK dans la boucle ci-dessous en dépend directement (reprise
+        # sur échec), un ordre instable rend un lancement interrompu
+        # imprévisible d'une tentative à l'autre.
+        selected = selected.unique(subset=["cik"], keep="first", maintain_order=True)
     else:
         selected = ticker_cik.filter(pl.col("ticker").is_in(tickers))
         missing = set(tickers) - set(selected["ticker"].to_list())
@@ -90,10 +123,33 @@ def run_from_network(
 
     sic_rows = []
     facts_frames = []
+    done_ciks: set[str] = set()
+
+    if checkpoint_dir is not None:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        loaded = _load_checkpoint(checkpoint_dir, t)
+        if loaded is not None:
+            checkpoint_sic, checkpoint_facts = loaded
+            sic_rows.append(checkpoint_sic)
+            facts_frames.append(checkpoint_facts)
+            done_ciks = set(checkpoint_sic["cik"].to_list())
+
+    # Un CIK déjà obtenu avant une panne réseau isolée n'est jamais
+    # refetché après reprise : le coût réel d'une requête EDGAR (invariant
+    # 10) ne doit jamais être payé deux fois pour le même travail (T96).
+    since_last_checkpoint = 0
     for cik in selected["cik"].to_list():
+        if cik in done_ciks:
+            continue
         _filings, sic_row = fetch_submissions(edgar_client, cik, as_of=t)
         sic_rows.append(sic_row)
         facts_frames.append(fetch_company_facts(edgar_client, cik))
+
+        if checkpoint_dir is not None:
+            since_last_checkpoint += 1
+            if since_last_checkpoint >= checkpoint_every:
+                _write_checkpoint(checkpoint_dir, t, sic_rows, facts_frames)
+                since_last_checkpoint = 0
 
     sic_codes = pl.concat(sic_rows).join(selected.select(["cik", "ticker"]), on="cik")
     facts = pl.concat(facts_frames)
@@ -109,7 +165,7 @@ def run_from_network(
         pl.lit(0.0).alias("shares_outstanding")
     )
 
-    return run_daily(
+    result = run_daily(
         shares_pit=shares_pit,
         prices_adj=prices_adj,
         sic_codes=sic_codes,
@@ -127,3 +183,14 @@ def run_from_network(
         own_history_by_cik=own_history_by_cik,
         since_year=since_year,
     )
+
+    if checkpoint_dir is not None:
+        # Le lancement a abouti : les résultats durables vivent déjà dans
+        # fundamentals_history_path/screen_history_path/
+        # universe_history_path -- le fichier de reprise n'a plus
+        # d'utilité pour ce t (T96).
+        sic_path, facts_path = _checkpoint_paths(checkpoint_dir, t)
+        sic_path.unlink(missing_ok=True)
+        facts_path.unlink(missing_ok=True)
+
+    return result
