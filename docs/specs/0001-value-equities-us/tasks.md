@@ -2486,4 +2486,45 @@ médiane d'un concept brut, pas celle du ratio EV/EBIT que le critère 12
 exige littéralement — une refonte, pas un simple câblage, à spécifier
 séparément.
 
-Total : 91 tâches.
+### T92 — Défaut de `end` trompeur dans la vue détail (premier aperçu réel)
+- **Objectif** : trouvé en montant la plateforme pour la première fois sur
+  la vraie sortie de production (25 titres, T89-T91). `app/main.py`
+  (T80) contraint déjà les options d'`end` aux exercices réellement connus
+  du titre sélectionné, mais le **défaut** choisi (`available_ends[0]`,
+  le plus récent, toutes natures de faits confondues) n'a aucun rapport
+  garanti avec l'exercice réellement utilisé pour calculer les valeurs
+  déjà affichées dans le tableau. Constaté en direct sur FISV : le
+  sélecteur propose par défaut `2026-07-31` (une date issue d'un fait
+  quelconque, pas nécessairement un exercice annuel), alors que
+  `ingest_run.py` avait utilisé `end=2025-12-31` pour produire les
+  chiffres du tableau. Conséquence observée : `ev_ebit` trace quand même
+  correctement par défaut (le TTM de T91 ne dépend pas de `end`), mais
+  `fcf_yield`, `roic` et `net_debt_ebitda` affichent `non_traceable` par
+  défaut — jamais parce que la donnée manque, seulement parce que le
+  sélecteur pointe au mauvais endroit. Un utilisateur pourrait conclure à
+  tort qu'un titre n'est pas traçable. Distinct de ce que T80 a corrigé
+  (T80 garantit que les options sont réelles, jamais que le défaut soit le
+  bon).
+  `end` reste un paramètre de configuration, jamais persisté nulle part
+  (point tranché en T77 — persister `end` dans `screen_results.parquet`
+  avait été explicitement écarté) : cette tâche améliore seulement le
+  choix du défaut à partir des faits déjà disponibles, elle ne rouvre pas
+  cette décision.
+- **Fichiers** : `src/dashboard/app/main.py`,
+  `tests/app/test_app_smoke.py` (étendu).
+- **Test** : `test_app_smoke_end_defaults_to_most_recent_annual_period` —
+  fixture portant, pour un même titre, un exercice annuel (`fiscal_period
+  = "FY"`) plus ancien et un exercice trimestriel plus récent (comme le
+  cas réel FISV) : le sélecteur doit s'initialiser sur l'exercice annuel
+  le plus récent, jamais sur le trimestriel plus récent mais sans rapport
+  garanti avec le calcul déjà affiché. Si aucun exercice annuel n'existe
+  pour le titre, repli sur le comportement actuel (le plus récent, toutes
+  natures confondues) — jamais une erreur.
+- **Critères de la spec couverts** : aucun directement — renforce
+  l'invariant 7 autour du paramètre `end` (T77, T80), sans en changer le
+  statut de paramètre de configuration.
+- **Terminée quand** : le test passe, et rejouer la vraie sortie de
+  production (FISV) affiche par défaut `2025-12-31`, pas `2026-07-31`.
+- **Dépend de** : T77, T80.
+
+Total : 92 tâches (T92 rédigée, non implémentée).
