@@ -2463,5 +2463,27 @@ découverte automatique du bassin ouvert après T81.
   et les tests existants de `ebit_bridge`/`ratios`/`detail_view` restent
   au vert sans modification de leur propre comportement.
 - **Dépend de** : T90, T26 (`calc.ebit_bridge`), T64-T66/T69 (`app.detail_view`).
+- **Statut** : faite. Découverte en implémentant : plusieurs fixtures
+  synthétiques existantes (`test_coverage_rate`, `test_currency_explicit`,
+  `test_ratios_missing_data`, les deux tests de bout en bout) ne portaient
+  aucune colonne `fiscal_period`/`start` du tout (jamais construites pour
+  un usage trimestriel) — `calc.ttm` plantait sur une colonne manquante
+  plutôt que de retomber sur le point-in-time. Corrigé par un garde
+  explicite dans `_last_four_quarters` : colonne absente traitée comme
+  aucune donnée trimestrielle, jamais une erreur. Tous les tests existants
+  restent verts sans modification de leur propre comportement (101
+  passed). Revérifié contre les vraies données déjà ingérées (FISV) :
+  l'EBIT implicite recalculé est exactement le TTM de T90 (5,065 Md$), et
+  la trace montre les quatre vrais trimestres (chacun la valeur
+  trimestrielle seule, jamais un cumul YTD) avec `concept`/`end`/`filed`/
+  `accn` réels.
 
-Total : 91 tâches (T91 rédigée, non implémentée).
+T91 est faite. Le critère 12 est désormais réellement satisfait pour son
+volet TTM par l'écran généré, pas seulement par un test de module isolé —
+referme l'écart trouvé pendant `/spec-verify` (sixième passage). Le volet
+médiane 5 ans (`calc.normalized_5y`) reste distinct : il calcule la
+médiane d'un concept brut, pas celle du ratio EV/EBIT que le critère 12
+exige littéralement — une refonte, pas un simple câblage, à spécifier
+séparément.
+
+Total : 91 tâches.

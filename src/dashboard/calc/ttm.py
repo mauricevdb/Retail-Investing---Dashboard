@@ -12,7 +12,14 @@ _QUARTERS = ("Q1", "Q2", "Q3", "Q4")
 _MAX_QUARTER_DURATION_DAYS = 100
 
 
-def ttm(facts: pl.DataFrame, cik: str, concept: str, t: date) -> float | None:
+def _last_four_quarters(facts: pl.DataFrame, cik: str, concept: str, t: date) -> pl.DataFrame:
+    # Certaines fixtures/appelants ne portent aucune colonne fiscal_period ou
+    # start (jamais construites pour un usage trimestriel) -- absence de
+    # donnée trimestrielle, jamais une erreur de colonne manquante (T91,
+    # repli explicite d'ebit_bridge.resolve_ttm vers le point-in-time).
+    if "fiscal_period" not in facts.columns or "start" not in facts.columns:
+        return facts.clear()
+
     quarterly = facts.filter(
         (pl.col("cik") == cik)
         & (pl.col("concept") == concept)
@@ -22,15 +29,37 @@ def ttm(facts: pl.DataFrame, cik: str, concept: str, t: date) -> float | None:
         & ((pl.col("end") - pl.col("start")).dt.total_days() <= _MAX_QUARTER_DURATION_DAYS)
     )
     if quarterly.height == 0:
-        return None
+        return quarterly
 
     latest_per_end = (
         quarterly.sort(["end", "filed"], descending=[False, True])
         .unique(subset=["end"], keep="first")
         .sort("end", descending=True)
     )
-    last_four = latest_per_end.head(4)
+    return latest_per_end.head(4)
+
+
+def ttm(facts: pl.DataFrame, cik: str, concept: str, t: date) -> float | None:
+    last_four = _last_four_quarters(facts, cik, concept, t)
     if last_four.height < 4:
         return None
 
     return last_four["value"].sum()
+
+
+def trace_ttm(facts: pl.DataFrame, cik: str, concept: str, t: date) -> list[dict]:
+    last_four = _last_four_quarters(facts, cik, concept, t)
+    if last_four.height < 4:
+        return []
+
+    return [
+        {
+            "concept": row["concept"],
+            "end": row["end"],
+            "filed": row["filed"],
+            "accn": row["accn"],
+            "value": row["value"],
+            "rank": 1,
+        }
+        for row in last_four.sort("end").iter_rows(named=True)
+    ]

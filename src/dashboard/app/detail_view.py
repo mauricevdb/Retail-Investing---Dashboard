@@ -6,6 +6,7 @@ from dashboard.calc.cash_bridge import trace as trace_cash
 from dashboard.calc.debt_bridge import trace as trace_debt
 from dashboard.calc.dna_bridge import trace as trace_dna
 from dashboard.calc.ebit_bridge import trace as trace_ebit
+from dashboard.calc.ebit_bridge import trace_ttm as trace_ebit_ttm
 from dashboard.calc.equity_bridge import trace as trace_equity
 from dashboard.calc.fcf_bridge import trace as trace_fcf
 from dashboard.calc.nopat import trace_tax_rate
@@ -14,7 +15,11 @@ from dashboard.calc.nopat import trace_tax_rate
 # (T25-T33) : la chaîne de repli et le rang qui en résulte viennent de ces
 # bridges, jamais d'une liste de tags supposée a priori (cf. T64).
 _INDICATOR_TRACERS: dict[str, tuple] = {
-    "ev_ebit": (trace_ebit, trace_debt, trace_cash),
+    # ev_ebit seul utilise le TTM (T91, critère 12, décidé avec
+    # l'utilisateur) -- roic et net_debt_ebitda gardent trace_ebit
+    # (point-in-time) inchangé, cohérent avec calc.ratios.ev_to_ebit étant
+    # le seul appelant de resolve_ttm.
+    "ev_ebit": (trace_ebit_ttm, trace_debt, trace_cash),
     "fcf_yield": (trace_fcf, trace_debt, trace_cash),
     "roic": (trace_ebit, trace_tax_rate, trace_debt, trace_equity, trace_cash),
     "net_debt_ebitda": (trace_ebit, trace_dna, trace_debt, trace_cash),

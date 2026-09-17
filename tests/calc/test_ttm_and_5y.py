@@ -3,7 +3,7 @@ from datetime import date
 import polars as pl
 
 from dashboard.calc.normalized_5y import normalized_5y
-from dashboard.calc.ttm import ttm
+from dashboard.calc.ttm import trace_ttm, ttm
 
 
 def test_ttm_and_5y_median_computed() -> None:
@@ -21,6 +21,7 @@ def test_ttm_and_5y_median_computed() -> None:
             "value": 50.0,
             "fiscal_period": "Q4",
             "fiscal_year": 2022,
+            "accn": "0000000001-23-000001",
         },
         {
             "cik": cik,
@@ -31,6 +32,7 @@ def test_ttm_and_5y_median_computed() -> None:
             "value": 100.0,
             "fiscal_period": "Q1",
             "fiscal_year": 2023,
+            "accn": "0000000001-23-000002",
         },
         {
             "cik": cik,
@@ -41,6 +43,7 @@ def test_ttm_and_5y_median_computed() -> None:
             "value": 110.0,
             "fiscal_period": "Q2",
             "fiscal_year": 2023,
+            "accn": "0000000001-23-000003",
         },
         {
             "cik": cik,
@@ -51,6 +54,7 @@ def test_ttm_and_5y_median_computed() -> None:
             "value": 120.0,
             "fiscal_period": "Q3",
             "fiscal_year": 2023,
+            "accn": "0000000001-23-000004",
         },
         {
             "cik": cik,
@@ -61,6 +65,7 @@ def test_ttm_and_5y_median_computed() -> None:
             "value": 130.0,
             "fiscal_period": "Q4",
             "fiscal_year": 2023,
+            "accn": "0000000001-24-000001",
         },
     ]
 
@@ -229,3 +234,90 @@ def test_ttm_excludes_year_to_date_cumulative_facts() -> None:
     # jamais une valeur mêlant un cumul, quel que soit l'ordre des lignes
     # ou lequel des deux la déduplication aurait choisi par défaut.
     assert ttm(facts, cik=cik, concept=concept, t=t) == 460.0
+
+
+def test_ttm_trace_returns_the_four_quarters_summed() -> None:
+    # trace_ttm (T91) doit exposer les faits réellement sommés par ttm() --
+    # sans quoi une valeur TTM affichée redeviendrait intraçable jusqu'à
+    # ses faits déposés (invariant 8, même défaut que celui corrigé pour
+    # roic en T79).
+    cik = "0000000001"
+    concept = "OperatingIncomeLoss"
+    t = date(2024, 3, 1)
+
+    quarterly = [
+        {
+            "cik": cik,
+            "concept": concept,
+            "start": date(2022, 10, 1),
+            "end": date(2022, 12, 31),
+            "filed": date(2023, 2, 10),
+            "value": 50.0,
+            "fiscal_period": "Q4",
+            "fiscal_year": 2022,
+            "accn": "0000000001-23-000001",
+        },
+        {
+            "cik": cik,
+            "concept": concept,
+            "start": date(2023, 1, 1),
+            "end": date(2023, 3, 31),
+            "filed": date(2023, 5, 10),
+            "value": 100.0,
+            "fiscal_period": "Q1",
+            "fiscal_year": 2023,
+            "accn": "0000000001-23-000002",
+        },
+        {
+            "cik": cik,
+            "concept": concept,
+            "start": date(2023, 4, 1),
+            "end": date(2023, 6, 30),
+            "filed": date(2023, 8, 10),
+            "value": 110.0,
+            "fiscal_period": "Q2",
+            "fiscal_year": 2023,
+            "accn": "0000000001-23-000003",
+        },
+        {
+            "cik": cik,
+            "concept": concept,
+            "start": date(2023, 7, 1),
+            "end": date(2023, 9, 30),
+            "filed": date(2023, 11, 10),
+            "value": 120.0,
+            "fiscal_period": "Q3",
+            "fiscal_year": 2023,
+            "accn": "0000000001-23-000004",
+        },
+        {
+            "cik": cik,
+            "concept": concept,
+            "start": date(2023, 10, 1),
+            "end": date(2023, 12, 31),
+            "filed": date(2024, 2, 15),
+            "value": 130.0,
+            "fiscal_period": "Q4",
+            "fiscal_year": 2023,
+            "accn": "0000000001-24-000001",
+        },
+    ]
+    facts = pl.DataFrame(quarterly)
+
+    components = trace_ttm(facts, cik=cik, concept=concept, t=t)
+
+    # Quatre composantes -- le trimestre 2022 glisse hors de la fenêtre,
+    # comme pour ttm() lui-même.
+    assert len(components) == 4
+    assert {c["end"] for c in components} == {
+        date(2023, 3, 31),
+        date(2023, 6, 30),
+        date(2023, 9, 30),
+        date(2023, 12, 31),
+    }
+    for component in components:
+        assert component["concept"] == concept
+        assert component["filed"] is not None
+        assert component["accn"] is not None
+
+    assert sum(c["value"] for c in components) == ttm(facts, cik=cik, concept=concept, t=t)

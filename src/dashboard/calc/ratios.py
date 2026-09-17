@@ -2,7 +2,7 @@ from datetime import date
 
 import polars as pl
 
-from dashboard.calc.ebit_bridge import resolve as resolve_ebit
+from dashboard.calc.ebit_bridge import resolve_ttm as resolve_ebit_ttm
 from dashboard.calc.ebitda import resolve as resolve_ebitda
 from dashboard.calc.ev import resolve as resolve_ev
 from dashboard.calc.fcf_bridge import resolve as resolve_fcf
@@ -13,7 +13,12 @@ from dashboard.calc.roic import resolve as resolve_roic
 def ev_to_ebit(
     market_cap: float, facts: pl.DataFrame, cik: str, end: date, t: date
 ) -> float | None:
-    ebit, _ = resolve_ebit(facts, cik, end, t)
+    # EV/EBIT (indicateur primaire, critère 12) utilise l'EBIT sur les
+    # quatre derniers trimestres connus (TTM) quand disponible, avec repli
+    # explicite sur la chaîne point-in-time existante sinon (T91) --
+    # jamais les autres indicateurs (ROIC, dette nette/EBITDA), qui gardent
+    # leur EBIT point-in-time inchangé (décidé avec l'utilisateur, ADR 0004).
+    ebit, _ = resolve_ebit_ttm(facts, cik, end, t)
     if ebit is None or ebit <= 0:
         return None
 

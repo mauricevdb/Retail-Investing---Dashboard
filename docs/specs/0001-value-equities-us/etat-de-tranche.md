@@ -268,9 +268,18 @@ trouvé ou de temps, pas des cas dont l'existence serait ignorée :
   production.** Testés isolément sur des séries construites pour
   l'occasion ; `pipeline.daily_run` ne les invoque jamais, faute d'un
   historique `screen_results` réellement accumulé sur plusieurs jours.
-- **`calc.ttm` et `calc.normalized_5y` ne sont appelés par aucun code de
-  production** non plus, pour la même raison — testés isolément, jamais
-  depuis le pipeline.
+- **`calc.ttm` est désormais appelé en production (T91)**, mais seulement
+  pour EV/EBIT (critère 12, décidé additif avec l'utilisateur) — ROIC et
+  dette nette/EBITDA gardent leur EBIT point-in-time, `calc.ttm` reste
+  inappelé pour eux. Repli explicite sur le point-in-time quand moins de
+  quatre trimestres sont connus (raison différente de `divergence`/`streak`
+  ci-dessus : `calc.ttm` n'a jamais eu besoin d'un historique `screen_results`
+  accumulé, seulement des trimestres déjà présents dans `facts` — la
+  raison précédemment donnée dans cette note était fausse pour `calc.ttm`,
+  corrigée ici, cf. /spec-verify sixième passage). `calc.normalized_5y`
+  reste totalement inappelé : il calcule la médiane d'un concept brut, pas
+  celle du ratio EV/EBIT que le critère 12 exige littéralement — une
+  refonte, pas un simple câblage, non traitée.
 - **Le calcul réel du percentile sectoriel (groupe ≥ 10 titres) n'a jamais
   été exercé.** Seul le repli (groupe < 10, critère 20) est testé, dans
   `calc.percentiles` comme dans le test de bout en bout de
