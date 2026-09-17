@@ -2635,4 +2635,44 @@ séparément.
   codées en dur (vérifié par un lancement réel unique, comme pour T89).
 - **Dépend de** : `calc.market_calendar` (existant), T83-T89 (bassin), ADR 0005.
 
-Total : 94 tâches (T94 rédigée, non implémentée).
+### T95 — `t` ne doit jamais viser la séance du jour même, pas encore publiée
+- **Objectif** : trouvé en tentant le premier lancement réel du script
+  produit par T94. `market_calendar.last_session` exclut bien les
+  week-ends et jours fériés, mais accepte le jour même dès lors que c'est
+  un jour ouvré -- sans savoir si la séance a déjà fermé, ni si EODHD a
+  déjà publié ses données de fin de journée pour cette séance. Constaté en
+  direct : lancé à 08:57 UTC (~4h57 du matin heure de New York, bien avant
+  l'ouverture), `derive_t`-au-sens-de-T94 (en réalité l'appel direct à
+  `last_session(datetime.now(timezone.utc))` dans `ingest_run.py`) a
+  renvoyé le jour même, EODHD a renvoyé 0 ligne pour cette séance
+  inexistante, et `rank_candidates` a levé `ColumnNotFoundError` sur un
+  DataFrame de prix vide -- pas un problème d'environnement, un vrai
+  défaut de calendrier pour un lancement automatique sans supervision.
+  Jamais rencontré avant T94 : `t` était toujours codé en dur (une date
+  déjà passée) dans tous les lancements réels précédents (T85-T89).
+  Correctif retenu, dans le même esprit que la marge de l'ADR 0005 (une
+  marge large et documentée plutôt qu'une modélisation fine et fragile des
+  fuseaux horaires et heures de clôture réelles) : un lancement automatique
+  ne doit jamais viser la séance du jour même, toujours la dernière séance
+  strictement antérieure -- garantissant au moins une journée calendaire
+  complète d'écart, largement suffisante pour la publication EODHD.
+- **Fichiers** : `src/dashboard/pipeline/production_schedule.py` (nouvelle
+  fonction `derive_t`), `tests/pipeline/test_production_schedule.py`
+  (étendu), `ingest_run.py` (appelle `derive_t` au lieu de `last_session`
+  directement).
+- **Test** : `test_derive_t_never_targets_the_current_day` — pour un
+  `instant` un jour ouvré, à une heure quelconque (y compris juste après
+  minuit UTC), `derive_t(instant)` ne renvoie jamais `instant.date()`,
+  toujours une date strictement antérieure.
+  `test_derive_t_skips_weekend` — pour un `instant` un lundi matin,
+  `derive_t` renvoie le vendredi précédent (jamais le week-end), cohérent
+  avec `last_session` déjà testé par ailleurs.
+- **Critères de la spec couverts** : aucun directement — corrige un défaut
+  de calendrier qui rendrait tout lancement automatique non supervisé
+  instable selon l'heure exacte du déclenchement.
+- **Terminée quand** : les tests passent, et relancer réellement
+  `ingest_run.py` (à n'importe quelle heure) ne lève plus
+  `ColumnNotFoundError` sur `prices_adj`.
+- **Dépend de** : T94, `calc.market_calendar` (existant).
+
+Total : 95 tâches (T95 rédigée, non implémentée).
