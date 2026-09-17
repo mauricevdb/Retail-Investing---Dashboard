@@ -2778,4 +2778,57 @@ séparément.
   reprise vide après succès (supprimé), historique de screen portant
   désormais deux dates distinctes. Exactement le comportement voulu.
 
-Total : 96 tâches, toutes implémentées et confirmées.
+### T97 — Rafraîchissement programmé : workflow GitHub Actions + commit automatique
+- **Objectif** : dernière pièce de l'option choisie avec l'utilisateur pour
+  que Streamlit Cloud dispose de vraies données (constat de T93 :
+  `ingestion_output/` n'est jamais versionné, `.gitignore` exclut tout
+  `*.parquet`) : un job planifié GitHub Actions relance `ingest_run.py`
+  (T94-T96 : `t`/`end`/`frame_period` dérivés automatiquement, résilient
+  aux pannes réseau isolées par reprise sur échec) et commit/push les
+  sorties durables si elles ont changé -- Streamlit Cloud redéploie
+  automatiquement à chaque push.
+  Dérogation ciblée à `*.parquet` dans `.gitignore`, restreinte aux trois
+  sorties durables (`screen_results.parquet`, `fundamentals_raw.parquet`,
+  `universe_membership.parquet`) -- jamais `ingestion_output/checkpoint/`,
+  qui reste transitoire et local à un lancement (T96 : supprimé après
+  succès, sans utilité une fois commité). `universe_membership.parquet`
+  et `fundamentals_raw.parquet` sont append-only (invariants 2 et 3) :
+  ne jamais les committer casserait l'accumulation d'historique d'un
+  lancement programmé à l'autre, chaque exécution GitHub Actions partant
+  d'un clone Git neuf.
+  Secrets (`SEC_USER_AGENT`, `EODHD_API_KEY`) fournis par GitHub Actions
+  comme variables d'environnement du job, jamais un fichier `.env` écrit
+  sur le runner (invariant 10 : les clés ne viennent jamais du code, un
+  fichier `.env` généré serait un risque de fuite superflu). `ingest_run.py`
+  doit donc lire l'environnement en repli si `.env` est absent -- reste
+  inchangé en local où `.env` existe.
+  Le point de reprise de T96 ne survit qu'à l'intérieur d'un même job
+  (le disque du runner est neuf à chaque déclenchement planifié) : une
+  boucle de nouvelles tentatives *à l'intérieur* du même job, bornée et
+  documentée (10 tentatives, 30 s entre chacune -- constaté cette session
+  même : 6 lancements ont été nécessaires en pratique face à une
+  instabilité réseau réelle), est nécessaire pour que la résilience de
+  T96 profite réellement à un lancement automatique sans supervision.
+- **Fichiers** : `.github/workflows/refresh_data.yml` (nouveau),
+  `.gitignore` (dérogation ciblée, 3 lignes), `ingest_run.py` (repli sur
+  `os.environ` dans `read_env` si `.env` est absent).
+- **Test** : aucun test pytest pertinent pour le fichier de workflow
+  lui-même (configuration CI, pas du code applicatif) -- cohérent avec
+  l'absence de test pour `ingest_run.py` déjà à T94/T95, vérifiées par un
+  vrai lancement plutôt qu'un test automatisé. Le repli `os.environ` de
+  `read_env` est vérifié manuellement (un lancement réel local avec `.env`
+  temporairement renommé et les variables exportées à la main) plutôt
+  qu'ajouté à la suite -- `ingest_run.py` reste un script hors périmètre
+  de test, comme le reste de son contenu actuel.
+- **Critères de la spec couverts** : aucun directement -- infrastructure
+  de déploiement, condition préalable à ce que la plateforme déployée
+  dispose de vraies données sans intervention manuelle répétée.
+- **Terminée quand** : `SEC_USER_AGENT`/`EODHD_API_KEY` ajoutés comme
+  secrets du dépôt GitHub par l'utilisateur (seul lui y a accès), le
+  workflow déclenché manuellement une fois (`workflow_dispatch`) aboutit,
+  un commit apparaît sur GitHub avec les sorties mises à jour, et
+  Streamlit Cloud redéploie avec ces nouvelles données -- confirmé par
+  l'utilisateur, hors portée de cet environnement.
+- **Dépend de** : T93 (constat initial), T94, T95, T96.
+
+Total : 97 tâches (T97 rédigée, non implémentée).
