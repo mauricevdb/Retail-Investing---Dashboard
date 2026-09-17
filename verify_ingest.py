@@ -1,13 +1,13 @@
-from datetime import date
-from pathlib import Path
 import json
 import urllib.request
+from datetime import date
+from pathlib import Path
 
 import polars as pl
 
+from dashboard.app.detail_view import trace_indicator
 from dashboard.ingestion.edgar_client import EdgarClient
 from dashboard.ingestion.edgar_facts import fetch_company_facts
-from dashboard.app.detail_view import trace_indicator
 
 
 def read_env(key: str) -> str:
@@ -26,12 +26,11 @@ def edgar_transport(url, headers):
         return json.load(response)
 
 
-edgar_client = EdgarClient(user_agent=read_env(
-    "SEC_USER_AGENT"), transport=edgar_transport)
+edgar_client = EdgarClient(user_agent=read_env("SEC_USER_AGENT"), transport=edgar_transport)
 
-CIK = "0000018230"        # Caterpillar
-END = date(2025, 12, 31)  # même valeur que dans ingest_run.py
-T = date(2026, 9, 11)     # même valeur que dans ingest_run.py
+CIK = "0001604028"  # Advanced Drainage Systems (WMS)
+END = date(2016, 3, 31)  # même valeur que dans ingest_run.py
+T = date(2017, 2, 1)  # même valeur que dans ingest_run.py
 
 screen = pl.read_parquet("ingestion_output/screen_results.parquet")
 row = screen.filter(pl.col("cik") == CIK).row(0, named=True)
