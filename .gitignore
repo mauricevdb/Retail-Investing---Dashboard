@@ -3,5 +3,13 @@ __pycache__/
 .venv/
 data/
 *.parquet
+# Sorties durables du rafraîchissement programmé (T97) -- append-only
+# (invariants 2 et 3) : doivent survivre d'un lancement GitHub Actions à
+# l'autre, chaque exécution partant d'un clone Git neuf. Le point de
+# reprise (ingestion_output/checkpoint/) reste exclu : transitoire,
+# supprimé après un lancement réussi (T96).
+!ingestion_output/screen_results.parquet
+!ingestion_output/fundamentals_raw.parquet
+!ingestion_output/universe_membership.parquet
 .pytest_cache/
 .ruff_cache/

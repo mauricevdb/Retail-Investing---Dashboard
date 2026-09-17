@@ -1,4 +1,5 @@
 import json
+import os
 import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
@@ -11,7 +12,18 @@ from dashboard.pipeline.production_schedule import derive_end, derive_frame_peri
 
 
 def read_env(key: str) -> str:
-    for line in Path(".env").read_text(encoding="utf-8").splitlines():
+    # Repli sur l'environnement du process si .env est absent (T97) :
+    # GitHub Actions fournit les secrets comme variables d'environnement
+    # du job, jamais un fichier .env écrit sur le runner (invariant 10).
+    # Reste inchangé en local, où .env existe.
+    env_path = Path(".env")
+    if not env_path.exists():
+        value = os.environ.get(key)
+        if value is None:
+            raise SystemExit(f"{key} absente de .env et de l'environnement")
+        return value
+
+    for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             name, _, value = line.partition("=")

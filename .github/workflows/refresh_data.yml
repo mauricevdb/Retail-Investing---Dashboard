@@ -1,0 +1,55 @@
+name: Rafraîchissement des données de production
+
+# Une fois par jour ouvré, après la clôture de Wall Street (T97) : dérive_t
+# (T95) garantit déjà qu'une exécution, quelle que soit l'heure réelle du
+# déclenchement, ne vise jamais la séance du jour même -- l'horaire choisi
+# ici (06:00 UTC, mardi à samedi, pour couvrir les séances lundi à
+# vendredi) est une marge de confort, pas une exigence de correction.
+on:
+  schedule:
+    - cron: "0 6 * * 2-6"
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - run: uv sync
+
+      # Le point de reprise de T96 ne survit qu'à l'intérieur de ce job --
+      # le disque du runner est neuf à chaque déclenchement planifié.
+      # Une boucle de nouvelles tentatives, bornée et documentée (jamais
+      # indéfinie), est nécessaire pour que la résilience de T96 profite
+      # réellement à ce lancement sans supervision : constaté en pratique
+      # lors de l'implémentation de T96, une instabilité réseau réelle a
+      # exigé 6 lancements successifs avant d'aboutir.
+      - name: Lance le pipeline d'ingestion, avec nouvelles tentatives
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+          PYTHONPATH: src
+        run: |
+          for attempt in $(seq 1 10); do
+            if uv run python ingest_run.py; then
+              exit 0
+            fi
+            echo "Tentative $attempt échouée, nouvel essai dans 30 s..."
+            sleep 30
+          done
+          echo "Échec après 10 tentatives"
+          exit 1
+
+      - name: Commit les sorties durables si elles ont changé
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ingestion_output/screen_results.parquet \
+                  ingestion_output/fundamentals_raw.parquet \
+                  ingestion_output/universe_membership.parquet
+          git diff --cached --quiet && exit 0
+          git commit -m "Rafraîchissement automatique des données ($(date -u +%F))"
+          git push

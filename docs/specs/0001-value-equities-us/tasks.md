@@ -2830,5 +2830,67 @@ séparément.
   Streamlit Cloud redéploie avec ces nouvelles données -- confirmé par
   l'utilisateur, hors portée de cet environnement.
 - **Dépend de** : T93 (constat initial), T94, T95, T96.
+- **Statut** : code fait. `.gitignore` porte désormais une dérogation
+  ciblée aux trois sorties durables (`git check-ignore` vérifié : les
+  trois deviennent suivables, `ingestion_output/checkpoint/*.parquet`
+  reste ignoré). `ingest_run.py::read_env` retombe sur `os.environ` si
+  `.env` est absent -- vérifié manuellement (`.env` renommé, variables
+  exportées à la main, résolution correcte, `SystemExit` explicite si la
+  clé manque aussi de l'environnement), `.env` restauré intact ensuite.
+  `.github/workflows/refresh_data.yml` ajouté (syntaxe YAML validée), avec
+  la boucle de nouvelles tentatives à l'intérieur du job (10 essais, 30 s)
+  et le commit conditionnel des sorties durables. Suite complète au vert
+  (109 passed), lint propre sur les fichiers Python touchés.
+  Reste à confirmer par l'utilisateur, hors portée de cet environnement :
+  ajouter `SEC_USER_AGENT`/`EODHD_API_KEY` comme secrets du dépôt GitHub,
+  déclencher le workflow une fois manuellement, et vérifier qu'un commit
+  apparaît sur GitHub avec Streamlit Cloud redéployant les nouvelles
+  données.
 
-Total : 97 tâches (T97 rédigée, non implémentée).
+### T98 — `fundamentals_raw.parquet` : instantané du jour, jamais l'historique complet
+- **Objectif** : trouvé en préparant le premier commit réel de T97 :
+  `fundamentals_raw.parquet` (l'historique complet, append-only depuis
+  T78, invariants 2/3) pèse déjà **220 Mo pour une seule journée** de
+  production -- et ne peut que grossir chaque jour. GitHub refuse
+  catégoriquement tout fichier de plus de 100 Mo dans un push normal :
+  incompatible avec l'option "commit automatique dans le dépôt" choisie
+  pour T97, dès le premier jour, avant même qu'un seul rafraîchissement
+  programmé n'ait tourné.
+  Décidé avec l'utilisateur : ne committer qu'un **instantané du jour
+  courant** (les faits fraîchement obtenus par le dernier lancement, pour
+  les seuls titres du screen du jour), jamais l'historique cumulé.
+  Suffisant pour la plateforme déployée : elle ne propose jamais de
+  détailler un titre en dehors du screen du jour affiché (T80), donc
+  jamais besoin d'un fait plus ancien qu'aujourd'hui pour la trace.
+  L'historique complet append-only (invariants 2/3, nécessaire pour
+  l'audit et une éventuelle réévaluation rétrospective, cf. invariant 3
+  sur l'univers historique) reste écrit **localement seulement**, jamais
+  commité -- aucune perte de la garantie déjà assurée par T78, seulement
+  un chemin de fichier distinct de celui exposé publiquement.
+  Additif : nouveau paramètre `fundamentals_snapshot_path: Path | None =
+  None` sur `run_from_network`, absent -> comportement actuel inchangé
+  (cohérent avec `discovery_buffer`, T89).
+- **Fichiers** : `src/dashboard/pipeline/ingest.py`,
+  `tests/pipeline/test_ingest_from_network.py` (étendu), `ingest_run.py`
+  (`fundamentals_history_path` renommé vers un fichier local distinct,
+  nouveau `fundamentals_snapshot_path` pointant vers
+  `ingestion_output/fundamentals_raw.parquet`, le nom déjà attendu par
+  `app/main.py` -- aucun changement requis côté dashboard).
+- **Test** : `test_run_from_network_writes_fundamentals_snapshot_overwriting_each_run`
+  -- deux lancements successifs sur des candidats différents, avec le même
+  `fundamentals_snapshot_path` : le fichier d'instantané ne porte, après
+  le second lancement, que les faits du second lancement, jamais un cumul
+  des deux (contrairement à `fundamentals_history_path`, dont le
+  comportement d'accumulation, déjà testé à T78, reste inchangé et non
+  retesté ici).
+- **Critères de la spec couverts** : aucun directement -- corrige un
+  défaut d'infrastructure de déploiement qui aurait rendu tout commit
+  automatique impossible dès le premier jour.
+- **Terminée quand** : le test passe, la suite complète reste au vert, et
+  un vrai lancement de production confirme que `fundamentals_raw.parquet`
+  reste de taille raisonnable (quelques Mo, pas des centaines) après
+  écriture.
+- **Dépend de** : T78 (historique append-only, inchangé), T97.
+
+Total : 98 tâches (T98 rédigée, non implémentée). T97 en attente de
+confirmation du déclenchement réel par l'utilisateur.
