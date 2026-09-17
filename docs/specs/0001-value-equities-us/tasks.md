@@ -2590,9 +2590,9 @@ séparément.
   complète au vert (103 passed), lint propre. Revérifié en direct : la
   commande documentée par CLAUDE.md (`uv run streamlit run
   src/dashboard/app/main.py`, sans `PYTHONPATH`) démarre désormais sans
-  erreur. Reste à confirmer par l'utilisateur sur le vrai déploiement
-  Streamlit Cloud (hors portée des tests automatisés et de cet
-  environnement).
+  erreur. Confirmé par l'utilisateur sur le vrai déploiement Streamlit
+  Cloud : le `ModuleNotFoundError` a disparu (l'écran affiche désormais
+  son message normal d'absence de résultat de screen, cf. tâche
+  corrective distincte pour `ingestion_output/` non versionné).
 
-Total : 93 tâches, toutes implémentées (T93 en attente de confirmation du
-déploiement réel Streamlit Cloud par l'utilisateur).
+Total : 93 tâches, toutes implémentées et confirmées.
