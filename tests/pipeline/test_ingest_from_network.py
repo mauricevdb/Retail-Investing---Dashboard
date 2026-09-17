@@ -320,6 +320,59 @@ def test_run_from_network_discovery_buffer_wider_than_universe_buffer(tmp_path: 
     assert membership.filter(pl.col("in_universe"))["ticker"].to_list() == ["AAAA"]
 
 
+def test_run_from_network_fundamentals_snapshot_excludes_discovery_only_candidates(
+    tmp_path: Path,
+) -> None:
+    # Trouvé en préparant le premier commit réel de T97/T98 : à l'échelle
+    # réelle de production, le bassin de découverte (~1250 candidats
+    # réellement ingérés pour classer et exclure, T89) est bien plus large
+    # que le screen final (quelques dizaines) -- un instantané portant tout
+    # le bassin, même limité au seul dernier lancement, reste lui-même trop
+    # volumineux pour être commité (~147 Mo mesurés en pratique). Seuls les
+    # titres réellement retenus dans le screen du jour doivent apparaître
+    # dans l'instantané, jamais Beta/Gamma qui n'ont servi qu'au classement.
+    frame_response = {
+        "data": [
+            {"cik": 1, "end": "2023-06-30", "val": 100_000_000},
+            {"cik": 2, "end": "2023-06-30", "val": 100_000_000},
+            {"cik": 3, "end": "2023-06-30", "val": 100_000_000},
+        ]
+    }
+    edgar_transport = WideDiscoveryEdgarTransport(frame_response)
+    eodhd_transport = WideDiscoveryEodhdTransport()
+    edgar_client = EdgarClient(
+        user_agent="RI Dashboard test@example.com", transport=edgar_transport
+    )
+    eodhd_client = EodhdClient(api_key="fake-eodhd-key", transport=eodhd_transport)
+
+    t = date(2024, 2, 15)
+    end = date(2023, 12, 31)
+    snapshot_path = tmp_path / "fundamentals_raw.parquet"
+
+    run_from_network(
+        edgar_client=edgar_client,
+        eodhd_client=eodhd_client,
+        t=t,
+        end=end,
+        universe_history_path=tmp_path / "universe_membership.parquet",
+        hier_membership=set(),
+        frame_period="CY2023Q2I",
+        thresholds={},
+        screen_history_path=tmp_path / "screen_results.parquet",
+        fundamentals_snapshot_path=snapshot_path,
+        n=1,
+        buffer=0,
+        discovery_buffer=2,
+        plausible_range=(0, 3),
+    )
+
+    # Beta et Gamma ont bien été ingérés pour de vrai (découverte, T89),
+    # mais n'apparaissent jamais dans l'instantané -- seule Alpha, retenue
+    # dans le screen final.
+    snapshot = pl.read_parquet(snapshot_path)
+    assert set(snapshot["cik"].to_list()) == {"0000000001"}
+
+
 class MultiTickerEdgarTransport:
     """company_tickers liste le CIK 1 sous deux tickers (comme Freddie Mac
     et ses séries d'actions préférentielles, T88) -- compte les appels
@@ -444,6 +497,104 @@ def test_run_from_network_ingests_and_feeds_daily_run(tmp_path: Path) -> None:
     assert any("companyfacts/CIK0000000001.json" in c for c in edgar_transport.calls)
     assert any("type=splits" in c for c in eodhd_transport.calls)
     assert any("type=splits" not in c for c in eodhd_transport.calls)
+
+
+class TwoCikEdgarTransport:
+    """Sert les dépôts/faits réels d'Alpha (CIK 1) et Gamma (CIK 3, choisie
+    plutôt que Beta/CIK 2 dont la fixture de faits est vide) sans aucune
+    restriction -- contrairement à AssertsNoRefetchEdgarTransport (conçue
+    pour prouver l'absence de refetch après reprise, T96), cette variante
+    sert n'importe lequel des deux CIK, autant de fois que nécessaire."""
+
+    def __init__(self):
+        with open(GOLDEN / "edgar_company_tickers.json", encoding="utf-8") as f:
+            self.tickers = json.load(f)
+        self.submissions = {}
+        self.facts = {}
+        for cik in ("0000000001", "0000000003"):
+            with open(GOLDEN / f"edgar_submissions_{cik}.json", encoding="utf-8") as f:
+                self.submissions[cik] = json.load(f)
+            with open(GOLDEN / f"edgar_companyfacts_{cik}.json", encoding="utf-8") as f:
+                self.facts[cik] = json.load(f)
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, headers: dict):
+        self.calls.append(url)
+        if "company_tickers.json" in url:
+            return self.tickers
+        for cik, payload in self.submissions.items():
+            if f"submissions/CIK{cik}.json" in url:
+                return payload
+        for cik, payload in self.facts.items():
+            if f"companyfacts/CIK{cik}.json" in url:
+                return payload
+        raise AssertionError(f"URL EDGAR inattendue : {url}")
+
+
+def test_run_from_network_writes_fundamentals_snapshot_overwriting_each_run(
+    tmp_path: Path,
+) -> None:
+    # fundamentals_history_path (T78) accumule tout, sans jamais rien
+    # écraser (invariants 2/3) -- mais ce comportement rend le fichier
+    # impossible à committer dans un dépôt Git au fil des jours (T98,
+    # trouvé en préparant le premier commit réel de T97 : 220 Mo pour une
+    # seule journée). fundamentals_snapshot_path, lui, ne porte jamais que
+    # les faits du dernier lancement -- suffisant pour la plateforme
+    # déployée, qui ne propose jamais de détailler un titre en dehors du
+    # screen du jour affiché.
+    def make_client() -> EdgarClient:
+        return EdgarClient(
+            user_agent="RI Dashboard test@example.com",
+            transport=TwoCikEdgarTransport(),
+        )
+
+    eodhd_client = EodhdClient(api_key="fake-eodhd-key", transport=RoutingEodhdTransport())
+    t = date(2024, 2, 15)
+    end = date(2023, 12, 31)
+    snapshot_path = tmp_path / "fundamentals_raw.parquet"
+    history_path = tmp_path / "fundamentals_history.parquet"
+
+    run_from_network(
+        edgar_client=make_client(),
+        eodhd_client=eodhd_client,
+        t=t,
+        end=end,
+        universe_history_path=tmp_path / "universe_1.parquet",
+        hier_membership=set(),
+        ciks=["0000000001"],
+        thresholds={},
+        screen_history_path=tmp_path / "screen_1.parquet",
+        fundamentals_history_path=history_path,
+        fundamentals_snapshot_path=snapshot_path,
+        plausible_range=(0, 1),
+    )
+    first_snapshot = pl.read_parquet(snapshot_path)
+    assert set(first_snapshot["cik"].to_list()) == {"0000000001"}
+
+    run_from_network(
+        edgar_client=make_client(),
+        eodhd_client=eodhd_client,
+        t=t,
+        end=end,
+        universe_history_path=tmp_path / "universe_2.parquet",
+        hier_membership=set(),
+        ciks=["0000000003"],
+        thresholds={},
+        screen_history_path=tmp_path / "screen_2.parquet",
+        fundamentals_history_path=history_path,
+        fundamentals_snapshot_path=snapshot_path,
+        plausible_range=(0, 1),
+    )
+
+    # L'instantané ne porte que le second lancement -- jamais un cumul des
+    # deux, contrairement à l'historique.
+    second_snapshot = pl.read_parquet(snapshot_path)
+    assert set(second_snapshot["cik"].to_list()) == {"0000000003"}
+
+    # L'historique, lui, garde son comportement d'accumulation inchangé
+    # (T78, non retesté ici) : les deux lancements y sont présents.
+    history = pl.read_parquet(history_path)
+    assert set(history["cik"].to_list()) == {"0000000001", "0000000003"}
 
 
 def test_run_from_network_propagates_source_failure(tmp_path: Path) -> None:

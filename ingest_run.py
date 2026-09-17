@@ -70,7 +70,13 @@ view_text = run_from_network(
     frame_period=frame_period,
     thresholds={},  # aucun seuil : tout titre calculable est retenu
     screen_history_path=output_dir / "screen_results.parquet",
-    fundamentals_history_path=output_dir / "fundamentals_raw.parquet",
+    # Historique complet, local seulement, jamais commité (T98) : grossit
+    # indéfiniment (invariants 2/3), déjà 220 Mo pour une seule journée --
+    # dépasse la limite GitHub de 100 Mo par fichier. L'instantané du jour
+    # (fundamentals_snapshot_path, ci-dessous) est ce que le dépôt versionne
+    # réellement et ce que la plateforme déployée lit.
+    fundamentals_history_path=output_dir / "fundamentals_history.parquet",
+    fundamentals_snapshot_path=output_dir / "fundamentals_raw.parquet",
     n=900,
     buffer=100,  # marge de l'univers final -- hystérésis, inchangée (T89)
     discovery_buffer=800,  # marge de découverte élargie -- compense

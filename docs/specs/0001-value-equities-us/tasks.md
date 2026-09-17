@@ -2891,6 +2891,25 @@ séparément.
   reste de taille raisonnable (quelques Mo, pas des centaines) après
   écriture.
 - **Dépend de** : T78 (historique append-only, inchangé), T97.
+- **Statut** : faite. Conception initiale insuffisante, corrigée avant
+  commit réel : un instantané portant tout le bassin de découverte
+  (~1250 candidats réellement ingérés à l'échelle réelle, T89) reste
+  lui-même trop volumineux (~65M lignes mesurées, ~147 Mo estimés) --
+  l'hypothèse de départ ("220 Mo pour une seule journée") reflétait en
+  réalité une accumulation de nombreux lancements de vérification de
+  toute la session (2410 CIK distincts), pas un seul jour à l'échelle
+  réelle. Corrigé en filtrant l'instantané aux seuls titres réellement
+  retenus dans le screen du jour (`screen_history_path`, lu après
+  `run_daily`), jamais l'ensemble du bassin de découverte -- nouveau test
+  dédié (`test_run_from_network_fundamentals_snapshot_excludes_discovery_only_candidates`)
+  prouvant que Beta/Gamma, ingérés pour classer, n'apparaissent jamais
+  dans l'instantané. Suite complète au vert (111 passed), lint propre.
+  Revérifié à l'échelle réelle en filtrant les vraies données déjà
+  obtenues aux 25 titres réellement retenus du dernier lancement : 4,9 Mo,
+  largement sous la limite GitHub (contre ~147 Mo pour le bassin complet).
+  `ingest_run.py` sépare désormais `fundamentals_history_path` (local
+  seulement, jamais commité) de `fundamentals_snapshot_path` (le nom déjà
+  attendu par `app/main.py`, committé par T97).
 
-Total : 98 tâches (T98 rédigée, non implémentée). T97 en attente de
-confirmation du déclenchement réel par l'utilisateur.
+Total : 98 tâches, toutes implémentées. T97 en attente de confirmation du
+déclenchement réel par l'utilisateur.

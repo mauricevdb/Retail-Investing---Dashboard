@@ -66,6 +66,7 @@ def run_from_network(
     since_year: int = 2011,
     checkpoint_dir: Path | None = None,
     checkpoint_every: int = 25,
+    fundamentals_snapshot_path: Path | None = None,
 ) -> str | None:
     if sum(mode is not None for mode in (ciks, tickers, frame_period)) != 1:
         raise IngestionSelectionError(
@@ -192,5 +193,33 @@ def run_from_network(
         sic_path, facts_path = _checkpoint_paths(checkpoint_dir, t)
         sic_path.unlink(missing_ok=True)
         facts_path.unlink(missing_ok=True)
+
+    if fundamentals_snapshot_path is not None:
+        # Écrase à chaque lancement, jamais un cumul (contrairement à
+        # fundamentals_history_path, append-only depuis T78) : l'historique
+        # complet grossit indéfiniment (invariants 2/3) et ne peut pas être
+        # commité dans un dépôt Git au fil des jours -- déjà 220 Mo pour
+        # une seule journée de production (T98).
+        # Filtré aux seuls titres réellement retenus dans le screen du
+        # jour -- jamais l'ensemble du bassin de découverte (T89 : jusqu'à
+        # ~1250 candidats réellement ingérés pour classer et exclure, très
+        # supérieur aux quelques dizaines finalement retenues). La
+        # plateforme déployée ne propose jamais de détailler un titre en
+        # dehors du screen affiché (T80) -- un instantané portant tout le
+        # bassin de découverte resterait lui-même trop volumineux (~65M
+        # lignes, ~147 Mo mesurés en pratique, toujours au-dessus de la
+        # limite GitHub), constaté en préparant le premier commit réel.
+        if screen_history_path is not None and screen_history_path.exists():
+            retained_ciks = (
+                pl.read_parquet(screen_history_path).filter(pl.col("date") == t)["cik"].to_list()
+            )
+            facts.filter(pl.col("cik").is_in(retained_ciks)).write_parquet(
+                fundamentals_snapshot_path
+            )
+        else:
+            # Aucun screen final connu (usage T58 seul, cf. daily_run) :
+            # impossible de filtrer, replier sur le bassin complet plutôt
+            # que ne rien écrire.
+            facts.write_parquet(fundamentals_snapshot_path)
 
     return result
