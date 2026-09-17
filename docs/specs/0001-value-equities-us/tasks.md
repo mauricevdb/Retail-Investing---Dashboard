@@ -2543,4 +2543,44 @@ séparément.
   désormais par défaut `2025-12-31`, et `fcf_yield`/`roic`/
   `net_debt_ebitda` sont bien `"ok"` (traçables) par défaut.
 
-Total : 92 tâches, toutes implémentées.
+### T93 — `dashboard` inimportable sans `PYTHONPATH` externe (bloque Streamlit Cloud)
+- **Objectif** : trouvé en déployant réellement sur Streamlit Cloud (après
+  T92, premier essai de mise en ligne publique). La commande documentée par
+  CLAUDE.md (`uv run streamlit run src/dashboard/app/main.py`, sans
+  variable d'environnement) échoue avec `ModuleNotFoundError: No module
+  named 'dashboard'` dès la ligne `from dashboard.app.detail_view import
+  trace_indicator` — reproduit aussi en local, hors tout contexte Streamlit
+  Cloud, dès qu'on relance l'app sans avoir positionné `PYTHONPATH=src` à
+  la main. `pyproject.toml` porte `[tool.uv] package = false` (décision
+  assumée : pas de packaging) et rien d'autre ne place `src/` sur le
+  `sys.path` d'une exécution normale.
+  Ce bug n'a jamais été détecté par la suite de tests parce que
+  `[tool.pytest.ini_options] pythonpath = ["src"]` place déjà `src/` sur le
+  `sys.path` de tout process pytest, et que `AppTest` (T77, T80, T82)
+  exécute `main.py` **dans ce même process** plutôt que dans un process
+  Python neuf et isolé comme le fait réellement `streamlit run` (localement
+  ou sur Streamlit Cloud). Aucun test existant n'exerçait donc le vrai
+  point d'entrée tel qu'un déploiement l'exécute.
+  Streamlit Cloud ne permet de positionner aucune variable d'environnement
+  avant l'import du script (seuls des secrets exposés via `st.secrets` sont
+  configurables) : la commande documentée doit donc fonctionner seule, sans
+  dépendre d'un `PYTHONPATH` externe, dans les deux environnements.
+- **Fichiers** : `src/dashboard/app/main.py`, `tests/app/test_app_smoke.py`
+  (nouveau test).
+- **Test** : `test_main_importable_without_external_pythonpath` — lance
+  `main.py` dans un **process Python neuf** (`subprocess.run`), avec
+  `PYTHONPATH` explicitement absent de l'environnement et un `cwd` sans
+  rapport avec le dépôt (pour prouver que la résolution vient de
+  `__file__`, jamais du répertoire courant), sur une fixture minimale
+  identique à celle déjà utilisée par `test_app_smoke_screen_and_detail`.
+  Doit reproduire le `ModuleNotFoundError` avant correctif, et s'exécuter
+  sans erreur après.
+- **Critères de la spec couverts** : aucun directement — corrige un bug de
+  point d'entrée qui empêche tout déploiement réel de l'écran, condition
+  préalable à l'exercice de n'importe quel critère par un utilisateur final.
+- **Terminée quand** : le test passe, la suite complète reste au vert, et
+  le déploiement réel sur Streamlit Cloud (confirmé par l'utilisateur, hors
+  portée des tests automatisés) ne lève plus `ModuleNotFoundError`.
+- **Dépend de** : T77 (point d'entrée Streamlit), T80/T82 (AppTest existant).
+
+Total : 93 tâches (T93 rédigée, non implémentée).
