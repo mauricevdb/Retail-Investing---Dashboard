@@ -2401,4 +2401,67 @@ découverte automatique du bassin ouvert après T81.
   une valeur déterministe (5,065 Md$, cohérente avec son EBIT annuel de
   5,818 Md$) au lieu d'un choix arbitraire entre deux valeurs réelles.
 
-Total : 90 tâches.
+### T91 — Câbler le TTM dans EV/EBIT (critère 12), sans toucher ROIC ni dette nette/EBITDA
+- **Objectif** : `calc.ebit_bridge` est partagé par trois indicateurs
+  (EV/EBIT, ROIC via `calc.nopat`, dette nette/EBITDA via `calc.ebitda`),
+  mais le critère 12 ne nomme que « l'indicateur en primaire » — EV/EBIT
+  (spec.md, indicateur #1). **Point tranché avec l'utilisateur avant
+  implémentation** : le TTM (T90) ne s'applique qu'à EV/EBIT, de façon
+  additive — `calc.ebit_bridge.resolve()`/`trace()` existants ne changent
+  pas, ROIC et dette nette/EBITDA gardent leur EBIT point-in-time actuel,
+  déjà testé. Cohérent avec ADR 0004 (additif plutôt que réécrire une
+  signature partagée par plusieurs modules déjà testés).
+  Portée du TTM dans cette tâche : seulement le tag primaire
+  (`OperatingIncomeLoss`), pas la reconstruction de repli
+  (résultat net + impôts + intérêts) — mesuré sur les vraies données déjà
+  ingérées, le tag primaire suffit pour 22/25 titres (88 %) ; étendre le
+  repli à une reconstruction TTM reste une extension distincte, à
+  spécifier séparément si la couverture réelle s'avère insuffisante.
+  `calc.ttm.ttm()` n'a pas de paramètre `end` (il flotte par rapport à
+  `t`, pas ancré sur un exercice précis) — cohérent avec le sens même du
+  TTM, mais signale explicitement que l'EBIT utilisé pour EV/EBIT n'est
+  plus le même point-in-time que celui de ROIC/dette nette-EBITDA pour un
+  même titre au même instant, une divergence assumée, pas une
+  incohérence à corriger.
+  `calc.ttm.ttm()` ne renvoie qu'une somme, jamais le détail des faits
+  utilisés : sans un pendant traçable, la valeur EV/EBIT résultante
+  redeviendrait intraçable (invariant 8), exactement le défaut déjà
+  trouvé et corrigé pour `roic` en T79. Cette tâche ajoute donc
+  `calc.ttm.trace_ttm()`, sur le modèle `resolve`/`trace` déjà établi
+  partout ailleurs (T64 et suivantes).
+- **Fichiers** : `src/dashboard/calc/ttm.py` (nouvelle fonction
+  `trace_ttm`), `src/dashboard/calc/ebit_bridge.py` (nouvelles fonctions
+  `resolve_ttm`/`trace_ttm`), `src/dashboard/calc/ratios.py` (`ev_to_ebit`
+  utilise `resolve_ttm` au lieu de `resolve`),
+  `src/dashboard/app/detail_view.py` (le traceur EBIT de `ev_ebit` dans
+  `_INDICATOR_TRACERS` devient `ebit_bridge.trace_ttm`, celui de `roic` et
+  `net_debt_ebitda` reste `ebit_bridge.trace` inchangé), tests associés
+  dans `tests/calc/test_ttm_and_5y.py`, `tests/calc/test_ebit_bridge.py`,
+  `tests/calc/test_ev.py` (ou nouveau test dédié à `ev_to_ebit`),
+  `tests/app/test_detail_view_traceability.py`.
+- **Test** : `test_ttm_trace_returns_the_four_quarters_summed` — pour un
+  jeu de quatre trimestres connus, `trace_ttm` renvoie les quatre
+  composantes (`concept`, `end`, `filed`, `accn`, `value`), dont la somme
+  égale exactement `ttm()` appelé sur les mêmes données.
+  `test_ebit_bridge_resolve_ttm_uses_four_quarters` — `resolve_ttm` renvoie
+  la même valeur que `calc.ttm.ttm(facts, cik, "OperatingIncomeLoss", t)`
+  appelé directement, jamais un point-in-time isolé ; renvoie `(None,
+  None)` si moins de quatre trimestres sont connus, jamais une
+  approximation sur trois.
+  `test_ev_to_ebit_uses_ttm` — sur une fixture à quatre trimestres
+  distincts du dernier exercice annuel connu, `ev_to_ebit` doit refléter
+  la somme trimestrielle, pas la valeur annuelle FY, prouvant que le
+  câblage a bien remplacé le chemin point-in-time.
+  Étend `test_every_displayed_number_traceable` (ou test dédié) : la trace
+  de `ev_ebit` doit désormais porter quatre composantes datées (une par
+  trimestre), celle de `roic`/`net_debt_ebitda` rester inchangée (une
+  seule composante EBIT, point-in-time, comme avant T91).
+- **Critères de la spec couverts** : #12 (TTM en primaire — le volet
+  médiane 5 ans reste hors périmètre, cf. `calc.normalized_5y`, tâche
+  distincte à rédiger séparément).
+- **Terminée quand** : les quatre tests passent, `test_ttm_and_5y_median_computed`
+  et les tests existants de `ebit_bridge`/`ratios`/`detail_view` restent
+  au vert sans modification de leur propre comportement.
+- **Dépend de** : T90, T26 (`calc.ebit_bridge`), T64-T66/T69 (`app.detail_view`).
+
+Total : 91 tâches (T91 rédigée, non implémentée).
