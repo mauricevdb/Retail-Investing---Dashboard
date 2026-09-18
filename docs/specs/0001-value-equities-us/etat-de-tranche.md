@@ -35,6 +35,34 @@ ticker dans l'univers suivi et permettra de juger si le garde-fou est
 nécessaire dans les faits, ou si le risque documenté par plan.md est plus
 théorique que réel à l'échelle où la tranche opère.
 
+### Rafraîchissement automatique programmé (T97) non opérationnel
+
+Le code est fait et testé (workflow GitHub Actions, dérivation de
+`t`/`end`/`frame_period`, reprise sur échec, instantané borné en taille --
+T94-T98), mais le premier déclenchement réel échoue systématiquement :
+10/10 tentatives, toujours `HTTP Error 403: Forbidden` sur
+`https://www.sec.gov/files/company_tickers.json`, le tout premier appel
+réseau du pipeline. Jamais rencontré en local de toute la session, y
+compris avec le même `SEC_USER_AGENT` (corrigé une fois pour écarter
+l'hypothèse d'un texte modèle jamais rempli, sans effet).
+
+Schéma cohérent avec un blocage par IP des plages cloud (Azure, qui
+héberge les runners GitHub Actions) par `www.sec.gov` spécifiquement --
+distinct de `data.sec.gov`, jamais bloqué de toute la session, qui porte
+toutes les autres requêtes du pipeline (submissions, companyfacts,
+frames). Cette hypothèse est cohérente avec des rapports publics de
+blocage de plages cloud par des sites `.gov` américains, mais n'a pas été
+confirmée avec certitude dans cet environnement (pas d'accès direct aux
+logs réseau du runner, pas de test isolant `www.sec.gov` de
+`data.sec.gov` depuis la même IP).
+
+Décidé avec l'utilisateur : ne pas investir dans un runner auto-hébergé
+à l'aveugle sans confirmation préalable. Le déclenchement planifié est
+retiré du workflow (`workflow_dispatch` conservé) ; le rafraîchissement
+des données reste manuel (`ingest_run.py` en local) jusqu'à nouvel ordre.
+La décision de reprendre ce chantier -- confirmer l'hypothèse, puis
+runner auto-hébergé ou autre mécanisme -- est reportée, pas tranchée.
+
 ## Dette assumée (documentée dans plan.md, acceptée en l'état)
 
 - **Taux d'imposition à 21 % par défaut** en l'absence de résultat avant

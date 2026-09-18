@@ -2846,6 +2846,26 @@ séparément.
   déclencher le workflow une fois manuellement, et vérifier qu'un commit
   apparaît sur GitHub avec Streamlit Cloud redéployant les nouvelles
   données.
+- **Déclenchement réel (2026-09-18)** : échec systématique, 10/10
+  tentatives, toujours `HTTP Error 403: Forbidden` sur
+  `https://www.sec.gov/files/company_tickers.json` (le tout premier appel
+  de `run_from_network`) -- jamais rencontré en local de toute la session.
+  Le secret `SEC_USER_AGENT` portait d'abord un texte de type modèle
+  jamais rempli (`"Prenom Nom email@exemple.com"`), corrigé avec une
+  vraie identité ; le 403 a persisté à l'identique sur un second
+  déclenchement. Schéma cohérent avec un blocage par IP des plages cloud
+  (Azure, qui héberge les runners GitHub Actions) par `www.sec.gov` --
+  distinct de `data.sec.gov`, jamais bloqué de toute la session en local,
+  qui porte toutes les autres requêtes (submissions, companyfacts,
+  frames). Non confirmé avec certitude absolue (recherche web
+  cohérente mais pas définitive), non résolu.
+  Décidé avec l'utilisateur : revenir à un lancement manuel local
+  (`ingest_run.py`) plutôt que d'investir dans un runner auto-hébergé à
+  l'aveugle. Déclenchement planifié (`schedule:`) retiré du workflow --
+  `workflow_dispatch` conservé pour un nouvel essai manuel si la
+  situation change (ex. runner auto-hébergé). T97 reste donc codée et
+  testée, mais **le rafraîchissement automatique programmé n'est pas
+  opérationnel** ; le rafraîchissement reste manuel jusqu'à nouvel ordre.
 
 ### T98 — `fundamentals_raw.parquet` : instantané du jour, jamais l'historique complet
 - **Objectif** : trouvé en préparant le premier commit réel de T97 :
@@ -2911,5 +2931,7 @@ séparément.
   seulement, jamais commité) de `fundamentals_snapshot_path` (le nom déjà
   attendu par `app/main.py`, committé par T97).
 
-Total : 98 tâches, toutes implémentées. T97 en attente de confirmation du
-déclenchement réel par l'utilisateur.
+Total : 98 tâches, toutes implémentées. T97 confirmée codée et testée,
+mais le rafraîchissement automatique programmé n'est pas opérationnel
+(blocage réel par IP probable de www.sec.gov depuis GitHub Actions) --
+rafraîchissement manuel local en attendant, décidé avec l'utilisateur.

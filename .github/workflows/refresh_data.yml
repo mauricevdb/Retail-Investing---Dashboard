@@ -1,13 +1,15 @@
 name: Rafraîchissement des données de production
 
-# Une fois par jour ouvré, après la clôture de Wall Street (T97) : dérive_t
-# (T95) garantit déjà qu'une exécution, quelle que soit l'heure réelle du
-# déclenchement, ne vise jamais la séance du jour même -- l'horaire choisi
-# ici (06:00 UTC, mardi à samedi, pour couvrir les séances lundi à
-# vendredi) est une marge de confort, pas une exigence de correction.
+# Déclenchement planifié désactivé (T97, premier essai réel) : la requête
+# vers www.sec.gov (company_tickers.json) échoue systématiquement en 403
+# Forbidden depuis les runners GitHub Actions (10/10 tentatives, secret
+# SEC_USER_AGENT pourtant corrigé) -- schéma cohérent avec un blocage par
+# IP des plages cloud (Azure) par www.sec.gov, jamais rencontré en local
+# de toute la session. Décidé avec l'utilisateur : revenir à un
+# lancement manuel local (ingest_run.py) en attendant une éventuelle
+# résolution (ex. runner auto-hébergé). `workflow_dispatch` reste
+# disponible pour un nouvel essai manuel si la situation change.
 on:
-  schedule:
-    - cron: "0 6 * * 2-6"
   workflow_dispatch: {}
 
 jobs:
