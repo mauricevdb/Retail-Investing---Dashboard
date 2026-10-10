@@ -109,12 +109,23 @@ Markdown placée à côté (formules en LaTeX), deux options activées par défa
 
 ## Installation
 
+Le dossier `dist/` contient le plug-in déjà compilé. Sous Windows, dans PowerShell (remplacer
+`C:\Obsidian` par le dossier du vault) :
+
+```powershell
+$dest = "C:\Obsidian\.obsidian\plugins\course-curator"
+$base = "https://raw.githubusercontent.com/mauricevdb/Retail-Investing---Dashboard/claude/inspiring-wright-epqm8b/obsidian-course-curator/dist"
+New-Item -ItemType Directory -Force -Path $dest | Out-Null
+foreach ($f in "main.js", "manifest.json", "styles.css") { Invoke-WebRequest "$base/$f" -OutFile (Join-Path $dest $f) }
+```
+
+Depuis les sources :
+
 ```bash
 cd obsidian-course-curator
 npm install
-npm run build
-mkdir -p "<vault>/.obsidian/plugins/course-curator"
-cp main.js manifest.json styles.css "<vault>/.obsidian/plugins/course-curator/"
+npm run dist        # build + copie dans dist/
+cp dist/* "<vault>/.obsidian/plugins/course-curator/"
 ```
 
 Puis dans Obsidian : Réglages → Plug-ins communautaires → activer **Course Curator**.

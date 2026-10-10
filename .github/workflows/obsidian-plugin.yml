@@ -22,3 +22,5 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - name: dist/ matches the sources
+        run: npm run dist && git diff --exit-code -- dist
