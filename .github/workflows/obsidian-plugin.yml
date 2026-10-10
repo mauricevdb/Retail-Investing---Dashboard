@@ -2,23 +2,23 @@ name: Obsidian plugin
 
 on:
   push:
-    paths: ["obsidian-course-curator/**", ".github/workflows/obsidian-plugin.yml"]
+    paths: ["obsidian-vault-curator/**", ".github/workflows/obsidian-plugin.yml"]
   pull_request:
-    paths: ["obsidian-course-curator/**", ".github/workflows/obsidian-plugin.yml"]
+    paths: ["obsidian-vault-curator/**", ".github/workflows/obsidian-plugin.yml"]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: obsidian-course-curator
+        working-directory: obsidian-vault-curator
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: obsidian-course-curator/package-lock.json
+          cache-dependency-path: obsidian-vault-curator/package-lock.json
       - run: npm ci
       - run: npm run build
       - run: npm test

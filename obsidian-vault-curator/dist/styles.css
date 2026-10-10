@@ -1,0 +1,228 @@
+/* Course Curator */
+.course-curator-modal {
+  width: min(920px, 92vw);
+}
+.course-curator-modal .cc-summary {
+  font-size: var(--font-ui-medium);
+}
+.cc-muted {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+.cc-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+}
+.cc-section {
+  margin: 0.5em 0;
+}
+.cc-section > summary {
+  cursor: pointer;
+  font-weight: var(--font-semibold);
+}
+.cc-tree li {
+  margin-bottom: 0.3em;
+}
+.cc-group {
+  margin-top: 1em;
+}
+.cc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-weight: var(--font-semibold);
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 0.3em;
+}
+.cc-icon {
+  display: inline-flex;
+}
+.cc-op {
+  display: flex;
+  gap: 0.6em;
+  align-items: flex-start;
+  padding: 0.4em 0;
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+}
+.cc-op.cc-off .cc-op-body {
+  opacity: 0.5;
+}
+.cc-op.cc-invalid .cc-op-body code {
+  text-decoration: line-through;
+}
+.cc-op-body {
+  flex: 1;
+  min-width: 0;
+}
+.cc-op-line {
+  overflow-wrap: anywhere;
+}
+.cc-op pre {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: var(--font-ui-smaller);
+}
+.cc-edit {
+  width: 100%;
+}
+.cc-edit-btn {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 0.3em;
+}
+.cc-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--background-primary);
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: 1em;
+  padding-top: 0.6em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em;
+  align-items: center;
+  justify-content: space-between;
+}
+.cc-footer-info {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  flex: 1 1 280px;
+}
+.cc-footer-buttons {
+  display: flex;
+  gap: 0.5em;
+}
+.cc-convention {
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+/* Side panel */
+.course-curator-view .cc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  margin: 0.6em 0 1em;
+}
+.course-curator-view .cc-actions button {
+  justify-content: flex-start;
+}
+.course-curator-view .cc-task {
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  padding: 0.6em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+.course-curator-view .cc-task progress {
+  width: 100%;
+}
+.course-curator-view .cc-inbox {
+  margin-bottom: 0.8em;
+}
+.course-curator-view .cc-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: 0.6em;
+  margin-bottom: 0.6em;
+}
+.course-curator-view .cc-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5em;
+  align-items: baseline;
+}
+.course-curator-view .cc-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+  margin-top: 0.5em;
+}
+.cc-badge {
+  font-size: var(--font-ui-smaller);
+  border-radius: var(--radius-s);
+  padding: 0 0.4em;
+  white-space: nowrap;
+}
+.cc-badge-ok {
+  background: rgba(var(--color-green-rgb), 0.15);
+  color: var(--color-green);
+}
+.cc-badge-new {
+  background: rgba(var(--color-yellow-rgb), 0.2);
+  color: var(--color-yellow);
+}
+.cc-badge-todo {
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+
+/* Plan as a conversation */
+.cc-understanding {
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  padding: 0.6em 0.9em;
+  margin-bottom: 0.8em;
+}
+.cc-understanding h4 {
+  margin: 0 0 0.4em;
+}
+.cc-labelled {
+  margin-bottom: 0.3em;
+}
+.cc-question {
+  margin: 0.5em 0;
+}
+.cc-answer,
+.cc-comment,
+.cc-general textarea,
+.cc-instructions {
+  width: 100%;
+  margin-top: 0.3em;
+  resize: vertical;
+}
+.cc-general h4 {
+  margin: 1.2em 0 0.3em;
+}
+.cc-footer-info.cc-warning {
+  color: var(--text-warning);
+}
+.cc-busy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8em;
+  padding: 3em 1em;
+}
+.cc-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: cc-spin 0.9s linear infinite;
+}
+@keyframes cc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Panel: other folders */
+.course-curator-view .cc-candidates {
+  margin-top: 1.2em;
+}
+.course-curator-view .cc-candidate {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.2em 0;
+}
+.course-curator-view .cc-instr {
+  font-style: italic;
+  margin-top: 0.2em;
+}

@@ -1,9 +1,0 @@
-{
-  "id": "course-curator",
-  "name": "Course Curator",
-  "version": "0.1.0",
-  "minAppVersion": "1.5.0",
-  "description": "Range un vault de cours avec Claude : dashboards skill tree en canvas, réorganisation des dossiers et agrégation validée des nouveaux documents.",
-  "author": "Maurice van den Boo",
-  "isDesktopOnly": false
-}

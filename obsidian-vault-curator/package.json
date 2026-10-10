@@ -1,0 +1,28 @@
+{
+  "name": "obsidian-vault-curator",
+  "version": "0.2.0",
+  "description": "Obsidian plugin that organises any vault folder with Claude: understands its use, discusses a structuring plan with the user, generates a canvas dashboard and aggregates new material after review.",
+  "main": "main.js",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dist": "npm run build && node -e \"for (const f of ['main.js','manifest.json','styles.css']) require('fs').copyFileSync(f, 'dist/' + f)\""
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "^1.8.7",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0"
+  }
+}
