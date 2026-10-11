@@ -30,7 +30,7 @@ Pour chaque fichier, renvoie :
 - topics : 2 à 6 notions ou sujets clés, courts.
 - sequence : ce qui situe le document dans une suite, si c'est visible (« Séance 3 », « Chapitre 2 », « Phase 1 », une date…), sinon null.
 - transcript : ${
-    settings.transcribeHandwriting
+    settings.handwriting !== "off"
       ? `pour les documents manuscrits uniquement (notes à la main, tableau, cahier), une transcription fidèle en Markdown
   (titres, listes, formules en LaTeX entre $...$ ou $$...$$, schémas décrits brièvement entre crochets).
   N'invente rien : écris [illisible] quand un passage ne se lit pas. Pour tous les autres fichiers : null.`
@@ -83,6 +83,20 @@ const EXAMPLES = `Exemples de structures selon la nature du dossier (inspiration
 - Administratif / finances perso : par domaine (Banque, Logement, Santé, Impôts, Travail…), puis par année ; noms « AAAA-MM-JJ - Émetteur - Objet ».
   Dashboard : sommaire par domaine, sans flèches.`;
 
+function handwritingRule(settings: CuratorSettings): string {
+  if (settings.handwriting === "off") return "N'utilise ni transcribe ni integrate.";
+  if (settings.handwriting === "separate") {
+    return `transcribe : pour chaque document manuscrit dont la transcription est disponible, ajoute une opération transcribe (source = chemin final du fichier, target = null, content = null) ; le plug-in crée une note Markdown à côté. N'utilise pas integrate.`;
+  }
+  return `integrate : le contenu des documents manuscrits (photos de tableau ou de cahier, scans de notes) doit rejoindre la fiche
+  correspondante, c'est-à-dire la note Markdown de la même séance ou du même sujet (par exemple les notes du cours pendant lequel le tableau
+  a été photographié, ou la fiche du TD pour une page de cahier d'exercices). Une seule opération integrate par fiche : sources = chemins
+  finaux de tous les documents à y intégrer, target = la fiche, source = null, content = null (le plug-in prépare la fusion, que l'utilisateur
+  relit avant de valider). S'il n'existe pas de fiche adaptée, donne comme target le chemin d'une nouvelle note (selon les règles de nommage) :
+  elle sera créée. Les photos elles-mêmes restent rangées à leur place. Les transcriptions séparées qui existent déjà (notes « … — transcription.md »)
+  sont à intégrer de la même façon (en sources), puis à archiver. N'utilise pas transcribe.`;
+}
+
 function rules(settings: CuratorSettings, space: SpaceInventory): string {
   const sub = space.subspaces.length
     ? `\n- Ces sous-dossiers sont organisés séparément : ne déplace rien à l'intérieur (tu peux déplacer ou renommer le dossier entier) : ${space.subspaces.map((s) => `« ${s.folder} »`).join(", ")}.`
@@ -95,7 +109,7 @@ function rules(settings: CuratorSettings, space: SpaceInventory): string {
   par tes déplacements sont supprimés automatiquement. mkdir ne sert que pour un dossier qui doit exister vide. Garde l'extension des fichiers.
 - archive : rien n'est jamais supprimé. Ce qui est obsolète ou en double va dans « ${settings.archiveFolder}/ » via archive (source seulement).
 - ${settings.renameUnclearFiles ? `Renomme les fichiers au nom opaque (IMG_2034.jpg, scan0001.pdf, Document (3).pdf) avec un nom parlant qui suit les règles de rangement. Ne renomme pas un fichier dont le nom est déjà parlant.` : "Ne renomme aucun fichier : déplace-les seulement."}
-- ${settings.transcribeHandwriting ? `transcribe : pour chaque document manuscrit dont la transcription est disponible, ajoute une opération transcribe (source = chemin final du fichier, target = null, content = null) ; le plug-in crée une note Markdown à côté.` : "N'utilise pas transcribe."}
+- ${handwritingRule(settings)}
 - create_note et append_note sont exceptionnels : seulement pour ne pas perdre une information (par exemple le contenu personnel d'un ancien dashboard qu'on archive) ou pour relier un nouveau document à une note existante. append_note ajoute à la fin d'une note, sans jamais la réécrire.
 - N'utilise jamais ces noms, réservés au plug-in : « ${space.generated.canvas} », « ${space.generated.index} », « ${space.generated.map} ».${sub}
 - Chaque opération a une raison courte (reason), lisible par l'utilisateur.
@@ -208,7 +222,7 @@ export function incrementalSystem(settings: CuratorSettings): string {
 
 Ta tâche ici : ce dossier est déjà organisé (règles de rangement et dashboard validés par l'utilisateur). De nouveaux documents sont arrivés.
 Propose comment les agréger à la structure existante, en appliquant ses règles de rangement et ses préférences :
-- ops : ranger chaque nouveau document au bon endroit, le renommer si son nom est opaque, transcrire le manuscrit, archiver un doublon évident.
+- ops : ranger chaque nouveau document au bon endroit, le renommer si son nom est opaque, traiter le manuscrit (voir les règles), archiver un doublon évident.
   Ne déplace pas les documents existants, sauf si l'arrivée des nouveaux rend un regroupement nécessaire (par exemple créer un sous-dossier
   quand il atteint 3 fichiers).
 - assignments : pour chaque nouveau document conservé (et chaque note créée), son chemin FINAL, la section (sectionId, ou null pour une
@@ -286,6 +300,44 @@ Produis une version révisée COMPLÈTE de ta proposition (même format), qui in
 si ses réponses la contredisent. Ne repose pas une question à laquelle il a répondu. Ajoute aux préférences ce que ses retours disent de sa
 façon de travailler, formulé comme des règles réutilisables, et reporte ce qui concerne le rangement dans les règles de rangement.
 Dans changes, liste concrètement ce qui a changé et comment chaque retour est pris en compte (ou pourquoi il ne peut pas l'être).`;
+}
+
+// ---------------------------------------------------------------------------
+// Merge: integrate handwritten material into its note.
+
+export function mergeSystem(settings: CuratorSettings): string {
+  return `${context(settings)}
+
+Ta tâche ici : intégrer dans une fiche Markdown le contenu de documents manuscrits (photos de tableau, pages de cahier, scans) déjà transcrits,
+ou à transcrire toi-même s'ils sont joints. L'objectif : une fiche unique, claire, où l'utilisateur retrouve tout le contenu de la séance ou du sujet.
+Règles :
+- Conserve intégralement le texte existant de la fiche : tu peux ajouter des titres, insérer des passages entre ses paragraphes, compléter une
+  liste, mais tu ne supprimes ni ne reformules rien de ce qui existe. Garde le frontmatter tel quel.
+- Place chaque contenu à l'endroit logique (la section de la même notion, dans l'ordre du raisonnement ou du cours) ; crée une section si besoin.
+- Fusionne sans doublonner : si une formule ou une idée est déjà dans la fiche, ne la répète pas, complète-la (hypothèse, étape de calcul, exemple).
+- Rédige proprement : Markdown, formules en LaTeX ($...$ et $$...$$), sans inventer : [illisible] reste [illisible].
+- Après chaque passage intégré, ajoute une référence discrète à sa source sous la forme ([[chemin|📷]]) pour pouvoir revoir la photo.
+- Si la fiche n'existe pas encore, crée-la : un titre, puis des sections dans l'ordre logique.
+content : la fiche complète après intégration. summary : une phrase sur ce que tu as ajouté et où.`;
+}
+
+export interface MergeSource {
+  path: string;
+  /** Transcription already available (digest or old transcription note), or null when the file is attached. */
+  text: string | null;
+}
+
+export function mergePrompt(target: string, before: string | null, sources: MergeSource[], readWithTool: boolean): string {
+  const parts = [
+    `# Fiche : ${target}`,
+    before === null ? "(nouvelle fiche, à créer)" : `## Contenu actuel de la fiche\n\`\`\`markdown\n${before}\n\`\`\``,
+    "## Documents à intégrer",
+  ];
+  for (const s of sources) {
+    if (s.text) parts.push(`### ${s.path}\n\`\`\`markdown\n${s.text}\n\`\`\``);
+    else parts.push(`### ${s.path}\n${readWithTool ? "Lis ce fichier avec l'outil Read et transcris-le." : "Joint ci-dessus : transcris-le."}`);
+  }
+  return parts.join("\n\n");
 }
 
 // ---------------------------------------------------------------------------

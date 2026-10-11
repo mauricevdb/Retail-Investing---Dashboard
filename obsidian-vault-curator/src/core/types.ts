@@ -103,7 +103,7 @@ export interface SpaceMap {
 // ---------------------------------------------------------------------------
 // Plans
 
-export type OpKind = "mkdir" | "move" | "archive" | "create_note" | "append_note" | "transcribe";
+export type OpKind = "mkdir" | "move" | "archive" | "create_note" | "append_note" | "transcribe" | "integrate";
 
 /**
  * One reviewable step. Paths are vault-relative. Ops run in order and each path refers to the
@@ -113,9 +113,11 @@ export interface PlanOp {
   kind: OpKind;
   /** move/archive: what is moved. transcribe: the image. Unused otherwise. */
   source: string | null;
-  /** mkdir/create_note/append_note/move/transcribe: the resulting path. archive: computed. */
+  /** integrate: the handwritten documents (or old transcription notes) whose content goes into the target note. */
+  sources?: string[] | null;
+  /** mkdir/create_note/append_note/move/transcribe/integrate: the resulting path. archive: computed. */
   target: string | null;
-  /** create_note/append_note: markdown body. transcribe: filled from the digest. */
+  /** create_note/append_note: markdown body. transcribe: filled from the digest. integrate: the whole note after merging, prepared by the plugin. */
   content: string | null;
   reason: string;
 }
@@ -154,6 +156,10 @@ export interface Plan {
 export interface CheckedOp extends PlanOp {
   index: number;
   error: string | null;
+  /** Something the user should look at before applying (the op starts unticked). */
+  warning?: string | null;
+  /** integrate: the note as it is today (null when the note is created). */
+  before?: string | null;
 }
 
 /** What the user says about a plan before validating it. */

@@ -3,7 +3,7 @@ import { buildCanvas, levels, readStatuses } from "../src/core/canvas";
 import { END, mergeIndex, renderIndexBody, START } from "../src/core/indexNote";
 import { applyPatch, upgradeMap } from "../src/core/mapMerge";
 import { sanitizePath, uniquePath } from "../src/core/paths";
-import { checkPlan, PlanContext, reconcileMap, renameInMap } from "../src/core/plan";
+import { checkPlan, IntegrationRequest, lostLines, PlanContext, reconcileMap, renameInMap } from "../src/core/plan";
 import { candidateFolders, scanVault } from "../src/core/scan";
 import { DEFAULT_SETTINGS, migrateSettings, newSpace } from "../src/core/settings";
 import { PlanOp, SectionNode, SpaceMap } from "../src/core/types";
@@ -170,11 +170,47 @@ describe("checkPlan", () => {
       state,
       ctx,
       undefined,
-      (origin, current) => (origin === "Finance/IMG_1.jpg" ? `![[${current}]]\n\nBS` : null),
+      { transcript: (origin, current) => (origin === "Finance/IMG_1.jpg" ? `![[${current}]]\n\nBS` : null) },
     );
     expect(checked[1].error).toBeNull();
     expect(checked[1].target).toBe("Finance/Images/S01 — transcription.md");
     expect(checked[1].content).toContain("![[Finance/Images/S01.jpg]]");
+  });
+
+  it("integrates handwritten documents into an existing or a new note", () => {
+    const requests: IntegrationRequest[] = [];
+    const fill = {
+      integration: (req: IntegrationRequest) => {
+        requests.push(req);
+        return { content: "fusion", before: req.targetOrigin ? "avant" : null, warning: null };
+      },
+    };
+    const checked = checkPlan(
+      [
+        op("move", "Finance/IMG_1.jpg", "Finance/Photos/S01 - Tableau.jpg"),
+        { kind: "integrate", source: null, sources: ["Finance/Photos/S01 - Tableau.jpg"], target: "Finance/notes.md", content: null, reason: "r" },
+        { kind: "integrate", source: null, sources: ["Finance/TD/TD1.pdf"], target: "Finance/Fiches/TD 1", content: null, reason: "r" },
+        { kind: "integrate", source: null, sources: ["Finance/TD/TD2.pdf"], target: "Finance/notes.md", content: null, reason: "r" },
+        { kind: "integrate", source: null, sources: ["Finance/absent.jpg"], target: "Finance/notes.md", content: null, reason: "r" },
+      ],
+      state,
+      ctx,
+      undefined,
+      fill,
+    );
+    expect(checked.map((c) => c.error)).toEqual([null, null, null, "une autre intégration vise déjà cette fiche", "document introuvable : Finance/absent.jpg"]);
+    expect(requests[0]).toEqual({ index: 1, target: "Finance/notes.md", targetOrigin: "Finance/notes.md", sources: [{ path: "Finance/Photos/S01 - Tableau.jpg", origin: "Finance/IMG_1.jpg" }] });
+    expect(checked[2]).toMatchObject({ target: "Finance/Fiches/TD 1.md", before: null, content: "fusion" });
+    expect(requests[1].targetOrigin).toBeNull();
+    // Without a prepared merge the op cannot run.
+    const unprepared = checkPlan([{ kind: "integrate", source: null, sources: ["Finance/IMG_1.jpg"], target: "Finance/notes.md", content: null, reason: "r" }], state, ctx);
+    expect(unprepared[0].error).toContain("fusion pas encore préparée");
+  });
+
+  it("detects lines a merge would lose", () => {
+    const before = "---\ntags: cours\n---\n# Régression\nLes MCO minimisent les résidus.\n- point A";
+    expect(lostLines(before, "---\ntags: cours\n---\n# Régression\n## Les MCO minimisent les résidus.\nAjout ridge\n* point A\n")).toEqual([]);
+    expect(lostLines(before, "# Régression\nAutre chose")).toEqual(["---", "tags: cours", "---", "Les MCO minimisent les résidus.", "point A"]);
   });
 
   it("skips deselected ops so later ops see the original state", () => {
@@ -342,7 +378,7 @@ describe("version 0.1 compatibility", () => {
   it("turns organised courses into managed folders, keeping their dashboard names", () => {
     const s = migrateSettings({ coursesRoot: "", transcribePhotos: false, canvasName: "{course} — Skill tree" }, (f) => f === "Taux", ["Taux", "Stats", "Taux/TD"]);
     expect(s.spaces.map((x) => [x.folder, x.canvas])).toEqual([["Taux", "Taux/Taux — Skill tree.canvas"]]);
-    expect(s.transcribeHandwriting).toBe(false);
+    expect(s.handwriting).toBe("off");
     expect(s.canvasName).toBe("{name} — Dashboard");
     expect("coursesRoot" in s).toBe(false);
   });

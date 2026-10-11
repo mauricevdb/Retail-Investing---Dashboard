@@ -36,7 +36,7 @@ export default class VaultCuratorPlugin extends Plugin {
     const saved = ((await this.loadData()) ?? {}) as Partial<PluginData> & { settings?: Record<string, unknown> };
     const rawSettings = (saved.settings ?? {}) as Record<string, unknown>;
     this.data = {
-      settings: { ...DEFAULT_SETTINGS, ...rawSettings, spaces: Array.isArray(rawSettings.spaces) ? (rawSettings.spaces as CuratorSettings["spaces"]) : [] },
+      settings: normaliseSettings(rawSettings),
       ledger: saved.ledger ?? {},
       journal: saved.journal ?? [],
     };
@@ -370,6 +370,16 @@ export default class VaultCuratorPlugin extends Plugin {
     const labels = new Map(spaces.map((s) => [s.folder, `${s.folder || "/ (tout le vault)"}${s.hasMap ? "" : "  (pas encore organisé)"}`]));
     new FolderPicker(this.app, spaces.map((s) => s.folder), onPick, "Choisir un dossier géré", labels).open();
   }
+}
+
+/** Defaults for new settings, and renamed settings from 0.2. */
+function normaliseSettings(raw: Record<string, unknown>): CuratorSettings {
+  const s = { ...DEFAULT_SETTINGS, ...raw, spaces: Array.isArray(raw.spaces) ? (raw.spaces as CuratorSettings["spaces"]) : [] } as CuratorSettings & {
+    transcribeHandwriting?: boolean;
+  };
+  if (raw.handwriting === undefined && s.transcribeHandwriting === false) s.handwriting = "off";
+  delete s.transcribeHandwriting;
+  return s;
 }
 
 function prefix(progress: Progress, name: string): Progress {

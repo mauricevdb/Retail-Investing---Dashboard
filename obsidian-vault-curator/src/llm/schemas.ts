@@ -27,8 +27,9 @@ const resource = obj({ path: str, role: docType, label: str });
 const sectionFields = { id: str, title: str, summary: str, keywords: strs, dependsOn: strs, folder: nstr, resources: arr(resource) };
 const section = obj({ ...sectionFields, children: arr(obj(sectionFields)) });
 const op = obj({
-  kind: { type: "string", enum: ["mkdir", "move", "archive", "create_note", "append_note", "transcribe"] },
+  kind: { type: "string", enum: ["mkdir", "move", "archive", "create_note", "append_note", "transcribe", "integrate"] },
   source: nstr,
+  sources: { type: ["array", "null"], items: str },
   target: nstr,
   content: nstr,
   reason: str,
@@ -62,6 +63,8 @@ export const INCREMENTAL_SCHEMA = obj({
   keywordUpdates: arr(obj({ sectionId: str, keywords: strs })),
   preferences: strs,
 });
+
+export const MERGE_SCHEMA = obj({ content: str, summary: str });
 
 export const ROUTE_SCHEMA = obj({
   routes: arr(obj({ path: str, space: nstr, reason: str })),
@@ -111,6 +114,11 @@ export interface IncrementalAnswer {
   assignments: Assignment[];
   keywordUpdates: { sectionId: string; keywords: string[] }[];
   preferences: string[];
+}
+
+export interface MergeAnswer {
+  content: string;
+  summary: string;
 }
 
 export interface RouteAnswer {

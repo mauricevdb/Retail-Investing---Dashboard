@@ -1,5 +1,5 @@
 import { basename, dirname, extname, isInside, join, matchPath, normalize, relativeTo, sanitizePath, stem, uniquePath } from "./paths";
-import { CheckedOp, SpaceMap, SectionNode, PlanOp, Resource } from "./types";
+import { CheckedOp, PlanOp, Resource, SectionNode, SpaceMap } from "./types";
 
 export interface VaultState {
   files: string[];
@@ -86,6 +86,23 @@ export function archiveTarget(source: string, ctx: PlanContext): string {
   return join(ctx.spaceFolder, ctx.archiveFolder, relativeTo(source, ctx.spaceFolder) || basename(source));
 }
 
+/** What the plugin needs to prepare the merge of handwritten material into a note. */
+export interface IntegrationRequest {
+  index: number;
+  /** The note, as addressed at this point of the plan. */
+  target: string;
+  /** Where the note is today, or null when the plan creates it. */
+  targetOrigin: string | null;
+  sources: { path: string; origin: string }[];
+}
+
+export interface Fillers {
+  /** Note body of a transcribe op, from the image's original path. */
+  transcript?: (originalPath: string, currentPath: string) => string | null;
+  /** Merged note of an integrate op, once prepared. */
+  integration?: (req: IntegrationRequest) => { content: string; before: string | null; warning: string | null } | null;
+}
+
 export function transcriptTarget(image: string): string {
   return join(dirname(image), `${stem(image)} — transcription.md`);
 }
@@ -101,10 +118,10 @@ export function checkPlan(
   state: VaultState,
   ctx: PlanContext,
   selected?: boolean[],
-  /** Supplies the note body of a transcribe op from the image's original path. */
-  transcriptFor?: (originalPath: string, currentPath: string) => string | null,
+  fill: Fillers = {},
 ): CheckedOp[] {
   const sim = new Sim(state);
+  const integrated = new Set<string>();
   const protectedSet = new Set(ctx.protectedPaths);
   const archiveRoot = join(ctx.spaceFolder, ctx.archiveFolder);
   const inSpace = (p: string) => isInside(p, ctx.spaceFolder) && p !== ctx.spaceFolder;
@@ -157,7 +174,7 @@ export function checkPlan(
         if (op.kind === "transcribe") {
           if (!op.source || !sim.files.has(op.source)) return fail("image introuvable");
           op.target = op.target ?? transcriptTarget(op.source);
-          if (!op.content?.trim() && transcriptFor) op.content = transcriptFor(sim.files.get(op.source)!, op.source);
+          if (!op.content?.trim() && fill.transcript) op.content = fill.transcript(sim.files.get(op.source)!, op.source);
           if (!op.content?.trim()) return fail("aucune transcription disponible");
         }
         if (!op.target || !inSpace(op.target)) return fail("note hors du dossier");
@@ -179,6 +196,38 @@ export function checkPlan(
         if (!op.content?.trim()) return fail("contenu vide");
         return op;
       }
+      case "integrate": {
+        const rawSources = raw.sources?.length ? raw.sources : raw.source ? [raw.source] : [];
+        const sources = rawSources.map((x) => sim.find(x, ctx)).filter((x): x is string => !!x);
+        op.source = null;
+        op.sources = sources;
+        if (!sources.length) return fail("aucun document à intégrer");
+        const missing = sources.find((x) => !sim.files.has(x));
+        if (missing) return fail(`document introuvable : ${missing}`);
+        const found = raw.target ? sim.find(raw.target, ctx) : null;
+        op.target = found && sim.files.has(found) ? found : op.target;
+        if (!op.target || !inSpace(op.target)) return fail("fiche hors du dossier");
+        if (extname(op.target) !== "md") op.target = `${op.target}.md`;
+        if (protectedSet.has(op.target)) return fail("fichier généré par le plugin");
+        if (locked(op.target)) return fail("dans un sous-espace géré à part");
+        if (sim.folders.has(op.target)) return fail("un dossier porte ce nom");
+        const origin = sim.files.get(op.target) ?? null;
+        if (origin?.startsWith("new:")) return fail("fiche créée par une autre opération du plan");
+        if (integrated.has(op.target)) return fail("une autre intégration vise déjà cette fiche");
+        if (!op.content?.trim() && fill.integration) {
+          const r = fill.integration({ index, target: op.target, targetOrigin: origin, sources: sources.map((x) => ({ path: x, origin: sim.files.get(x)! })) });
+          if (r) Object.assign(op, { content: r.content, before: r.before, warning: r.warning });
+        }
+        if (!op.content?.trim()) return fail("fusion pas encore préparée : « Réviser » pour la relancer");
+        if (active) {
+          integrated.add(op.target);
+          if (!origin) {
+            sim.files.set(op.target, `new:${index}`);
+            sim.addFolder(dirname(op.target));
+          }
+        }
+        return op;
+      }
       default:
         return fail(`opération inconnue « ${(op as PlanOp).kind} »`);
     }
@@ -192,6 +241,7 @@ export function finalLocations(ops: CheckedOp[], state: VaultState, selected?: b
     if (op.error || selected?.[op.index] === false) continue;
     if ((op.kind === "move" || op.kind === "archive") && op.source && op.target) sim.move(op.source, op.target);
     if ((op.kind === "create_note" || op.kind === "transcribe") && op.target) sim.files.set(op.target, `new:${op.index}`);
+    if (op.kind === "integrate" && op.target && !sim.files.has(op.target)) sim.files.set(op.target, `new:${op.index}`);
   }
   return sim.locations();
 }
@@ -276,4 +326,19 @@ export function allSections(map: SpaceMap): SectionNode[] {
 
 export function allResourcePaths(map: SpaceMap): Set<string> {
   return new Set([...allSections(map).flatMap((m) => m.resources.map((r) => r.path)), ...map.transverse.map((r) => r.path)]);
+}
+
+/**
+ * Lines of the note as it was that cannot be found in the merged version: the merge must only
+ * add. Returns them (trimmed); headings and list markers are compared without their prefix so
+ * that promoting a line to a heading or a bullet is not counted as a loss.
+ */
+export function lostLines(before: string, after: string): string[] {
+  const norm = (l: string) => l.trim().replace(/^(#+|[-*+]|\d+\.)\s+/, "").replace(/\s+/g, " ");
+  const kept = new Set(after.split("\n").map(norm));
+  const afterFlat = after.replace(/\s+/g, " ");
+  return before
+    .split("\n")
+    .map(norm)
+    .filter((l) => l.length > 2 && !kept.has(l) && !afterFlat.includes(l));
 }

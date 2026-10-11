@@ -5,7 +5,20 @@ import { buildCanvas, describeCanvas, parseCanvas, readStatuses } from "./core/c
 import { mergeIndex, renderIndexBody } from "./core/indexNote";
 import { applyPatch, attachTranscripts, carryStatuses, MapPatch, normaliseRole, upgradeMap } from "./core/mapMerge";
 import { basename, dirname, extname, isInside, join, matchPath, normalize, slugify } from "./core/paths";
-import { allResourcePaths, allSections, checkPlan, pathRewriter, PlanContext, reconcileMap, renameInMap, resolvePath, VaultState } from "./core/plan";
+import {
+  allResourcePaths,
+  allSections,
+  checkPlan,
+  Fillers,
+  IntegrationRequest,
+  lostLines,
+  pathRewriter,
+  PlanContext,
+  reconcileMap,
+  renameInMap,
+  resolvePath,
+  VaultState,
+} from "./core/plan";
 import { fileKind, fingerprint, isIgnored, scanVault, SpaceInventory, VaultScan } from "./core/scan";
 import { CuratorSettings, newSpace, SpaceConfig } from "./core/settings";
 import { CheckedOp, Feedback, FileDigest, JournalEntry, JournalStep, Plan, PlanOp, Resource, SectionNode, SpaceMap, VaultFile } from "./core/types";
@@ -20,6 +33,9 @@ import {
   initialPrompt,
   initialSystem,
   mapOutline,
+  mergePrompt,
+  MergeSource,
+  mergeSystem,
   revisionPrompt,
   routePrompt,
   routeSystem,
@@ -31,6 +47,8 @@ import {
   IncrementalAnswer,
   INITIAL_SCHEMA,
   InitialAnswer,
+  MERGE_SCHEMA,
+  MergeAnswer,
   RawSection,
   ROUTE_SCHEMA,
   RouteAnswer,
@@ -78,6 +96,19 @@ export interface PreparedPlan {
   newFiles: VaultFile[];
   /** Digests by original path. */
   digests: Map<string, FileDigest>;
+  /** Prepared merges of handwritten material into notes, by request key (kept across revisions). */
+  merges: Map<string, Merge>;
+}
+
+export interface Merge {
+  content: string;
+  before: string | null;
+  warning: string | null;
+  summary: string;
+}
+
+function mergeKey(req: IntegrationRequest): string {
+  return `${req.targetOrigin ?? `new:${req.target}`}|${req.sources.map((s) => `${s.origin}>${s.path}`).sort().join(",")}`;
 }
 
 export interface ApplyReport {
@@ -321,11 +352,82 @@ export class Engine {
     return { files: this.io.listFiles().map((f) => f.path), folders: this.io.listFolders() };
   }
 
-  private transcriptFiller(digests: Map<string, FileDigest>) {
-    return (origin: string, current: string) => {
-      const t = digests.get(origin)?.transcript;
-      return t ? `![[${current}]]\n\n${t.trim()}\n` : null;
+  private fillers(digests: Map<string, FileDigest>, merges: Map<string, Merge>): Fillers {
+    return {
+      transcript: (origin, current) => {
+        const t = digests.get(origin)?.transcript;
+        return t ? `![[${current}]]\n\n${t.trim()}\n` : null;
+      },
+      integration: (req) => merges.get(mergeKey(req)) ?? null,
     };
+  }
+
+  /** Validates the ops, preparing first the merges of handwritten material the plan asks for. */
+  private async finish(prepared: PreparedPlan, progress: Progress, signal?: AbortSignal): Promise<PreparedPlan> {
+    const requests: IntegrationRequest[] = [];
+    checkPlan(prepared.plan.ops, prepared.state, prepared.ctx, undefined, {
+      integration: (req) => {
+        if (!prepared.merges.has(mergeKey(req))) requests.push(req);
+        return null;
+      },
+    });
+    let done = 0;
+    let next = 0;
+    const errors: string[] = [];
+    if (requests.length) progress(`Intégration du manuscrit dans les fiches…`, 0, requests.length);
+    const workers = Array.from({ length: Math.min(this.settings.concurrency, requests.length) }, async () => {
+      while (next < requests.length) {
+        const req = requests[next++];
+        try {
+          prepared.merges.set(mergeKey(req), await this.merge(req, prepared.digests, signal));
+        } catch (e) {
+          if (signal?.aborted) throw e;
+          errors.push(`${req.target} : ${(e as Error).message}`);
+        }
+        progress(`Intégration du manuscrit dans les fiches…`, ++done, requests.length);
+      }
+    });
+    await Promise.all(workers);
+    if (errors.length) progress(`${errors.length} fusion(s) impossible(s) : ${errors[0]}`);
+    prepared.checked = checkPlan(prepared.plan.ops, prepared.state, prepared.ctx, undefined, this.fillers(prepared.digests, prepared.merges));
+    return prepared;
+  }
+
+  /** Asks Claude to merge handwritten material into a note (existing or new). */
+  private async merge(req: IntegrationRequest, digests: Map<string, FileDigest>, signal?: AbortSignal): Promise<Merge> {
+    const before = req.targetOrigin ? await this.io.read(req.targetOrigin) : null;
+    const backend = this.llm();
+    const sources: MergeSource[] = [];
+    const attachments: Attachment[] = [];
+    for (const src of req.sources) {
+      let text = digests.get(src.origin)?.transcript ?? null;
+      if (!text && fileKind(src.origin) === "markdown") {
+        // An old transcription note: its text, minus the embedded photo.
+        text = (await this.io.read(src.origin)).replace(/^!\[\[[^\]]*\]\]\s*$/gm, "").trim() || null;
+      }
+      if (!text) {
+        const kind = fileKind(src.origin) === "pdf" ? "pdf" : "image";
+        attachments.push({ path: src.path, absPath: this.io.absolutePath(src.origin), kind, load: () => this.io.binaryPayload(src.origin) });
+      }
+      sources.push({ path: src.path, text });
+    }
+    const answer = await backend.complete<MergeAnswer>({
+      label: `intégration dans ${basename(req.target)}`,
+      system: mergeSystem(this.settings),
+      prompt: mergePrompt(req.target, before, sources, backend.name === "Claude Code"),
+      schema: MERGE_SCHEMA,
+      model: this.settings.planModel,
+      effort: "medium",
+      attachments,
+      maxTokens: 32000,
+      signal,
+    });
+    const content = answer.content.endsWith("\n") ? answer.content : `${answer.content}\n`;
+    const lost = before ? lostLines(before, content) : [];
+    const warning = lost.length
+      ? `${lost.length} ligne(s) de la fiche actuelle n'apparaissent plus (ex. « ${lost[0].slice(0, 80)} ») : vérifie l'aperçu avant d'appliquer.`
+      : null;
+    return { content, before, warning, summary: answer.summary ?? "" };
   }
 
   /** First pass on a folder: understanding, structure, dashboards arbitration and clean-up plan. */
@@ -361,7 +463,7 @@ export class Engine {
       maxTokens: 64000,
       signal,
     });
-    return this.prepareInitial(space, answer, request, 1, [], digests, previousMap);
+    return this.finish(this.prepareInitial(space, answer, request, 1, [], digests, previousMap, new Map()), progress, signal);
   }
 
   private prepareInitial(
@@ -372,6 +474,7 @@ export class Engine {
     history: string[],
     digests: Map<string, FileDigest>,
     previousMap: SpaceMap | null,
+    merges: Map<string, Merge>,
   ): PreparedPlan {
     // Every dashboard Claude chose to merge or archive must actually be archived.
     const ops: PlanOp[] = [...(answer.ops ?? [])];
@@ -422,11 +525,12 @@ export class Engine {
       history,
       state,
       ctx,
-      checked: checkPlan(ops, state, ctx, undefined, this.transcriptFiller(digests)),
+      checked: [],
       baseMap: previousMap,
       patch: null,
       newFiles: space.files,
       digests,
+      merges,
     };
   }
 
@@ -449,7 +553,7 @@ export class Engine {
       maxTokens: 32000,
       signal,
     });
-    return this.prepareIncremental(space, map, files, answer, request, 1, [], digests);
+    return this.finish(this.prepareIncremental(space, map, files, answer, request, 1, [], digests, new Map()), progress, signal);
   }
 
   private prepareIncremental(
@@ -461,6 +565,7 @@ export class Engine {
     round: number,
     history: string[],
     digests: Map<string, FileDigest>,
+    merges: Map<string, Merge>,
   ): PreparedPlan {
     const state = this.state();
     const ctx = this.context(space);
@@ -491,11 +596,12 @@ export class Engine {
       history,
       state,
       ctx,
-      checked: checkPlan(ops, state, ctx, undefined, this.transcriptFiller(digests)),
+      checked: [],
       baseMap: map,
       patch,
       newFiles: files,
       digests,
+      merges,
     };
   }
 
@@ -516,7 +622,8 @@ export class Engine {
         maxTokens: 64000,
         signal,
       });
-      return this.prepareInitial(prepared.space, answer, prepared.request, prepared.round + 1, history, prepared.digests, prepared.baseMap);
+      const next = this.prepareInitial(prepared.space, answer, prepared.request, prepared.round + 1, history, prepared.digests, prepared.baseMap, prepared.merges);
+      return this.finish(next, progress, signal);
     }
     const answer = await this.llm().complete<IncrementalAnswer>({
       label: `révision de l'agrégation dans ${prepared.space.name}`,
@@ -528,7 +635,8 @@ export class Engine {
       maxTokens: 32000,
       signal,
     });
-    return this.prepareIncremental(prepared.space, prepared.baseMap!, prepared.newFiles, answer, prepared.request, prepared.round + 1, history, prepared.digests);
+    const next = this.prepareIncremental(prepared.space, prepared.baseMap!, prepared.newFiles, answer, prepared.request, prepared.round + 1, history, prepared.digests, prepared.merges);
+    return this.finish(next, progress, signal);
   }
 
   /** Assigns inbox documents to managed folders. Returns folder → files. */
@@ -569,7 +677,7 @@ export class Engine {
   /** Re-validates after the user toggled or edited ops in the review modal. */
   recheck(prepared: PreparedPlan, ops: PlanOp[], selected: boolean[]): CheckedOp[] {
     prepared.plan.ops = ops;
-    prepared.checked = checkPlan(ops, prepared.state, prepared.ctx, selected, this.transcriptFiller(prepared.digests));
+    prepared.checked = checkPlan(ops, prepared.state, prepared.ctx, selected, this.fillers(prepared.digests, prepared.merges));
     return prepared.checked;
   }
 
@@ -674,6 +782,20 @@ export class Engine {
         await this.io.create(op.target!, op.content!);
         steps.push({ type: "create", path: op.target!, content: op.content! });
         return;
+      case "integrate": {
+        if (op.before === null || op.before === undefined) {
+          if (this.io.exists(op.target!)) throw new Error("la fiche existe déjà");
+          await this.mkdirp(dirname(op.target!), steps);
+          await this.io.create(op.target!, op.content!);
+          steps.push({ type: "create", path: op.target!, content: op.content! });
+        } else {
+          const current = await this.io.read(op.target!);
+          if (current !== op.before) throw new Error("la fiche a changé depuis la préparation du plan");
+          await this.io.write(op.target!, op.content!);
+          steps.push({ type: "modify", path: op.target!, before: current, after: op.content! });
+        }
+        return;
+      }
       case "append_note": {
         const before = await this.io.read(op.target!);
         const after = `${before.trimEnd()}\n\n${op.content!.trim()}\n`;

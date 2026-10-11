@@ -10,6 +10,7 @@ const GROUPS: { kind: OpKind; title: string; icon: string }[] = [
   { kind: "mkdir", title: "Dossiers à créer", icon: "folder-plus" },
   { kind: "move", title: "Déplacements et renommages", icon: "folder-input" },
   { kind: "archive", title: "Archivage (rien n'est supprimé)", icon: "archive" },
+  { kind: "integrate", title: "Manuscrit intégré dans les fiches", icon: "file-input" },
   { kind: "transcribe", title: "Transcriptions", icon: "scan-text" },
   { kind: "create_note", title: "Notes créées", icon: "file-plus" },
   { kind: "append_note", title: "Ajouts à des notes existantes", icon: "file-pen-line" },
@@ -57,7 +58,7 @@ export class PlanModal extends Modal {
     this.prepared = prepared;
     this.ops = prepared.plan.ops.map((o) => ({ ...o }));
     this.checked = prepared.checked;
-    this.selected = this.checked.map((c) => !c.error);
+    this.selected = this.checked.map((c) => !c.error && !c.warning);
     this.answers = prepared.plan.questions.map(() => "");
     this.comments.clear();
     this.openComments.clear();
@@ -336,6 +337,10 @@ export class PlanModal extends Modal {
           line.createEl("code", { text: rel(op.source) });
           line.createSpan({ text: " → " });
         }
+        if (op.kind === "integrate") {
+          const n = op.sources?.length ?? 0;
+          line.createSpan({ text: `${n} document${n > 1 ? "s" : ""} → ` });
+        }
         if (this.editing === op.index) {
           const input = line.createEl("input", { type: "text", value: op.target ?? "", cls: "cc-edit" });
           input.focus();
@@ -365,7 +370,11 @@ export class PlanModal extends Modal {
           else this.openComments.add(op.index);
         });
         body.createDiv({ cls: "cc-muted", text: op.reason });
+        if (op.kind === "integrate") {
+          body.createDiv({ cls: "cc-muted", text: `${op.before === null || op.before === undefined ? "Nouvelle fiche" : "Fiche existante complétée"} · sources : ${(op.sources ?? []).map((x) => rel(x)).join(" · ")}` });
+        }
         if (op.error) body.createDiv({ cls: "cc-error", text: `Ignorée : ${op.error}` });
+        if (op.warning) body.createDiv({ cls: "cc-warning-text", text: `⚠ ${op.warning}` });
         if (this.openComments.has(op.index)) {
           const area = body.createEl("textarea", { cls: "cc-comment", attr: { rows: "2", placeholder: "Ton commentaire sur cette opération…" } });
           area.value = this.comments.get(op.index) ?? "";
@@ -374,7 +383,11 @@ export class PlanModal extends Modal {
             this.updateFooter();
           };
         }
-        if (op.content && (op.kind === "create_note" || op.kind === "append_note" || op.kind === "transcribe")) {
+        if (op.kind === "integrate" && op.content) {
+          const det = body.createEl("details");
+          det.createEl("summary", { text: "Aperçu de la fiche (ajouts en vert)" });
+          renderMergePreview(det, op.before ?? null, op.content);
+        } else if (op.content && (op.kind === "create_note" || op.kind === "append_note" || op.kind === "transcribe")) {
           const det = body.createEl("details");
           det.createEl("summary", { text: "Aperçu" });
           det.createEl("pre", { text: op.content.slice(0, 3000) });
@@ -404,5 +417,16 @@ export class PlanModal extends Modal {
     this.footerInfo.removeClass("cc-warning");
     const pending = this.hasFeedback() ? " · retours en attente : « Réviser » pour qu'ils soient intégrés" : "";
     this.footerInfo.setText(`${n} opération(s) retenue(s)${invalid ? ` · ${invalid} ignorée(s) car invalides` : ""} · dashboard et index mis à jour · tout est annulable${pending}`);
+  }
+}
+
+/** The merged note, with the lines that are new highlighted and lost lines listed. */
+function renderMergePreview(parent: HTMLElement, before: string | null, after: string) {
+  const norm = (l: string) => l.trim().replace(/\s+/g, " ");
+  const old = new Set((before ?? "").split("\n").map(norm));
+  const pre = parent.createEl("pre", { cls: "cc-merge" });
+  for (const line of after.split("\n")) {
+    const added = before !== null && norm(line) !== "" && !old.has(norm(line));
+    pre.createSpan({ text: `${line}\n`, cls: added ? "cc-added" : "" });
   }
 }

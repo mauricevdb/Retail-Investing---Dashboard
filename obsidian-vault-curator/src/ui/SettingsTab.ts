@@ -1,5 +1,5 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
-import { Backend, DEFAULT_GUIDELINES, Intervention } from "../core/settings";
+import { Backend, DEFAULT_GUIDELINES, HandwritingMode, Intervention } from "../core/settings";
 import type VaultCuratorPlugin from "../main";
 
 export class CuratorSettingTab extends PluginSettingTab {
@@ -134,7 +134,17 @@ export class CuratorSettingTab extends PluginSettingTab {
           .onChange(async (v) => ((s.intervention = v as Intervention), save())),
       );
     toggleSetting(containerEl, "Renommer les fichiers au nom opaque", "IMG_2034.jpg → « S03 - Tableau - Black-Scholes.jpg ».", s.renameUnclearFiles, async (v) => ((s.renameUnclearFiles = v), save()));
-    toggleSetting(containerEl, "Transcrire le manuscrit", "Crée une note Markdown (formules en LaTeX) à côté de chaque photo de tableau, de cahier ou de notes manuscrites.", s.transcribeHandwriting, async (v) => ((s.transcribeHandwriting = v), save()));
+    new Setting(containerEl)
+      .setName("Photos et notes manuscrites")
+      .setDesc("Photos de tableau ou de cahier, scans de notes : ce que le plug-in fait de leur contenu.")
+      .addDropdown((d) =>
+        d
+          .addOption("integrate", "Transcrire et intégrer dans la fiche correspondante")
+          .addOption("separate", "Transcrire dans une note à part, à côté de la photo")
+          .addOption("off", "Ne pas transcrire")
+          .setValue(s.handwriting)
+          .onChange(async (v) => ((s.handwriting = v as HandwritingMode), save())),
+      );
     numberSetting(containerEl, "Pages lues par PDF", "Texte extrait localement pour identifier un PDF.", s.pdfPages, async (v) => ((s.pdfPages = v), save()));
 
     new Setting(containerEl).setName("Au lancement d'Obsidian").setHeading();

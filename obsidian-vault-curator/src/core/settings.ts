@@ -2,6 +2,7 @@ import { basename, join } from "./paths";
 
 export type Backend = "claude-code" | "anthropic-api";
 export type Intervention = "conservative" | "balanced" | "thorough";
+export type HandwritingMode = "integrate" | "separate" | "off";
 
 /** A folder managed by the plugin. */
 export interface SpaceConfig {
@@ -43,7 +44,11 @@ export interface CuratorSettings {
 
   intervention: Intervention;
   renameUnclearFiles: boolean;
-  transcribeHandwriting: boolean;
+  /**
+   * Handwritten material (photos of a board or notebook, scans): integrate its transcribed content
+   * into the matching note, keep the transcription as a separate note next to it, or leave it alone.
+   */
+  handwriting: HandwritingMode;
   /** Pages of text extracted from each PDF for the digest. */
   pdfPages: number;
   /** Who the user is, so Claude can guess how a folder is used. */
@@ -79,7 +84,7 @@ export const DEFAULT_SETTINGS: CuratorSettings = {
   indexName: "{name} — Index",
   intervention: "balanced",
   renameUnclearFiles: true,
-  transcribeHandwriting: true,
+  handwriting: "integrate",
   pdfPages: 4,
   profile: "Étudiant en master Data & Finance.",
   guidelines: DEFAULT_GUIDELINES,
@@ -114,7 +119,13 @@ export function newSpace(settings: CuratorSettings, folder: string, vaultName: s
  * already had a map keeps its dashboards and becomes a managed space.
  */
 export function migrateSettings(raw: Record<string, unknown>, existingMaps: (folder: string) => boolean, folders: string[]): CuratorSettings {
-  const s = { ...DEFAULT_SETTINGS, ...raw } as CuratorSettings & { coursesRoot?: string; transcribePhotos?: boolean; convention?: string; watchNewFiles?: boolean };
+  const s = { ...DEFAULT_SETTINGS, ...raw } as CuratorSettings & {
+    coursesRoot?: string;
+    transcribePhotos?: boolean;
+    transcribeHandwriting?: boolean;
+    convention?: string;
+    watchNewFiles?: boolean;
+  };
   if (!Array.isArray(raw.spaces) && typeof s.coursesRoot === "string") {
     const root = s.coursesRoot;
     const canvasPattern = (raw.canvasName as string | undefined) ?? "{course} — Skill tree";
@@ -135,10 +146,12 @@ export function migrateSettings(raw: Record<string, unknown>, existingMaps: (fol
     s.canvasName = DEFAULT_SETTINGS.canvasName;
     s.indexName = DEFAULT_SETTINGS.indexName;
   }
-  if (typeof s.transcribePhotos === "boolean") s.transcribeHandwriting = s.transcribePhotos;
+  const transcribe = s.transcribeHandwriting ?? s.transcribePhotos;
+  if (transcribe === false && raw.handwriting === undefined) s.handwriting = "off";
   if (typeof s.watchNewFiles === "boolean") s.checkOnStart = s.watchNewFiles;
   delete s.coursesRoot;
   delete s.transcribePhotos;
+  delete s.transcribeHandwriting;
   delete s.convention;
   delete s.watchNewFiles;
   return s;

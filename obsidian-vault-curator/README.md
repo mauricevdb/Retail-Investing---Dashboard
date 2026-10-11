@@ -70,6 +70,24 @@ sert, comment s'en servir, règles de rangement, préférences retenues. Le text
 `course-curator` y est conservé. `_curator.json` contient la carte ; c'est elle que relit Claude à chaque
 agrégation.
 
+### Photos et notes manuscrites
+
+Réglage « Photos et notes manuscrites » :
+
+- **Transcrire et intégrer dans la fiche correspondante** (par défaut). Les photos de tableau, pages de
+  cahier et scans sont transcrits (formules en LaTeX), puis leur contenu est fusionné dans la note de la
+  même séance ou du même sujet. Par exemple, le tableau photographié pendant le CM1 va dans les notes du CM1,
+  à l'endroit de la notion concernée, sans doublonner ce qui y est déjà ; une page de cahier de PC va dans la
+  fiche de la PC, créée si elle n'existe pas. Chaque passage ajouté renvoie à sa photo (lien 📷), et les photos
+  restent rangées à leur place.
+- **Transcrire dans une note à part**, à côté de la photo (comportement de la version 0.2).
+- **Ne pas transcrire.**
+
+La fusion ne fait qu'ajouter : le texte existant de la fiche est conservé. Le plan en montre un aperçu (ajouts
+en vert). Si une ligne de la fiche actuelle disparaît, l'opération arrive décochée avec un avertissement. Les
+transcriptions séparées créées par la version 0.2 sont intégrées de la même façon, puis archivées, lors de la
+prochaine réorganisation du dossier (« Réorganiser »).
+
 ### Ce que Claude retient
 
 - les **règles de rangement** du dossier (où va chaque type de document, comment le nommer) ;

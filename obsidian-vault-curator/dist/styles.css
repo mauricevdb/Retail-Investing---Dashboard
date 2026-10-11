@@ -226,3 +226,18 @@
   font-style: italic;
   margin-top: 0.2em;
 }
+
+/* Merge preview */
+.cc-merge {
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: var(--font-ui-smaller);
+}
+.cc-merge .cc-added {
+  background: rgba(var(--color-green-rgb), 0.18);
+}
+.cc-warning-text {
+  color: var(--text-warning);
+  font-size: var(--font-ui-smaller);
+}

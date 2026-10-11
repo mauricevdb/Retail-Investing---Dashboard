@@ -268,4 +268,59 @@ describe("Engine", () => {
     await io.move("Taux", "Finance/Taux");
     expect(data.settings.spaces[0]).toMatchObject({ folder: "Finance/Taux", canvas: "Finance/Taux/Taux — Dashboard.canvas" });
   });
+
+  it("merges the transcribed content of photos into the matching note", async () => {
+    write("Taux/CM1 - Notes.md", "# CM1\nIntroduction aux taux.");
+    const answer: InitialAnswer = {
+      ...initialAnswer,
+      dashboards: [],
+      questions: [],
+      ops: [
+        { kind: "move", source: "Taux/IMG_2034.jpg", target: "Taux/Photos/2026-10-05 - Tableau - Taux.jpg", content: null, reason: "nom opaque" },
+        { kind: "integrate", source: null, sources: ["Taux/Photos/2026-10-05 - Tableau - Taux.jpg"], target: "Taux/CM1 - Notes.md", content: null, reason: "tableau du CM1" },
+      ],
+    };
+    const { llm, engine } = engineWith((req) => {
+      if (req.label.startsWith("lecture")) return digestAll(req);
+      if (req.label.startsWith("intégration")) {
+        return { content: "# CM1\nIntroduction aux taux.\n\n## Taux continu\n$r = \\ln(1+R)$ ([[Taux/Photos/2026-10-05 - Tableau - Taux.jpg|📷]])", summary: "ajout" };
+      }
+      return answer;
+    });
+    await engine.addSpace("Taux");
+    const prepared = await engine.planInitial(engine.scan().spaces[0], () => undefined);
+    const merge = llm.calls.find((c) => c.label.startsWith("intégration"))!;
+    expect(merge.prompt).toContain("Introduction aux taux."); // the note as it is
+    expect(merge.prompt).toContain("Formule : $r = \\ln(1+R)$"); // the transcription from the digest
+    expect(merge.prompt).toContain("### Taux/Photos/2026-10-05 - Tableau - Taux.jpg"); // linked by its final path
+    expect(prepared.checked[1]).toMatchObject({ error: null, warning: null, before: "# CM1\nIntroduction aux taux." });
+
+    // A revision that keeps the same integration reuses the prepared merge.
+    const calls = llm.calls.length;
+    await engine.revise(prepared, { answers: [], opComments: [], refused: [], edited: [], general: "ok" }, () => undefined);
+    expect(llm.calls.slice(calls).map((c) => c.label)).toEqual(["révision du plan pour Taux"]);
+
+    await engine.apply(prepared, [true, true], () => undefined);
+    const note = await io.read("Taux/CM1 - Notes.md");
+    expect(note).toContain("## Taux continu");
+    expect(io.exists("Taux/Photos/2026-10-05 - Tableau - Taux.jpg")).toBe(true);
+    expect(io.exists("Taux/Photos/2026-10-05 - Tableau - Taux — transcription.md")).toBe(false);
+    await engine.undoLast();
+    expect(await io.read("Taux/CM1 - Notes.md")).toBe("# CM1\nIntroduction aux taux.");
+  });
+
+  it("flags a merge that drops lines of the note", async () => {
+    write("Taux/CM1 - Notes.md", "# CM1\nIntroduction aux taux.\nUne remarque importante.");
+    const answer: InitialAnswer = {
+      ...initialAnswer,
+      dashboards: [],
+      ops: [{ kind: "integrate", source: null, sources: ["Taux/IMG_2034.jpg"], target: "Taux/CM1 - Notes.md", content: null, reason: "r" }],
+    };
+    const { engine } = engineWith((req) =>
+      req.label.startsWith("lecture") ? digestAll(req) : req.label.startsWith("intégration") ? { content: "# CM1\nIntroduction aux taux.\nAjout", summary: "" } : answer,
+    );
+    await engine.addSpace("Taux");
+    const prepared = await engine.planInitial(engine.scan().spaces[0], () => undefined);
+    expect(prepared.checked[0].warning).toContain("1 ligne(s) de la fiche actuelle n'apparaissent plus");
+  });
 });
