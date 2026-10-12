@@ -103,3 +103,13 @@ export function matchPath(path: string, candidates: Iterable<string>): string | 
   const hits = list.filter((c) => pathKey(c) === key);
   return hits.length === 1 ? hits[0] : null;
 }
+
+/** Short stable hash (FNV-1a, base 36) for cache keys and file names. */
+export function hash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}

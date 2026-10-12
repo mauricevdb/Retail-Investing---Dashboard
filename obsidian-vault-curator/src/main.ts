@@ -11,6 +11,10 @@ import { CuratorView, VIEW_TYPE } from "./ui/CuratorView";
 import { PlanModal } from "./ui/PlanModal";
 import { CuratorSettingTab } from "./ui/SettingsTab";
 import { AddSpaceModal, FolderPicker } from "./ui/SpaceModals";
+import { Lot, Synthesizer } from "./learn/synthesizer";
+import { SynthesisPlanModal, SynthesisResultModal } from "./ui/SynthesisModals";
+import { isInside } from "./core/paths";
+import { SpaceInventory } from "./core/scan";
 
 interface Task {
   message: string;
@@ -22,6 +26,7 @@ interface Task {
 export default class VaultCuratorPlugin extends Plugin {
   data!: PluginData;
   engine!: Engine;
+  syn!: Synthesizer;
   task: Task | null = null;
   private claudeCode: ClaudeCodeBackend | null = null;
   private api!: AnthropicApiBackend;
@@ -48,6 +53,7 @@ export default class VaultCuratorPlugin extends Plugin {
     this.api = new AnthropicApiBackend(() => this.cfg);
     const store = { data: this.data, save: () => this.saveData(this.data) };
     this.engine = new Engine(new ObsidianIO(this.app, this), () => this.backend(), store, this.app.vault.getName());
+    this.syn = new Synthesizer(this.engine);
 
     this.registerView(VIEW_TYPE, (leaf) => new CuratorView(leaf, this));
     this.addSettingTab(new CuratorSettingTab(this.app, this));
@@ -60,6 +66,7 @@ export default class VaultCuratorPlugin extends Plugin {
     this.addCommand({ id: "add-folder", name: "Organiser un dossier…", callback: () => this.pickFolderToAdd() });
     this.addCommand({ id: "organise", name: "Réorganiser un dossier géré…", callback: () => this.pickSpace((f) => void this.organise([f])) });
     this.addCommand({ id: "aggregate", name: "Agréger les nouveaux documents", callback: () => void this.aggregate() });
+    this.addCommand({ id: "synthesize-folder", name: "Synthétiser un dossier de cours en fiches…", callback: () => this.pickLotFolder() });
     this.addCommand({ id: "refresh-dashboards", name: "Régénérer les dashboards (sans Claude)", callback: () => void this.refreshAll(true) });
     this.addCommand({ id: "reset-layout", name: "Réinitialiser la mise en page d'un dashboard…", callback: () => this.pickSpace((f) => void this.refreshOne(f, false), true) });
     this.addCommand({ id: "undo", name: "Annuler la dernière opération", callback: () => void this.undo() });
@@ -72,26 +79,59 @@ export default class VaultCuratorPlugin extends Plugin {
       },
     });
 
-    // Right-click on a folder in the file explorer.
+    // Right-click in the file explorer: on a folder, a file, or a selection of files.
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
+        const path = file instanceof TFolder && file.isRoot() ? "" : file.path;
+        const learning = this.learningSpaceOf(path);
+        if (file instanceof TFile) {
+          if (learning) {
+            menu.addItem((item) =>
+              item
+                .setTitle("Vault Curator : synthétiser ce document en fiches")
+                .setIcon("graduation-cap")
+                .onClick(async () => this.synthesize([await this.syn.lotFromFiles(learning, [file.path], file.basename)])),
+            );
+          }
+          return;
+        }
         if (!(file instanceof TFolder)) return;
-        const folder = file.isRoot() ? "" : file.path;
-        const managed = this.cfg.spaces.some((s) => s.folder === folder);
+        const managed = this.cfg.spaces.find((s) => s.folder === path);
+        if (learning && path !== learning.folder) {
+          menu.addItem((item) =>
+            item
+              .setTitle("Vault Curator : synthétiser ce dossier en fiches")
+              .setIcon("graduation-cap")
+              .onClick(async () => this.synthesize([await this.syn.lotFromFolder(this.engine.space(learning.folder)!, path)])),
+          );
+        }
         menu.addItem((item) =>
           item
-            .setTitle(managed ? "Vault Curator : réorganiser ce dossier" : "Vault Curator : organiser ce dossier")
+            .setTitle(managed ? (managed.mode === "learning" ? "Vault Curator : synthétiser tout le cours, dossier par dossier" : "Vault Curator : réorganiser ce dossier") : "Vault Curator : gérer ce dossier")
             .setIcon("sparkles")
-            .onClick(() => (managed ? void this.organise([folder]) : void this.addFolder(folder))),
+            .onClick(() => (managed ? void this.organise([path]) : void this.addFolder(path))),
         );
         if (managed) {
           menu.addItem((item) =>
             item
               .setTitle("Vault Curator : agréger les nouveaux documents")
               .setIcon("inbox")
-              .onClick(() => void this.aggregate([folder])),
+              .onClick(() => void this.aggregate([path])),
           );
         }
+      }),
+    );
+    this.registerEvent(
+      this.app.workspace.on("files-menu", (menu: Menu, files: TAbstractFile[]) => {
+        const docs = files.filter((f): f is TFile => f instanceof TFile);
+        const space = docs.length ? this.learningSpaceOf(docs[0].path) : null;
+        if (!space || docs.some((d) => this.learningSpaceOf(d.path)?.folder !== space.folder)) return;
+        menu.addItem((item) =>
+          item
+            .setTitle(`Vault Curator : synthétiser ces ${docs.length} documents en fiches`)
+            .setIcon("graduation-cap")
+            .onClick(async () => this.synthesize([await this.syn.lotFromFiles(space, docs.map((d) => d.path), `Sélection de ${docs.length} documents`)])),
+        );
       }),
     );
 
@@ -116,6 +156,7 @@ export default class VaultCuratorPlugin extends Plugin {
     const recount = debounce(() => this.updateStatus(true), 4000, true);
     this.app.workspace.onLayoutReady(async () => {
       await this.migrate(rawSettings);
+      await this.guessModes();
       this.registerEvent(this.app.vault.on("create", (f) => f instanceof TFile && recount()));
       this.registerEvent(this.app.vault.on("delete", (f) => this.forget(f)));
       this.onStart();
@@ -136,6 +177,29 @@ export default class VaultCuratorPlugin extends Plugin {
     this.data.settings = migrateSettings(raw, (folder) => this.app.vault.getAbstractFileByPath(mapPath(folder)) !== null, folders);
     await this.saveData(this.data);
     if (this.cfg.spaces.length) new Notice(`Vault Curator : ${this.cfg.spaces.length} cours déjà organisés repris comme dossiers gérés.`);
+  }
+
+  /** Spaces from 0.2/0.3 have no mode: courses become learning spaces. */
+  private async guessModes() {
+    let changed = false;
+    for (const s of this.cfg.spaces as (CuratorSettings["spaces"][number] & { mode?: string })[]) {
+      if (s.mode === "learning" || s.mode === "files") continue;
+      const map = await this.engine.readMap({ generated: { map: mapPath(s.folder) } });
+      const text = `${map?.kind ?? ""} ${s.instructions}`;
+      s.mode = /cours|course|formation|module|matière|enseignement|master/i.test(text) ? "learning" : "files";
+      changed = true;
+    }
+    if (changed) await this.saveData(this.data);
+  }
+
+  /** The learning space a path belongs to (the innermost managed folder containing it). */
+  learningSpaceOf(path: string): SpaceInventory | null {
+    const owner = [...this.cfg.spaces].filter((s) => isInside(path, s.folder)).sort((a, b) => b.folder.length - a.folder.length)[0];
+    if (!owner) return null;
+    // A nested managed folder inside a learning space (made by 0.2/0.3) belongs to the course.
+    const course = [...this.cfg.spaces].filter((s) => s.mode === "learning" && isInside(path, s.folder)).sort((a, b) => a.folder.length - b.folder.length)[0];
+    const chosen = owner.mode === "learning" ? (course ?? owner) : course;
+    return chosen ? (this.engine.space(chosen.folder) ?? null) : null;
   }
 
   /** On each start: look for new material in the managed folders. */
@@ -182,7 +246,7 @@ export default class VaultCuratorPlugin extends Plugin {
   async addFolder(folder: string) {
     const choice = await new AddSpaceModal(this.app, folder).ask();
     if (!choice) return;
-    const error = await this.engine.addSpace(folder, choice.instructions);
+    const error = await this.engine.addSpace(folder, choice.instructions, choice.mode);
     if (error) return void new Notice(`Vault Curator : ${error}`);
     this.refreshView();
     if (choice.action === "organise") await this.organise([folder]);
@@ -209,6 +273,14 @@ export default class VaultCuratorPlugin extends Plugin {
   /** Organises (or re-organises) folders, one discussed and validated plan at a time. */
   async organise(folders: string[]) {
     if (!folders.length) return void new Notice("Aucun dossier à organiser.");
+    const learning = folders.map((f) => this.cfg.spaces.find((s) => s.folder === f)).filter((s) => s?.mode === "learning");
+    if (learning.length) {
+      const lots: Lot[] = [];
+      for (const s of learning) lots.push(...(await this.courseLots(this.engine.space(s!.folder)!)));
+      await this.synthesize(lots);
+      folders = folders.filter((f) => !learning.some((s) => s!.folder === f));
+      if (!folders.length) return;
+    }
     await this.run("Organisation", async (progress, signal) => {
       for (const [i, folder] of folders.entries()) {
         const space = this.engine.space(folder);
@@ -234,10 +306,20 @@ export default class VaultCuratorPlugin extends Plugin {
         .filter((c) => !only || only.includes(c.folder))
         .map((c) => ({ space: c, files: [...this.engine.newFiles(c), ...(extra.get(c.folder) ?? [])] }))
         .filter((w) => w.files.length);
-      const notOrganised = work.filter((w) => !w.space.hasMap);
+      const notOrganised = work.filter((w) => !w.space.hasMap && w.space.config.mode !== "learning");
       if (notOrganised.length) new Notice(`À organiser d'abord : ${notOrganised.map((w) => w.space.name).join(", ")}.`);
-      const ready = work.filter((w) => w.space.hasMap);
-      if (!ready.length) return void new Notice("Aucun nouveau document à agréger.");
+      const learningWork = work.filter((w) => w.space.config.mode === "learning");
+      if (learningWork.length) {
+        const lots: Lot[] = [];
+        for (const w of learningWork) lots.push(...(await this.syn.lotsFromNew(w.space, w.files)));
+        const go = await this.runLots(lots, progress, signal);
+        if (go === "stop") return;
+      }
+      const ready = work.filter((w) => w.space.hasMap && w.space.config.mode !== "learning");
+      if (!ready.length) {
+        if (!learningWork.length) new Notice("Aucun nouveau document à agréger.");
+        return;
+      }
       for (const [i, { space, files }] of ready.entries()) {
         const prepared = await this.engine.planIncremental(space, files, prefix(progress, space.name), signal);
         const go = await this.review(prepared, `(${i + 1}/${ready.length})`, progress, signal);
@@ -260,6 +342,85 @@ export default class VaultCuratorPlugin extends Plugin {
     const n = new Notice(`${lines.join("\n")}\nCliquez pour ouvrir le dashboard.`, 10000);
     n.noticeEl.onclick = () => void this.openFile(report.canvas);
     return "done";
+  }
+
+  // -------------------------------------------------------------------------
+  // Synthesis (learning spaces)
+
+  /** One lot per sub-folder holding raw documents, plus the loose documents at the course root. */
+  private async courseLots(space: SpaceInventory): Promise<Lot[]> {
+    const folders = new Map<string, string[]>();
+    for (const f of space.files) {
+      const rel = f.path.slice(space.folder ? space.folder.length + 1 : 0);
+      const top = rel.includes("/") ? `${space.folder ? `${space.folder}/` : ""}${rel.split("/")[0]}` : space.folder;
+      folders.set(top, [...(folders.get(top) ?? []), f.path]);
+    }
+    // Sub-folders managed on their own by an older version are part of the course.
+    for (const sub of space.subspaces) folders.set(sub.folder, folders.get(sub.folder) ?? []);
+    const lots: Lot[] = [];
+    for (const [folder, paths] of folders) {
+      const lot = folder === space.folder ? await this.syn.lotFromFiles(space, paths, `Documents à la racine de ${space.name}`) : await this.syn.lotFromFolder(space, folder);
+      if (lot.files.length) lots.push(lot);
+    }
+    return lots;
+  }
+
+  pickLotFolder() {
+    const learning = this.cfg.spaces.filter((s) => s.mode === "learning");
+    if (!learning.length) return void new Notice("Aucun dossier en mode apprentissage : ajoute d'abord un cours (« Organiser un dossier… »).");
+    const folders = this.engine.scanFolders().filter((f) => learning.some((s) => isInside(f, s.folder) && f !== s.folder));
+    new FolderPicker(
+      this.app,
+      folders,
+      async (f) => {
+        const space = this.learningSpaceOf(f);
+        if (space) await this.synthesize([await this.syn.lotFromFolder(space, f)]);
+      },
+      "Quel dossier synthétiser en fiches ?",
+    ).open();
+  }
+
+  async synthesize(lots: Lot[]) {
+    const nonEmpty = lots.filter((l) => l.files.length);
+    if (!nonEmpty.length) return void new Notice("Aucun document brut à synthétiser ici (les fiches déjà rédigées ne sont pas des sources).");
+    await this.run("Synthèse", (progress, signal) => this.runLots(nonEmpty, progress, signal).then(() => undefined));
+  }
+
+  /** The whole pipeline for each lot, with the two review windows. */
+  private async runLots(lots: Lot[], progress: Progress, signal: AbortSignal): Promise<"done" | "stop"> {
+    for (const [i, lot] of lots.entries()) {
+      const p = prefix(progress, lot.name);
+      let job = await this.syn.plan(lot, p, signal);
+      p("En attente de tes retours sur le plan");
+      const review = await new SynthesisPlanModal(
+        this.app,
+        job,
+        `(${i + 1}/${lots.length})`,
+        (j, feedback, modalSignal) => this.syn.revise(j, feedback, p, anySignal(signal, modalSignal)).finally(() => p("En attente de tes retours sur le plan")),
+        (j, id, text) => this.syn.correct(j, id, text),
+      ).run();
+      if (review.action === "stop") return "stop";
+      if (review.action === "skip") continue;
+      job = await this.syn.write(review.job, p, signal, review.comments);
+      p("En attente de ta relecture des fiches");
+      const result = await new SynthesisResultModal(this.app, job, (j, id, comment, modalSignal) =>
+        this.syn.rewrite(j, id, comment, p, anySignal(signal, modalSignal)).finally(() => p("En attente de ta relecture des fiches")),
+      ).run();
+      if (result.action !== "apply") continue;
+      const report = await this.syn.apply(result.job, p);
+      const n = new Notice(
+        `${lot.name} : ${report.fiches.length} fiche(s) écrite(s), ${report.archived.length} document(s) archivé(s)${report.kept.length ? `, ${report.kept.length} gardé(s) (contenu pas entièrement intégré)` : ""}.\nCliquez pour ouvrir le skill tree.`,
+        12000,
+      );
+      n.noticeEl.onclick = () => void this.openFile(report.canvas);
+    }
+    return "done";
+  }
+
+  async setMode(folder: string, mode: "learning" | "files") {
+    const s = this.cfg.spaces.find((x) => x.folder === folder);
+    if (s) s.mode = mode;
+    await this.saveSettings();
   }
 
   async undo() {

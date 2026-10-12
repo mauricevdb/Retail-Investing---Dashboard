@@ -1,9 +1,9 @@
 {
   "id": "course-curator",
   "name": "Vault Curator",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "minAppVersion": "1.5.0",
-  "description": "Organise n'importe quel dossier du vault avec Claude : il comprend son usage, discute un plan de rangement avec toi, génère un dashboard en canvas et agrège ensuite les nouveaux documents.",
+  "description": "Avec Claude : synthétise les documents bruts d'un cours (slides, photos du tableau et du cahier, notes) en fiches de révision reliées par un skill tree puis archive les sources ; range aussi n'importe quel autre dossier.",
   "author": "Maurice van den Boo",
   "isDesktopOnly": false
 }

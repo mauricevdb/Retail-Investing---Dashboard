@@ -1,5 +1,5 @@
 import { App, arrayBufferToBase64, FileSystemAdapter, loadPdfJs, normalizePath, Plugin, TFile, TFolder } from "obsidian";
-import { dirname } from "./core/paths";
+import { dirname, hash } from "./core/paths";
 import { VaultFile } from "./core/types";
 import { VaultIO } from "./io";
 
@@ -117,6 +117,56 @@ export class ObsidianIO implements VaultIO {
     } catch {
       return null; // HEIC and other formats the webview cannot decode
     }
+  }
+
+  private get pluginDir(): string {
+    return this.plugin.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}`;
+  }
+
+  async imageViews(path: string): Promise<{ label: string; mediaType: string; base64: string; absPath: string | null }[]> {
+    const file = this.file(path);
+    const bitmap = await createImageBitmap(new Blob([await this.app.vault.readBinary(file)]));
+    const { width: W, height: H } = bitmap;
+    const regions: { label: string; x: number; y: number; w: number; h: number }[] = [{ label: "vue d'ensemble", x: 0, y: 0, w: W, h: H }];
+    if (Math.max(W, H) > 2000) {
+      // 2×2 crops with 15 % overlap, so no line of writing is cut in every view.
+      const cw = Math.round(W * 0.575);
+      const ch = Math.round(H * 0.575);
+      for (const [i, [x, y]] of [[0, 0], [W - cw, 0], [0, H - ch], [W - cw, H - ch]].entries()) {
+        regions.push({ label: ["détail haut gauche", "détail haut droite", "détail bas gauche", "détail bas droite"][i], x, y, w: cw, h: ch });
+      }
+    }
+    const adapter = this.app.vault.adapter;
+    const dir = `${this.pluginDir}/cache/views`;
+    if (!(await adapter.exists(dir))) await adapter.mkdir(dir);
+    const key = hash(`${path}:${file.stat.size}:${file.stat.mtime}`);
+    const out = [];
+    for (const [i, r] of regions.entries()) {
+      const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(r.w, r.h));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(r.w * scale);
+      canvas.height = Math.round(r.h * scale);
+      canvas.getContext("2d")!.drawImage(bitmap, r.x, r.y, r.w, r.h, 0, 0, canvas.width, canvas.height);
+      const base64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+      const viewPath = `${dir}/${key}-${i}.jpg`;
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      await adapter.writeBinary(viewPath, bytes.buffer);
+      out.push({ label: r.label, mediaType: "image/jpeg", base64, absPath: adapter instanceof FileSystemAdapter ? adapter.getFullPath(viewPath) : null });
+    }
+    bitmap.close();
+    return out;
+  }
+
+  async cacheRead(key: string): Promise<string | null> {
+    const p = `${this.pluginDir}/cache/${key}`;
+    return (await this.app.vault.adapter.exists(p)) ? this.app.vault.adapter.read(p) : null;
+  }
+
+  async cacheWrite(key: string, value: string): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    const dir = `${this.pluginDir}/cache/${dirname(key)}`.replace(/\/$/, "");
+    if (!(await adapter.exists(dir))) await adapter.mkdir(dir);
+    await adapter.write(`${this.pluginDir}/cache/${key}`, value);
   }
 
   onRename(cb: (from: string, to: string) => void): void {

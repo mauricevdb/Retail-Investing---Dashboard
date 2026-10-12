@@ -1,5 +1,5 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
-import { Backend, DEFAULT_GUIDELINES, HandwritingMode, Intervention } from "../core/settings";
+import { Backend, DEFAULT_FICHE_TEMPLATE, DEFAULT_GUIDELINES, HandwritingMode, Intervention } from "../core/settings";
 import type VaultCuratorPlugin from "../main";
 
 export class CuratorSettingTab extends PluginSettingTab {
@@ -147,6 +147,35 @@ export class CuratorSettingTab extends PluginSettingTab {
       );
     numberSetting(containerEl, "Pages lues par PDF", "Texte extrait localement pour identifier un PDF.", s.pdfPages, async (v) => ((s.pdfPages = v), save()));
 
+    new Setting(containerEl).setName("Synthèse des cours (dossiers en mode apprentissage)").setHeading();
+    textSetting(containerEl, "Dossier d'archive", "Où vont les documents bruts une fois entièrement transcrits et intégrés aux fiches (le chemin du cours y est reproduit).", s.archiveRoot, async (v) => ((s.archiveRoot = v || "Archive"), save()));
+    new Setting(containerEl)
+      .setName("Modèle de transcription")
+      .setDesc("Lit les photos de tableau et de cahier : c'est la lecture la plus difficile, le modèle le plus capable est conseillé.")
+      .addText((t) => t.setValue(s.transcriptionModel).onChange(async (v) => ((s.transcriptionModel = v.trim() || "claude-opus-5-5"), save())));
+    toggleSetting(containerEl, "Vérifier chaque transcription", "Deuxième lecture de la photo pour corriger la transcription (plus lent, nettement plus fiable).", s.verifyTranscriptions, async (v) => ((s.verifyTranscriptions = v), save()));
+    numberSetting(containerEl, "Pages lues par PDF", "Au-delà, les pages ne sont pas lues (signalé dans le plan).", s.maxPdfPages, async (v) => ((s.maxPdfPages = v), save()));
+    new Setting(containerEl)
+      .setName("Gabarit de fiche")
+      .setDesc("Structure d'une fiche de révision ; Claude l'adapte au contenu.")
+      .addExtraButton((b) =>
+        b
+          .setIcon("rotate-ccw")
+          .setTooltip("Rétablir le gabarit par défaut")
+          .onClick(async () => {
+            s.ficheTemplate = DEFAULT_FICHE_TEMPLATE;
+            await save();
+            this.display();
+          }),
+      );
+    const tpl = containerEl.createEl("textarea", { cls: "cc-convention" });
+    tpl.value = s.ficheTemplate;
+    tpl.rows = 14;
+    tpl.onchange = async () => {
+      s.ficheTemplate = tpl.value;
+      await save();
+    };
+
     new Setting(containerEl).setName("Au lancement d'Obsidian").setHeading();
     toggleSetting(containerEl, "Chercher le nouveau matériau", "Repère les documents arrivés dans les dossiers gérés depuis la dernière fois et te le signale.", s.checkOnStart, async (v) => ((s.checkOnStart = v), save()));
     toggleSetting(containerEl, "Proposer l'agrégation directement", "Lance la préparation des plans d'agrégation sans attendre ton clic (tu valides toujours avant toute modification).", s.aggregateOnStart, async (v) => ((s.aggregateOnStart = v), save()));
@@ -160,7 +189,7 @@ export class CuratorSettingTab extends PluginSettingTab {
       s.ignoredFolders.join(", "),
       async (v) => ((s.ignoredFolders = v.split(",").map((x) => x.trim()).filter(Boolean)), save()),
     );
-    textSetting(containerEl, "Dossier d'archive", "Créé dans chaque dossier géré ; rien n'est jamais supprimé.", s.archiveFolder, async (v) => ((s.archiveFolder = v || "99 Archive"), save()));
+    textSetting(containerEl, "Archive des dossiers en mode documents", "Créé dans chaque dossier géré en mode documents ; rien n'est jamais supprimé.", s.archiveFolder, async (v) => ((s.archiveFolder = v || "99 Archive"), save()));
     textSetting(containerEl, "Nom des dashboards", "Pour les nouveaux dossiers ; {name} = nom du dossier.", s.canvasName, async (v) => ((s.canvasName = v || "{name} — Dashboard"), save()));
     textSetting(containerEl, "Nom des index", "Pour les nouveaux dossiers ; {name} = nom du dossier.", s.indexName, async (v) => ((s.indexName = v || "{name} — Index"), save()));
 

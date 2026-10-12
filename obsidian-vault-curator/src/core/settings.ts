@@ -4,9 +4,16 @@ export type Backend = "claude-code" | "anthropic-api";
 export type Intervention = "conservative" | "balanced" | "thorough";
 export type HandwritingMode = "integrate" | "separate" | "off";
 
+/**
+ * learning: courses and the like — raw material is synthesised into study notes and a skill tree,
+ * then archived. files: any other folder — documents are filed and renamed.
+ */
+export type SpaceMode = "learning" | "files";
+
 /** A folder managed by the plugin. */
 export interface SpaceConfig {
   folder: string;
+  mode: SpaceMode;
   /** What the user said about this folder when adding it (optional). */
   instructions: string;
   /** Generated dashboard paths (kept here so renames and legacy names survive). */
@@ -55,6 +62,16 @@ export interface CuratorSettings {
   profile: string;
   /** House rules applied to every folder; editable. */
   guidelines: string;
+  /** Vault-level folder where synthesised raw material is archived (mirrors the course path). */
+  archiveRoot: string;
+  /** Model used to transcribe photos of boards and notebooks (the hardest reading). */
+  transcriptionModel: string;
+  /** Second pass that checks each photo transcription against the image. */
+  verifyTranscriptions: boolean;
+  /** Pages of a PDF read in full by the synthesis (beyond, the rest is skipped and reported). */
+  maxPdfPages: number;
+  /** How a study note is laid out; Claude adapts it to the content. */
+  ficheTemplate: string;
   /** Look for new material when Obsidian starts. */
   checkOnStart: boolean;
   /** …and open the aggregation right away instead of only notifying. */
@@ -66,6 +83,34 @@ export const DEFAULT_GUIDELINES = `- Numéroter les dossiers qui ont un ordre na
 - Pas de dossier pour moins de 3 fichiers : en dessous, les fichiers restent au niveau parent.
 - Noms courts et en français, sans abréviations obscures.
 - Rien n'est supprimé : ce qui est obsolète ou en double va dans l'archive.`;
+
+export const DEFAULT_FICHE_TEMPLATE = `# <Titre de la notion>
+> **Objectif** : ce qu'on doit savoir faire après cette fiche. **Prérequis** : liens vers les fiches nécessaires.
+
+## Intuition
+Le problème que la notion résout et l'idée en deux ou trois phrases.
+
+## Définitions et notations
+
+## Résultats et formules
+Formules en LaTeX, avec les hypothèses et le sens de chaque terme.
+
+## Méthode / algorithme
+Étapes numérotées, complexité si pertinente.
+
+## Exemples
+Les exemples traités au tableau ou en cours, rédigés pas à pas.
+
+## Pièges et remarques
+
+## À retenir
+3 à 6 points.
+
+## Pour s'entraîner
+Liens vers les exercices corrigés correspondants.
+
+## Sources
+Liens vers les documents d'origine (archivés).`;
 
 export const DEFAULT_SETTINGS: CuratorSettings = {
   backend: "claude-code",
@@ -88,6 +133,11 @@ export const DEFAULT_SETTINGS: CuratorSettings = {
   pdfPages: 4,
   profile: "Étudiant en master Data & Finance.",
   guidelines: DEFAULT_GUIDELINES,
+  archiveRoot: "Archive",
+  transcriptionModel: "claude-opus-5-5",
+  verifyTranscriptions: true,
+  maxPdfPages: 80,
+  ficheTemplate: DEFAULT_FICHE_TEMPLATE,
   checkOnStart: true,
   aggregateOnStart: false,
 };
@@ -102,11 +152,12 @@ export function spaceName(folder: string, vaultName: string): string {
   return folder === "" ? vaultName : basename(folder);
 }
 
-export function newSpace(settings: CuratorSettings, folder: string, vaultName: string, instructions = ""): SpaceConfig {
+export function newSpace(settings: CuratorSettings, folder: string, vaultName: string, instructions = "", mode: SpaceMode = "files"): SpaceConfig {
   const name = spaceName(folder, vaultName);
   const fill = (pattern: string) => pattern.replace(/\{name\}|\{course\}/g, name);
   return {
     folder,
+    mode,
     instructions,
     canvas: join(folder, `${fill(settings.canvasName)}.canvas`),
     index: join(folder, `${fill(settings.indexName)}.md`),
@@ -137,6 +188,7 @@ export function migrateSettings(raw: Record<string, unknown>, existingMaps: (fol
         const name = basename(folder);
         return {
           folder,
+          mode: "learning" as SpaceMode,
           instructions: "Dossier d'un cours du master Data & Finance.",
           canvas: join(folder, `${canvasPattern.replace(/\{course\}|\{name\}/g, name)}.canvas`),
           index: join(folder, `${indexPattern.replace(/\{course\}|\{name\}/g, name)}.md`),

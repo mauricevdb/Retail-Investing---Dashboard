@@ -1,4 +1,5 @@
 import { App, FuzzySuggestModal, Modal, Setting } from "obsidian";
+import { SpaceMode } from "../core/settings";
 
 /** Picks a folder of the vault ("" = root). */
 export class FolderPicker extends FuzzySuggestModal<string> {
@@ -23,11 +24,12 @@ export class FolderPicker extends FuzzySuggestModal<string> {
   }
 }
 
-export type AddChoice = { action: "organise" | "add"; instructions: string } | null;
+export type AddChoice = { action: "organise" | "add"; instructions: string; mode: SpaceMode } | null;
 
 /** Asks what the folder is about before managing it; the answer guides Claude's understanding. */
 export class AddSpaceModal extends Modal {
   private instructions = "";
+  private mode: SpaceMode = "learning";
   private resolve!: (c: AddChoice) => void;
   private done = false;
 
@@ -77,17 +79,29 @@ export class AddSpaceModal extends Modal {
     area.value = this.instructions;
     area.oninput = () => (this.instructions = area.value);
     area.focus();
+    if (!this.editOnly) {
+      new Setting(contentEl)
+        .setName("Type de dossier")
+        .setDesc("Apprentissage : les documents bruts deviennent des fiches de révision reliées par un skill tree, puis sont archivés. Documents : rangement et renommage des fichiers.")
+        .addDropdown((d) =>
+          d
+            .addOption("learning", "Cours / apprentissage")
+            .addOption("files", "Documents (rangement)")
+            .setValue(this.mode)
+            .onChange((v) => (this.mode = v as SpaceMode)),
+        );
+    }
 
     const s = new Setting(contentEl);
     if (this.editOnly) {
-      s.addButton((b) => b.setButtonText("Enregistrer").setCta().onClick(() => this.finish({ action: "add", instructions: this.instructions.trim() })));
+      s.addButton((b) => b.setButtonText("Enregistrer").setCta().onClick(() => this.finish({ action: "add", instructions: this.instructions.trim(), mode: this.mode })));
     } else {
-      s.addButton((b) => b.setButtonText("Ajouter seulement").onClick(() => this.finish({ action: "add", instructions: this.instructions.trim() })));
+      s.addButton((b) => b.setButtonText("Ajouter seulement").onClick(() => this.finish({ action: "add", instructions: this.instructions.trim(), mode: this.mode })));
       s.addButton((b) =>
         b
           .setButtonText("Ajouter et organiser")
           .setCta()
-          .onClick(() => this.finish({ action: "organise", instructions: this.instructions.trim() })),
+          .onClick(() => this.finish({ action: "organise", instructions: this.instructions.trim(), mode: this.mode })),
       );
     }
   }

@@ -20,7 +20,7 @@ import {
   VaultState,
 } from "./core/plan";
 import { fileKind, fingerprint, isIgnored, scanVault, SpaceInventory, VaultScan } from "./core/scan";
-import { CuratorSettings, newSpace, SpaceConfig } from "./core/settings";
+import { CuratorSettings, newSpace, SpaceConfig, SpaceMode } from "./core/settings";
 import { CheckedOp, Feedback, FileDigest, JournalEntry, JournalStep, Plan, PlanOp, Resource, SectionNode, SpaceMap, VaultFile } from "./core/types";
 import { VaultIO } from "./io";
 import {
@@ -141,6 +141,37 @@ export class Engine {
     return this.store.data.settings;
   }
 
+  get data(): PluginData {
+    return this.store.data;
+  }
+
+  get vault(): VaultIO {
+    return this.io;
+  }
+
+  backend(): LlmBackend {
+    return this.llm();
+  }
+
+  /** Runs file operations made by the plugin itself: renames then only update the ledger and settings. */
+  async asPlugin<T>(fn: () => Promise<T>): Promise<T> {
+    this.applying = true;
+    try {
+      return await fn();
+    } finally {
+      this.applying = false;
+    }
+  }
+
+  async record(entry: JournalEntry) {
+    if (entry.steps.length) this.store.data.journal = [entry, ...this.store.data.journal].slice(0, 20);
+    await this.store.save();
+  }
+
+  async save() {
+    await this.store.save();
+  }
+
   /** Called after a user rename that touched a map (lets the UI refresh dashboards). */
   onMapRenamed(cb: (from: string, to: string) => void) {
     this.renameListeners.push(cb);
@@ -166,13 +197,13 @@ export class Engine {
   // Managed folders
 
   /** Starts managing a folder. Returns an error message when it cannot. */
-  async addSpace(folder: string, instructions = ""): Promise<string | null> {
+  async addSpace(folder: string, instructions = "", mode: SpaceMode = "files"): Promise<string | null> {
     folder = normalize(folder);
     const s = this.settings;
     if (folder !== "" && !this.io.listFolders().includes(folder)) return `Le dossier « ${folder} » n'existe pas.`;
     if (s.spaces.some((x) => x.folder === folder)) return `« ${folder || "La racine du vault"} » est déjà géré.`;
     if (isInside(folder, s.inboxFolder)) return "La boîte de réception ne peut pas être un dossier géré.";
-    s.spaces.push(newSpace(s, folder, this.vaultName, instructions));
+    s.spaces.push(newSpace(s, folder, this.vaultName, instructions, mode));
     await this.store.save();
     return null;
   }
@@ -806,7 +837,7 @@ export class Engine {
     }
   }
 
-  private async removeEmptied(ops: CheckedOp[], spaceFolder: string, steps: JournalStep[]) {
+  async removeEmptied(ops: CheckedOp[], spaceFolder: string, steps: JournalStep[]) {
     const candidates = new Set<string>();
     for (const op of ops) {
       if ((op.kind !== "move" && op.kind !== "archive") || !op.source) continue;
@@ -823,7 +854,7 @@ export class Engine {
     }
   }
 
-  private async mkdirp(folder: string, steps: JournalStep[]) {
+  async mkdirp(folder: string, steps: JournalStep[]) {
     const missing: string[] = [];
     for (let d = folder; d && !this.io.exists(d); d = dirname(d)) missing.unshift(d);
     for (const d of missing) {
@@ -832,7 +863,7 @@ export class Engine {
     }
   }
 
-  private async writeTracked(path: string, content: string, steps: JournalStep[] | null) {
+  async writeTracked(path: string, content: string, steps: JournalStep[] | null) {
     if (this.io.exists(path)) {
       const before = await this.io.read(path);
       if (before === content) return;

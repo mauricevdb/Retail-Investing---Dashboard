@@ -71,7 +71,7 @@ export class CuratorView extends ItemView {
     for (const space of scan.spaces) {
       const card = el.createDiv({ cls: "cc-card" });
       const head = card.createDiv({ cls: "cc-card-head" });
-      head.createEl("strong", { text: space.folder || "/ (tout le vault)" });
+      head.createEl("strong", { text: `${space.config.mode === "learning" ? "🎓 " : "🗂️ "}${space.folder || "/ (tout le vault)"}` });
       const fresh = space.hasMap ? plugin.engine.newFiles(space).length : 0;
       const status = space.hasMap ? (fresh ? `${fresh} nouveau(x)` : "à jour") : "pas encore organisé";
       head.createSpan({ cls: `cc-badge ${space.hasMap ? (fresh ? "cc-badge-new" : "cc-badge-ok") : "cc-badge-todo"}`, text: status });
@@ -86,15 +86,22 @@ export class CuratorView extends ItemView {
         a.disabled = busy;
         a.onclick = fn;
       };
+      const learning = space.config.mode === "learning";
       if (space.hasMap) {
-        link("Dashboard", () => void plugin.openFile(space.generated.canvas));
+        link(learning ? "Skill tree" : "Dashboard", () => void plugin.openFile(space.generated.canvas));
         link("Index", () => void plugin.openFile(space.generated.index));
+      }
+      if (learning) {
+        if (fresh || !space.hasMap) link(fresh ? `Synthétiser ${fresh} nouveau(x)` : "Synthétiser le cours", () => void (fresh ? plugin.aggregate([space.folder]) : plugin.organise([space.folder])), "mod-cta");
+        link("Synthétiser un dossier…", () => plugin.pickLotFolder());
+      } else if (space.hasMap) {
         if (fresh) link("Agréger", () => void plugin.aggregate([space.folder]), "mod-cta");
         link("Réorganiser", () => void plugin.organise([space.folder]));
       } else {
         link("Organiser", () => void plugin.organise([space.folder]), "mod-cta");
       }
       link("Consignes", () => void plugin.editInstructions(space.folder));
+      link(learning ? "Passer en mode documents" : "Passer en mode apprentissage", () => void plugin.setMode(space.folder, learning ? "files" : "learning"));
       link("Retirer", () => void plugin.removeSpace(space.folder));
     }
 

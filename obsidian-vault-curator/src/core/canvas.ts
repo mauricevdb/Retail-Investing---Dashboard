@@ -55,6 +55,8 @@ export const ROLE_ICON: Record<DocType, string> = {
   journal: "📅",
   modele: "🧩",
   dashboard: "🗺️",
+  fiche: "📒",
+  archive: "🗄️",
   autre: "📎",
 };
 const ROLE_ORDER = Object.keys(ROLE_ICON) as DocType[];
@@ -196,13 +198,14 @@ export function buildCanvas(
   for (const band of [...bands.keys()].sort((a, b) => a - b)) {
     const row0 = bands.get(band)!;
     for (let start = 0; start < row0.length; start += PER_ROW) {
-      const row = row0.slice(start, start + PER_ROW);
-      const rowWidth = row.length * (CARD_W + 40) + (row.length - 1) * GAP_X;
+      const row = row0.slice(start, start + PER_ROW).map((m) => layoutSection(m, numbering.get(m.id)!));
+      const rowWidth = row.reduce((w, r) => w + r.width, 0) + (row.length - 1) * GAP_X;
       let x = Math.round(headerW / 2 - rowWidth / 2);
       let rowHeight = 0;
-      for (const m of row) {
-        rowHeight = Math.max(rowHeight, placeSection(m, numbering.get(m.id)!, x, y, nodes));
-        x += CARD_W + 40 + GAP_X;
+      for (const r of row) {
+        for (const n of r.nodes) nodes.push({ ...n, x: n.x + x, y: n.y + y });
+        rowHeight = Math.max(rowHeight, r.height);
+        x += r.width + GAP_X;
       }
       y += rowHeight + GAP_Y;
     }
@@ -217,6 +220,29 @@ export function buildCanvas(
     }
     for (const m of map.sections.filter((m) => (lvl.get(m.id) ?? 0) === 0)) {
       edges.push(edge(`${OWN}e-course--${m.id}`, HEADER, `${SECTION}${m.id}`, "6"));
+    }
+  }
+  // Prerequisites between sub-sections (study notes of a course), within or across sections.
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const children = map.sections.flatMap((m) => m.children);
+  const deps = new Map(children.map((c) => [c.id, c.dependsOn.filter((d) => d !== c.id)]));
+  // Transitive reduction: no arrow A → C when C already depends on A through another prerequisite.
+  const reaches = (from: string, to: string, seen = new Set<string>()): boolean => {
+    for (const d of deps.get(from) ?? []) {
+      if (d === to) return true;
+      if (!seen.has(d)) {
+        seen.add(d);
+        if (reaches(d, to, seen)) return true;
+      }
+    }
+    return false;
+  };
+  for (const c of children) {
+    for (const p of deps.get(c.id) ?? []) {
+      if ((deps.get(c.id) ?? []).some((q) => q !== p && reaches(q, p))) continue;
+      if (nodeIds.has(`${SECTION}${p}`) && nodeIds.has(`${SECTION}${c.id}`)) {
+        edges.push(edge(`${OWN}e-${p}--${c.id}`, `${SECTION}${p}`, `${SECTION}${c.id}`, "2"));
+      }
     }
   }
 
@@ -295,22 +321,53 @@ function edge(id: string, from: string, to: string, color?: string): CanvasEdge 
 }
 
 /** Places a section card (+ its sub-sections) inside a group; returns the group height. */
-function placeSection(m: SectionNode, number: string, x: number, y: number, nodes: CanvasNode[]): number {
+/**
+ * Lays out a section card and its sub-sections inside a group, at (0,0); returns the nodes and the
+ * group size. When sub-sections depend on each other (the study notes of a course module), they
+ * form a small skill tree: one row per prerequisite level, side by side within a row. Otherwise
+ * they are stacked.
+ */
+function layoutSection(m: SectionNode, number: string): { nodes: CanvasNode[]; width: number; height: number } {
   const pad = 20;
+  const gap = 40;
   const text = sectionText(m, number);
   const cardH = estimateHeight(text, CARD_W);
-  const children: CanvasNode[] = [];
-  let cy = y + pad + 30 + cardH + 30;
+  const siblings = new Set(m.children.map((c) => c.id));
+  const tree = m.children.some((c) => c.dependsOn.some((d) => siblings.has(d) && d !== c.id));
+  const lvl = tree ? levels(m.children.map((c) => ({ ...c, dependsOn: c.dependsOn.filter((d) => siblings.has(d)) }))) : new Map<string, number>();
+  const rows = new Map<number, { c: SectionNode; i: number }[]>();
   m.children.forEach((c, i) => {
-    const ct = sectionText(c, `${number}.${i + 1}`).replace(/^## /, "### ");
-    const h = estimateHeight(ct, CHILD_W);
-    children.push({ id: `${SECTION}${c.id}`, type: "text", x: x + pad + 20, y: cy, width: CHILD_W, height: h, text: ct, color: STATUS_COLOR[c.status ?? "todo"] });
-    cy += h + 30;
+    const l = tree ? Math.max(0, lvl.get(c.id) ?? 0) : i;
+    rows.set(l, [...(rows.get(l) ?? []), { c, i }]);
   });
-  nodes.push({ id: `${OWN}g-${m.id}`, type: "group", x, y, width: CARD_W + 40, height: cy - y, label: `${number} · ${m.title}` });
-  nodes.push({ id: `${SECTION}${m.id}`, type: "text", x: x + pad, y: y + pad + 30, width: CARD_W, height: cardH, text, color: STATUS_COLOR[m.status ?? "todo"] });
-  nodes.push(...children);
-  return cy - y;
+  const widest = Math.max(1, ...[...rows.values()].map((r) => r.length));
+  const width = Math.max(CARD_W, widest * CHILD_W + (widest - 1) * gap) + 2 * pad;
+  const children: CanvasNode[] = [];
+  let cy = pad + 30 + cardH + (tree ? 80 : 30);
+  for (const l of [...rows.keys()].sort((a, b) => a - b)) {
+    const row = rows.get(l)!;
+    const rowW = row.length * CHILD_W + (row.length - 1) * gap;
+    let cx = Math.round((width - rowW) / 2);
+    let rowH = 0;
+    for (const { c, i } of row) {
+      const ct = sectionText(c, `${number}.${i + 1}`).replace(/^## /, "### ");
+      const h = estimateHeight(ct, CHILD_W);
+      children.push({ id: `${SECTION}${c.id}`, type: "text", x: cx, y: cy, width: CHILD_W, height: h, text: ct, color: STATUS_COLOR[c.status ?? "todo"] });
+      cx += CHILD_W + gap;
+      rowH = Math.max(rowH, h);
+    }
+    cy += rowH + (tree ? 80 : 30);
+  }
+  const height = cy - (tree ? 50 : 0);
+  return {
+    nodes: [
+      { id: `${OWN}g-${m.id}`, type: "group", x: 0, y: 0, width, height, label: `${number} · ${m.title}` },
+      { id: `${SECTION}${m.id}`, type: "text", x: Math.round((width - CARD_W) / 2), y: pad + 30, width: CARD_W, height: cardH, text, color: STATUS_COLOR[m.status ?? "todo"] },
+      ...children,
+    ],
+    width,
+    height,
+  };
 }
 
 /** Reads section progress back from a canvas the plugin generated. */

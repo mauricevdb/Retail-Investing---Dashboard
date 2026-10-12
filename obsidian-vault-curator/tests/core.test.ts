@@ -293,6 +293,20 @@ describe("canvas", () => {
   });
 });
 
+describe("course skill tree", () => {
+  it("lays the notes of a module by prerequisite level, without redundant arrows", () => {
+    const fiche = (id: string, deps: string[] = []) => sec(id, { dependsOn: deps, resources: [{ path: `ML/${id}.md`, role: "fiche", label: id }] });
+    const m = map([sec("knn", { children: [fiche("principe"), fiche("distances", ["principe"]), fiche("choix-k", ["principe", "distances"]), fiche("limites", ["distances"]), fiche("exos", ["choix-k", "limites"])] })]);
+    const c = buildCanvas(m, { index: "i.md" });
+    const y = (id: string) => c.nodes.find((n) => n.id === `cc-m-${id}`)!.y;
+    expect(y("principe")).toBeLessThan(y("distances"));
+    expect(y("choix-k")).toBe(y("limites")); // same level, side by side
+    expect(y("exos")).toBeGreaterThan(y("choix-k"));
+    const arrows = c.edges.filter((e) => !e.id.includes("course")).map((e) => e.id).sort();
+    expect(arrows).toEqual(["cc-e-choix-k--exos", "cc-e-distances--choix-k", "cc-e-distances--limites", "cc-e-limites--exos", "cc-e-principe--distances"]);
+  });
+});
+
 describe("canvas newcomers", () => {
   it("puts new sections below the kept layout and new sub-sections inside their group", () => {
     const base = map([sec("a"), sec("b"), sec("c")], { linkKind: "none" });

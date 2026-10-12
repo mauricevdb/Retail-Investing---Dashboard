@@ -29,6 +29,8 @@ export const DOC_TYPES = [
   "journal", // daily notes, logs, diaries
   "modele", // templates
   "dashboard", // index, MOC, map of content, canvas
+  "fiche", // a study note written by the synthesis pipeline
+  "archive", // an archive document gathering the raw sources of a synthesis
   "autre",
 ] as const;
 export type DocType = (typeof DOC_TYPES)[number];

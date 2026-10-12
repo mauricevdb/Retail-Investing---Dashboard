@@ -1,0 +1,766 @@
+// The synthesis pipeline, stage by stage:
+//   1. lot      — the raw documents of a session (a folder, a selection, or the new files)
+//   2. extract  — full transcription of every document: PDFs page by page, photos with zoomed views
+//                 and a verification pass, notes as they are (cached, correctable by the user)
+//   3. plan     — Claude reads everything and proposes the study notes and their skill-tree place
+//   4. discuss  — the user answers, comments, corrects transcriptions; Claude revises (any number of rounds)
+//   5. write    — one call per note, from the full content of its sources
+//   6. check    — coverage: every element of every source must be in a note; missing ones are added
+//   7. apply    — notes written, sources moved to the archive with an archive document, skill tree updated
+import { Engine, Progress } from "../engine";
+import { basename, dirname, extname, hash, isInside, join, matchPath, relativeTo, sanitizePath, slugify, uniquePath } from "../core/paths";
+import { allSections } from "../core/plan";
+import { fileKind, SpaceInventory } from "../core/scan";
+import { mapPath } from "../core/settings";
+import { JournalEntry, JournalStep, Resource, SectionNode, SpaceMap, VaultFile } from "../core/types";
+import { Attachment } from "../llm/types";
+import {
+  completePrompt,
+  completeSystem,
+  CourseContext,
+  coveragePrompt,
+  coverageSystem,
+  pdfPrompt,
+  pdfSystem,
+  photoPrompt,
+  photoSystem,
+  planPrompt,
+  planRevisionPrompt,
+  planSystem,
+  verifyPrompt,
+  verifySystem,
+  writePrompt,
+  writeSystem,
+} from "./prompts";
+import {
+  COVERAGE_SCHEMA,
+  CoverageAnswer,
+  PDF_SCHEMA,
+  PdfAnswer,
+  PHOTO_SCHEMA,
+  PhotoAnswer,
+  PLAN_SCHEMA,
+  VERIFY_SCHEMA,
+  VerifyAnswer,
+  WRITE_SCHEMA,
+  WriteAnswer,
+} from "./schemas";
+import { Coverage, Extract, FichePlan, Source, SynthesisPlan, WrittenFiche } from "./types";
+
+export interface Lot {
+  space: SpaceInventory;
+  name: string;
+  /** Folder the lot comes from (emptied and removed after archiving), or null for a selection. */
+  folder: string | null;
+  files: VaultFile[];
+}
+
+export interface SynthesisFeedback {
+  answers: { question: string; answer: string }[];
+  ficheComments: { id: string; comment: string }[];
+  general: string;
+  /** Transcriptions corrected by hand, by source id. */
+  transcriptions: { sourceId: string; text: string }[];
+}
+
+export interface SynthesisJob {
+  lot: Lot;
+  sources: Source[];
+  extracts: Map<string, Extract>;
+  course: CourseContext;
+  map: SpaceMap | null;
+  plan: SynthesisPlan;
+  request: { system: string; prompt: string };
+  round: number;
+  history: string[];
+  /** Sources no note uses (they would be lost): shown to the user, never archived. */
+  unassigned: string[];
+  written: WrittenFiche[];
+  coverage: Coverage[];
+}
+
+export interface SynthesisReport {
+  fiches: string[];
+  archived: string[];
+  kept: string[];
+  archiveDoc: string;
+  canvas: string;
+}
+
+const PDF_CHUNK = 10;
+const VIEW_EXT = new Set(["png", "jpg", "jpeg", "webp", "gif"]);
+
+export class Synthesizer {
+  constructor(private readonly engine: Engine) {}
+
+  private get io() {
+    return this.engine.vault;
+  }
+  private get settings() {
+    return this.engine.settings;
+  }
+
+  // -------------------------------------------------------------------------
+  // 1. Lots
+
+  /** Raw documents of a folder of a learning space (study notes already written by the pipeline are not sources). */
+  async lotFromFolder(space: SpaceInventory, folder: string): Promise<Lot> {
+    // Folders managed on their own by an older version (e.g. "Semaine 2") belong to the course: take their files too.
+    const seen = new Set<string>();
+    const files = this.engine
+      .scan()
+      .spaces.filter((s) => isInside(s.folder, space.folder))
+      .flatMap((s) => s.files)
+      .filter((f) => isInside(f.path, folder) && !seen.has(f.path) && seen.add(f.path));
+    return { space, name: basename(folder) || space.name, folder, files: await this.rawOnly(files) };
+  }
+
+  async lotFromFiles(space: SpaceInventory, paths: string[], name?: string): Promise<Lot> {
+    const files = space.files.filter((f) => paths.includes(f.path));
+    return { space, name: name ?? `${files.length} document(s)`, folder: null, files: await this.rawOnly(files) };
+  }
+
+  /** New material of a learning space, one lot per parent folder. */
+  async lotsFromNew(space: SpaceInventory, files: VaultFile[]): Promise<Lot[]> {
+    const raw = await this.rawOnly(files);
+    const byFolder = new Map<string, VaultFile[]>();
+    for (const f of raw) byFolder.set(dirname(f.path), [...(byFolder.get(dirname(f.path)) ?? []), f]);
+    return [...byFolder].map(([folder, fs]) => ({
+      space,
+      name: folder === space.folder ? `Nouveaux documents de ${space.name}` : basename(folder),
+      folder: folder === space.folder ? null : folder,
+      files: fs,
+    }));
+  }
+
+  private async rawOnly(files: VaultFile[]): Promise<VaultFile[]> {
+    const out: VaultFile[] = [];
+    for (const f of files) {
+      if (fileKind(f.path) === "canvas") continue;
+      if (fileKind(f.path) === "markdown" && /^---[\s\S]*?\ncurator:\s*(fiche|index)\b/m.test((await this.io.read(f.path)).slice(0, 600))) continue;
+      out.push(f);
+    }
+    return out;
+  }
+
+  // -------------------------------------------------------------------------
+  // 2. Extraction
+
+  async extract(lot: Lot, progress: Progress, signal?: AbortSignal): Promise<{ sources: Source[]; extracts: Map<string, Extract> }> {
+    const sources: Source[] = lot.files.map((f, i) => ({
+      id: `S${i + 1}`,
+      path: f.path,
+      kind: sourceKind(f.path),
+      size: f.size,
+      mtime: f.mtime,
+    }));
+    const extracts = new Map<string, Extract>();
+    const todo: Source[] = [];
+    for (const s of sources) {
+      const cached = await this.io.cacheRead(cacheKey(s));
+      if (cached) extracts.set(s.id, { ...(JSON.parse(cached) as Extract), sourceId: s.id, path: s.path });
+      else todo.push(s);
+    }
+    let done = 0;
+    const total = todo.length;
+    if (total) progress(`Lecture intégrale de ${total} document(s)…`, 0, total);
+    const errors: string[] = [];
+    let next = 0;
+    const workers = Array.from({ length: Math.max(1, Math.min(this.settings.concurrency, total)) }, async () => {
+      while (next < todo.length) {
+        const s = todo[next++];
+        signal?.throwIfAborted();
+        try {
+          const e = await this.extractOne(s, signal);
+          extracts.set(s.id, e);
+          await this.io.cacheWrite(cacheKey(s), JSON.stringify(e));
+        } catch (err) {
+          if (signal?.aborted) throw err;
+          errors.push(`${basename(s.path)} : ${(err as Error).message}`);
+        }
+        progress(`Lecture intégrale des documents…`, ++done, total);
+      }
+    });
+    await Promise.all(workers);
+    if (errors.length) progress(`${errors.length} document(s) illisible(s) : ${errors[0]}`);
+    return { sources, extracts };
+  }
+
+  private async extractOne(s: Source, signal?: AbortSignal): Promise<Extract> {
+    const base = { sourceId: s.id, path: s.path, uncertain: [] as string[], description: "" };
+    if (s.kind === "markdown" || s.kind === "text") return { ...base, text: await this.io.read(s.path) };
+    if (s.kind === "image") return this.extractPhoto(s, signal);
+    if (s.kind === "pdf") return this.extractPdf(s, signal);
+    return { ...base, text: `(format non lu automatiquement : .${extname(s.path)} — à intégrer à la main)`, description: "document non lu" };
+  }
+
+  private async extractPhoto(s: Source, signal?: AbortSignal): Promise<Extract> {
+    const backend = this.engine.backend();
+    const readsFiles = backend.name === "Claude Code";
+    const views = await this.io.imageViews(s.path);
+    const attachments: Attachment[] = views.map((v) => ({
+      path: `${s.path} (${v.label})`,
+      absPath: v.absPath,
+      kind: "image",
+      load: async () => ({ mediaType: v.mediaType, base64: v.base64 }),
+    }));
+    const labels = views.map((v) => v.label);
+    const draft = await backend.complete<PhotoAnswer>({
+      label: `transcription de ${basename(s.path)}`,
+      system: photoSystem(this.settings),
+      prompt: photoPrompt(s.path, labels, readsFiles),
+      schema: PHOTO_SCHEMA,
+      model: this.settings.transcriptionModel,
+      effort: "high",
+      attachments,
+      maxTokens: 16000,
+      signal,
+    });
+    let text = draft.transcript;
+    let uncertain = draft.uncertain ?? [];
+    if (this.settings.verifyTranscriptions) {
+      const checked = await backend.complete<VerifyAnswer>({
+        label: `vérification de ${basename(s.path)}`,
+        system: verifySystem(this.settings),
+        prompt: verifyPrompt(s.path, labels, draft.transcript, readsFiles),
+        schema: VERIFY_SCHEMA,
+        model: this.settings.transcriptionModel,
+        effort: "medium",
+        attachments,
+        maxTokens: 16000,
+        signal,
+      });
+      text = checked.transcript || text;
+      uncertain = checked.uncertain ?? uncertain;
+    }
+    return { sourceId: s.id, path: s.path, text, uncertain, description: draft.description ?? "" };
+  }
+
+  private async extractPdf(s: Source, signal?: AbortSignal): Promise<Extract> {
+    const backend = this.engine.backend();
+    const readsFiles = backend.name === "Claude Code";
+    const layer = await this.io.pdfText(s.path, this.settings.maxPdfPages);
+    const pageCount = layer?.pageCount || 1;
+    const pages = layer ? splitPages(layer.text) : new Map<number, string>();
+    const last = Math.min(pageCount, this.settings.maxPdfPages);
+    const parts: string[] = [];
+    const uncertain: string[] = [];
+    const attachment: Attachment = { path: s.path, absPath: this.io.absolutePath(s.path), kind: "pdf", load: () => this.io.binaryPayload(s.path) };
+    for (let from = 1; from <= last; from += PDF_CHUNK) {
+      const to = Math.min(last, from + PDF_CHUNK - 1);
+      const hint = [...pages].filter(([n]) => n >= from && n <= to).map(([n, t]) => `[page ${n}] ${t}`).join("\n") || null;
+      const answer = await backend.complete<PdfAnswer>({
+        label: `lecture de ${basename(s.path)} (p. ${from}-${to})`,
+        system: pdfSystem(this.settings),
+        prompt: pdfPrompt(s.path, from, to, pageCount, hint, readsFiles),
+        schema: PDF_SCHEMA,
+        model: this.settings.digestModel,
+        effort: "medium",
+        attachments: [attachment],
+        maxTokens: 32000,
+        signal,
+      });
+      parts.push(answer.text);
+      uncertain.push(...(answer.uncertain ?? []));
+    }
+    const truncated = pageCount > last ? `pages ${last + 1} à ${pageCount} non lues (limite de ${last} pages)` : null;
+    return { sourceId: s.id, path: s.path, text: parts.join("\n\n"), uncertain, description: `${pageCount} page(s)`, truncated };
+  }
+
+  /** Saves a transcription corrected by the user, so it is reused (and never re-read) afterwards. */
+  async correct(job: SynthesisJob, sourceId: string, text: string) {
+    const s = job.sources.find((x) => x.id === sourceId);
+    const e = job.extracts.get(sourceId);
+    if (!s || !e) return;
+    const next = { ...e, text, editedByUser: true };
+    job.extracts.set(sourceId, next);
+    await this.io.cacheWrite(cacheKey(s), JSON.stringify(next));
+  }
+
+  // -------------------------------------------------------------------------
+  // 3-4. Plan and revisions
+
+  async plan(lot: Lot, progress: Progress, signal?: AbortSignal): Promise<SynthesisJob> {
+    const { sources, extracts } = await this.extract(lot, progress, signal);
+    const map = await this.engine.readMap(lot.space);
+    const course = await this.courseContext(lot.space, map);
+    progress(`Analyse et plan des fiches pour « ${lot.name} »…`);
+    const request = { system: planSystem(this.settings), prompt: planPrompt(course, lot.name, sources, extracts) };
+    const plan = await this.engine.backend().complete<SynthesisPlan>({
+      label: `plan de synthèse pour ${lot.name}`,
+      ...request,
+      schema: PLAN_SCHEMA,
+      model: this.settings.planModel,
+      effort: "high",
+      maxTokens: 32000,
+      signal,
+    });
+    return this.prepare({ lot, sources, extracts, course, map, plan, request, round: 1, history: [], unassigned: [], written: [], coverage: [] });
+  }
+
+  async revise(job: SynthesisJob, feedback: SynthesisFeedback, progress: Progress, signal?: AbortSignal): Promise<SynthesisJob> {
+    for (const t of feedback.transcriptions) await this.correct(job, t.sourceId, t.text);
+    const text = feedbackText(job, feedback);
+    progress(`Révision du plan (version ${job.round + 1})…`);
+    // The sources block is rebuilt so corrected transcriptions are what Claude reads.
+    const original = planPrompt(job.course, job.lot.name, job.sources, job.extracts);
+    const plan = await this.engine.backend().complete<SynthesisPlan>({
+      label: `révision du plan de synthèse pour ${job.lot.name}`,
+      system: job.request.system,
+      prompt: planRevisionPrompt(original, job.plan, job.round, text, job.history),
+      schema: PLAN_SCHEMA,
+      model: this.settings.planModel,
+      effort: "high",
+      maxTokens: 32000,
+      signal,
+    });
+    return this.prepare({ ...job, plan, request: { ...job.request, prompt: original }, round: job.round + 1, history: [...job.history, text || "(aucun commentaire)"], written: [], coverage: [] });
+  }
+
+  /** Makes Claude's plan safe: paths inside the course, unique ids, every source accounted for. */
+  private prepare(job: SynthesisJob): SynthesisJob {
+    const space = job.lot.space;
+    const inSpace = (p: string) => {
+      const clean = sanitizePath(p);
+      return isInside(clean, space.folder) ? clean : join(space.folder, clean);
+    };
+    const plan = job.plan;
+    plan.module.folder = inSpace(plan.module.folder || plan.module.title);
+    const seen = new Set<string>();
+    const existingIds = new Set(job.map ? allSections(job.map).map((s) => s.id) : []);
+    for (const f of plan.fiches) {
+      let id = slugify(f.id || f.title) || "fiche";
+      while (seen.has(id) || (f.action === "create" && existingIds.has(id))) id = `${id}-b`;
+      seen.add(id);
+      f.id = id;
+      f.path = inSpace(f.path || join(plan.module.folder, `${f.title}.md`));
+      if (extname(f.path) !== "md") f.path = `${f.path}.md`;
+      if (f.action === "extend" && !this.io.exists(f.path)) f.action = "create";
+      f.outline = f.outline ?? [];
+      f.sources = (f.sources ?? []).filter((x) => job.sources.some((s) => s.id === x.sourceId));
+      f.dependsOn = f.dependsOn ?? [];
+      f.keywords = f.keywords ?? [];
+    }
+    const used = new Set(plan.fiches.flatMap((f) => f.sources.map((x) => x.sourceId)));
+    job.unassigned = job.sources.filter((s) => !used.has(s.id)).map((s) => s.id);
+    plan.questions = plan.questions ?? [];
+    plan.changes = plan.changes ?? [];
+    plan.issues = plan.issues ?? [];
+    plan.preferences = plan.preferences ?? [];
+    return job;
+  }
+
+  private async courseContext(space: SpaceInventory, map: SpaceMap | null): Promise<CourseContext> {
+    const lines: string[] = [];
+    if (map) {
+      for (const sec of map.sections) {
+        lines.push(`- module ${sec.id} « ${sec.title} »${sec.folder ? ` (dossier ${sec.folder})` : ""}${sec.dependsOn.length ? ` après ${sec.dependsOn.join(", ")}` : ""}`);
+        for (const c of sec.children) {
+          const fiche = c.resources.find((r) => r.role === "fiche");
+          const headings = fiche && this.io.exists(fiche.path) ? headingsOf(await this.io.read(fiche.path)) : "";
+          lines.push(`    - fiche ${c.id} « ${c.title} »${fiche ? ` : ${fiche.path}` : ""}${c.dependsOn.length ? ` (prérequis : ${c.dependsOn.join(", ")})` : ""}${headings ? ` — sections : ${headings}` : ""}`);
+        }
+        for (const r of sec.resources.filter((r) => r.role !== "archive")) lines.push(`    - document : ${r.path}`);
+      }
+    }
+    // Notes of the course not in the map yet (e.g. written by hand or by an older version).
+    const listed = new Set(map ? allSections(map).flatMap((s) => s.resources.map((r) => r.path)) : []);
+    const loose = space.files.filter((f) => fileKind(f.path) === "markdown" && !listed.has(f.path)).slice(0, 60);
+    if (loose.length) lines.push(`Autres notes du cours : ${loose.map((f) => f.path).join(" ; ")}`);
+    return {
+      course: space.name,
+      folder: space.folder,
+      outline: lines.join("\n"),
+      conventions: map?.conventions ?? "",
+      preferences: map?.preferences ?? [],
+      instructions: space.config.instructions,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // 5-6. Writing and coverage
+
+  /** Where the lot's sources and its archive document will live. */
+  archiveLayout(job: SynthesisJob) {
+    const dir = join(this.settings.archiveRoot, job.plan.module.folder);
+    const taken = new Set<string>();
+    const target = new Map<string, string>();
+    for (const s of job.sources) {
+      const p = uniquePath(join(dir, basename(s.path)), (x) => taken.has(x) || this.io.exists(x));
+      taken.add(p);
+      target.set(s.id, p);
+    }
+    const doc = uniquePath(join(dir, `${sanitizePath(job.plan.session || job.lot.name)} — Sources.md`), (x) => this.io.exists(x));
+    return { dir, target, doc };
+  }
+
+  async write(job: SynthesisJob, progress: Progress, signal?: AbortSignal, comments = new Map<string, string>()): Promise<SynthesisJob> {
+    const layout = this.archiveLayout(job);
+    const fiches = job.plan.fiches;
+    const written: WrittenFiche[] = new Array(fiches.length);
+    let done = 0;
+    let next = 0;
+    progress("Rédaction des fiches…", 0, fiches.length);
+    const workers = Array.from({ length: Math.max(1, Math.min(this.settings.concurrency, fiches.length)) }, async () => {
+      while (next < fiches.length) {
+        const i = next++;
+        written[i] = await this.writeOne(job, fiches[i], layout, comments.get(fiches[i].id) ?? "", signal);
+        progress("Rédaction des fiches…", ++done, fiches.length);
+      }
+    });
+    await Promise.all(workers);
+    job.written = written;
+    await this.checkCoverage(job, progress, signal);
+    return job;
+  }
+
+  /** Rewrites one note with a comment from the user, then re-checks coverage. */
+  async rewrite(job: SynthesisJob, ficheId: string, comment: string, progress: Progress, signal?: AbortSignal): Promise<SynthesisJob> {
+    const i = job.written.findIndex((w) => w.plan.id === ficheId);
+    if (i < 0) return job;
+    progress(`Réécriture de « ${job.written[i].plan.title} »…`);
+    const current = job.written[i];
+    const comm = `${comment}\n\nVersion actuelle de la fiche, à améliorer selon cette demande :\n\`\`\`markdown\n${current.content}\n\`\`\``;
+    job.written[i] = await this.writeOne(job, current.plan, this.archiveLayout(job), comm, signal);
+    await this.checkCoverage(job, progress, signal);
+    return job;
+  }
+
+  private async writeOne(job: SynthesisJob, fiche: FichePlan, layout: ReturnType<Synthesizer["archiveLayout"]>, comment: string, signal?: AbortSignal): Promise<WrittenFiche> {
+    const before = fiche.action === "extend" ? await this.io.read(fiche.path) : null;
+    const used = job.sources.filter((s) => fiche.sources.some((x) => x.sourceId === s.id));
+    const others = [
+      ...job.plan.fiches.filter((f) => f.id !== fiche.id).map((f) => ({ title: f.title, path: f.path })),
+      ...(job.map ? allSections(job.map).flatMap((s) => s.resources.filter((r) => r.role === "fiche").map((r) => ({ title: r.label, path: r.path }))) : []),
+    ];
+    const links = [{ path: layout.doc, title: `Sources de la séance (${job.plan.session || job.lot.name})` }, ...used.map((s) => ({ path: layout.target.get(s.id)!, title: basename(s.path) }))];
+    const frontmatter = [
+      "curator: fiche",
+      `cours: "${job.course.course.replace(/"/g, "'")}"`,
+      `module: "${job.plan.module.title.replace(/"/g, "'")}"`,
+      `notions: [${fiche.keywords.map((k) => `"${k.replace(/"/g, "'")}"`).join(", ")}]`,
+      `sources: "[[${layout.doc}]]"`,
+    ].join("\n");
+    const answer = await this.engine.backend().complete<WriteAnswer>({
+      label: `rédaction de « ${fiche.title} »`,
+      system: writeSystem(this.settings),
+      prompt: writePrompt(fiche, frontmatter, before, used, job.extracts, others, links, comment),
+      schema: WRITE_SCHEMA,
+      model: this.settings.planModel,
+      effort: "high",
+      maxTokens: 32000,
+      signal,
+    });
+    let content = answer.content.trim();
+    if (!content.startsWith("---")) content = `---\n${frontmatter}\n---\n\n${content}`;
+    return { plan: fiche, content: `${content}\n`, before };
+  }
+
+  /** Checks that nothing of the sources is lost; adds what is missing (one round), then re-checks. */
+  private async checkCoverage(job: SynthesisJob, progress: Progress, signal?: AbortSignal) {
+    // Notes being extended are sources too: their current content must survive.
+    const extended = job.written.filter((w) => w.before !== null);
+    const pseudo: Source[] = extended.map((w, i) => ({ id: `E${i + 1}`, path: w.plan.path, kind: "markdown", size: 0, mtime: 0 }));
+    const extracts = new Map(job.extracts);
+    extended.forEach((w, i) => extracts.set(`E${i + 1}`, { sourceId: `E${i + 1}`, path: w.plan.path, text: w.before!, uncertain: [], description: "contenu actuel de la fiche" }));
+    const all = [...job.sources.filter((s) => s.kind !== "other"), ...pseudo];
+
+    const run = async (subset: Source[]) => {
+      const answer = await this.engine.backend().complete<CoverageAnswer>({
+        label: "contrôle de couverture",
+        system: coverageSystem(this.settings),
+        prompt: coveragePrompt(subset, extracts, job.written.map((w) => ({ path: w.plan.path, content: w.content }))),
+        schema: COVERAGE_SCHEMA,
+        model: this.settings.planModel,
+        effort: "medium",
+        maxTokens: 16000,
+        signal,
+      });
+      return answer.sources ?? [];
+    };
+
+    progress("Contrôle : tout le contenu des sources est-il dans les fiches ?");
+    let result = await run(all);
+    const missing = result.filter((r) => !r.covered && r.missing.length);
+    if (missing.length) {
+      // Group the missing elements by note and complete each note once.
+      const paths = job.written.map((w) => w.plan.path);
+      const byFiche = new Map<string, { sourceId: string; items: string[] }[]>();
+      for (const r of missing) {
+        for (const m of r.missing) {
+          const target = matchPath(m.fiche, paths) ?? job.written.find((w) => w.plan.sources.some((x) => x.sourceId === r.sourceId))?.plan.path ?? paths[0];
+          const list = byFiche.get(target) ?? [];
+          const entry = list.find((e) => e.sourceId === r.sourceId) ?? (list.push({ sourceId: r.sourceId, items: [] }), list[list.length - 1]);
+          entry.items.push(m.item);
+          byFiche.set(target, list);
+        }
+      }
+      let k = 0;
+      for (const [path, items] of byFiche) {
+        progress(`Ajout des éléments manquants…`, ++k, byFiche.size);
+        const w = job.written.find((x) => x.plan.path === path)!;
+        const answer = await this.engine.backend().complete<WriteAnswer>({
+          label: `complément de « ${w.plan.title} »`,
+          system: completeSystem(this.settings),
+          prompt: completePrompt(path, w.content, items, all, extracts),
+          schema: WRITE_SCHEMA,
+          model: this.settings.planModel,
+          effort: "high",
+          maxTokens: 32000,
+          signal,
+        });
+        if (answer.content?.trim()) w.content = keepFrontmatter(w.content, answer.content);
+      }
+      progress("Nouveau contrôle de couverture…");
+      const again = await run(all.filter((s) => missing.some((m) => m.sourceId === s.id)));
+      result = result.map((r) => again.find((a) => a.sourceId === r.sourceId) ?? r);
+    }
+    job.coverage = all.map((s) => {
+      const r = result.find((x) => x.sourceId === s.id);
+      const covered = s.kind !== "other" && !job.unassigned.includes(s.id) && (r ? r.covered || !r.missing.length : false);
+      return { sourceId: s.id, path: s.path, covered, missing: r?.missing ?? [] };
+    });
+    for (const s of job.sources.filter((x) => x.kind === "other")) job.coverage.push({ sourceId: s.id, path: s.path, covered: false, missing: [{ item: "format non lu automatiquement", fiche: "" }] });
+  }
+
+  // -------------------------------------------------------------------------
+  // 7. Apply
+
+  async apply(job: SynthesisJob, progress: Progress): Promise<SynthesisReport> {
+    const space = job.lot.space;
+    const layout = this.archiveLayout(job);
+    const entry: JournalEntry = {
+      id: `${Date.now()}`,
+      date: new Date().toISOString(),
+      label: `Synthèse — ${job.plan.session || job.lot.name}`,
+      steps: [],
+      mapsBefore: { [space.folder]: job.map },
+    };
+    const report: SynthesisReport = { fiches: [], archived: [], kept: [], archiveDoc: layout.doc, canvas: space.generated.canvas };
+    const steps: JournalStep[] = entry.steps;
+    const coveredIds = new Set(job.coverage.filter((c) => c.covered && c.sourceId.startsWith("S")).map((c) => c.sourceId));
+
+    await this.engine.asPlugin(async () => {
+      try {
+        // Notes.
+        await this.engine.mkdirp(job.plan.module.folder, steps);
+        for (const [i, w] of job.written.entries()) {
+          progress("Écriture des fiches…", i, job.written.length);
+          if (w.before === null) {
+            const path = uniquePath(w.plan.path, (p) => this.io.exists(p));
+            w.plan.path = path;
+            await this.engine.writeTracked(path, w.content, steps);
+          } else {
+            const current = await this.io.read(w.plan.path);
+            if (current !== w.before) throw new Error(`« ${w.plan.path} » a changé depuis la préparation : relance la synthèse.`);
+            await this.engine.writeTracked(w.plan.path, w.content, steps);
+          }
+          report.fiches.push(w.plan.path);
+        }
+
+        // Archive document, then the raw sources it describes.
+        await this.engine.writeTracked(layout.doc, this.archiveDocument(job, layout, coveredIds), steps);
+        for (const s of job.sources) {
+          if (!coveredIds.has(s.id) || !this.io.exists(s.path)) {
+            report.kept.push(s.path);
+            continue;
+          }
+          const to = layout.target.get(s.id)!;
+          await this.engine.mkdirp(dirname(to), steps);
+          await this.io.move(s.path, to);
+          steps.push({ type: "move", from: s.path, to });
+          report.archived.push(s.path);
+        }
+
+        // The lot's folder, if it was a managed folder of its own (v0.2/0.3), goes too once empty.
+        if (job.lot.folder && job.lot.folder !== space.folder) {
+          const nested = this.settings.spaces.find((x) => x.folder === job.lot.folder);
+          if (nested && report.kept.length === 0) {
+            for (const p of [nested.canvas, nested.index, mapPath(nested.folder)]) {
+              if (!this.io.exists(p)) continue;
+              const to = uniquePath(join(layout.dir, `ancien ${basename(p)}`), (x) => this.io.exists(x));
+              await this.engine.mkdirp(dirname(to), steps);
+              await this.io.move(p, to);
+              steps.push({ type: "move", from: p, to });
+            }
+            this.settings.spaces = this.settings.spaces.filter((x) => x !== nested);
+          }
+        }
+        await this.engine.removeEmptied(
+          report.archived.map((p, index) => ({ kind: "move", source: p, target: null, content: null, reason: "", index, error: null })),
+          space.folder,
+          steps,
+        );
+
+        // Skill tree.
+        const map = this.updateMap(job, layout, report);
+        const live = this.engine.space(space.folder) ?? space;
+        await this.engine.writeTracked(live.generated.map, JSON.stringify(map, null, 2), steps);
+        await this.engine.renderDashboards(live, map, { keepLayout: true }, steps);
+
+        // Ledger: the notes are known; so are the lot's documents left in place (not proposed again
+        // until they change). Other raw documents of the course stay "new" until they are synthesised.
+        const ledger = this.engine.data.ledger;
+        const done = new Set([...report.fiches, ...report.kept]);
+        for (const f of this.engine.space(space.folder)?.files ?? []) {
+          if (done.has(f.path)) ledger[f.path] = { ...(ledger[f.path] ?? {}), fp: `${f.size}:${Math.round(f.mtime)}`, known: true };
+        }
+      } finally {
+        await this.engine.record(entry);
+      }
+    });
+    return report;
+  }
+
+  private archiveDocument(job: SynthesisJob, layout: ReturnType<Synthesizer["archiveLayout"]>, covered: Set<string>): string {
+    const lines = [
+      "---",
+      "curator: archive",
+      `cours: "${job.course.course.replace(/"/g, "'")}"`,
+      `seance: "${(job.plan.session || job.lot.name).replace(/"/g, "'")}"`,
+      "---",
+      `# ${job.plan.session || job.lot.name} — sources archivées`,
+      "",
+      job.plan.summary,
+      "",
+      `Fiches produites : ${job.written.map((w) => `[[${w.plan.path}|${w.plan.title}]]`).join(" · ")}`,
+      "",
+    ];
+    for (const s of job.sources) {
+      const e = job.extracts.get(s.id);
+      const archived = covered.has(s.id);
+      const where = archived ? layout.target.get(s.id)! : s.path;
+      lines.push(`## ${s.id} — ${basename(s.path)}`);
+      lines.push(archived ? `Archivé depuis \`${s.path}\`.` : `> [!warning] Non archivé (contenu pas entièrement intégré) : reste à \`${s.path}\`.`);
+      if (s.kind === "image") lines.push("", `![[${where}]]`);
+      else lines.push("", `[[${where}|Ouvrir l'original]]`);
+      if (e?.description) lines.push("", `*${e.description}*`);
+      if (e?.uncertain.length) lines.push("", `> [!question] Passages incertains\n${e.uncertain.map((u) => `> - ${u}`).join("\n")}`);
+      if (e?.text && s.kind !== "markdown") lines.push("", "### Transcription", "", e.text);
+      lines.push("");
+    }
+    return `${lines.join("\n")}\n`;
+  }
+
+  private updateMap(job: SynthesisJob, layout: ReturnType<Synthesizer["archiveLayout"]>, report: SynthesisReport): SpaceMap {
+    const space = job.lot.space;
+    const map: SpaceMap = job.map
+      ? structuredClone(job.map)
+      : {
+          version: 2,
+          name: space.name,
+          folder: space.folder,
+          kind: "cours",
+          summary: "",
+          purpose: "",
+          usage: "",
+          conventions: "",
+          preferences: [],
+          dashboardTitle: "Skill tree",
+          linkKind: "prerequisite",
+          sections: [],
+          transverse: [],
+          keptDashboards: [],
+          updatedAt: new Date().toISOString(),
+        };
+    if (map.linkKind === "none") map.linkKind = "prerequisite";
+    if (!map.dashboardTitle) map.dashboardTitle = "Skill tree";
+    map.preferences = job.plan.preferences.length ? job.plan.preferences : map.preferences;
+
+    // Raw documents now archived disappear from the map: the notes replace them. Sections left
+    // empty (file groupings made by an older version) go too.
+    const archived = new Set(report.archived);
+    const strip = (rs: Resource[]) => rs.filter((r) => !archived.has(r.path));
+    for (const s of allSections(map)) s.resources = strip(s.resources);
+    map.transverse = strip(map.transverse);
+    for (const s of map.sections) s.children = s.children.filter((c) => c.resources.length || c.children.length);
+    map.sections = map.sections.filter((s) => s.resources.length || s.children.length || s.id === job.plan.module.id);
+
+    const m = job.plan.module;
+    let section = map.sections.find((s) => s.id === m.id) ?? (m.mode === "existing" ? map.sections.find((s) => s.title === m.title) : undefined);
+    if (!section) {
+      section = { id: slugify(m.id || m.title) || `module-${map.sections.length + 1}`, title: m.title, summary: m.summary, keywords: [], dependsOn: [], folder: m.folder, resources: [], children: [] };
+      map.sections.push(section);
+    }
+    section.folder = section.folder ?? m.folder;
+    section.summary = section.summary || m.summary;
+    const sectionIds = new Set(map.sections.map((s) => s.id));
+    section.dependsOn = [...new Set([...section.dependsOn, ...m.dependsOn.filter((d) => sectionIds.has(d) && d !== section!.id)])];
+    if (!section.resources.some((r) => r.path === layout.doc)) section.resources.push({ path: layout.doc, role: "archive", label: `Sources — ${job.plan.session || job.lot.name}` });
+
+    for (const w of job.written) {
+      const f = w.plan;
+      const node: SectionNode = {
+        id: f.id,
+        title: f.title,
+        summary: f.objective,
+        keywords: f.keywords,
+        dependsOn: f.dependsOn,
+        folder: null,
+        resources: [{ path: f.path, role: "fiche", label: f.title }],
+        children: [],
+      };
+      const existing = allSections(map).find((s) => s.id === f.id || s.resources.some((r) => r.path === f.path));
+      if (existing && existing !== section) {
+        Object.assign(existing, { ...node, status: existing.status, children: existing.children });
+      } else if (!section.children.some((c) => c.id === f.id)) {
+        section.children.push(node);
+      }
+    }
+    const known = new Set(allSections(map).map((s) => s.id));
+    for (const s of allSections(map)) s.dependsOn = s.dependsOn.filter((d) => known.has(d) && d !== s.id);
+    map.updatedAt = new Date().toISOString();
+    return map;
+  }
+}
+
+/** The frontmatter written by the pipeline survives a completion that dropped it. */
+function keepFrontmatter(previous: string, next: string): string {
+  const fm = /^---\n[\s\S]*?\n---\n/.exec(previous)?.[0];
+  const body = next.trim();
+  return `${fm && !body.startsWith("---") ? `${fm}\n${body}` : body}\n`;
+}
+
+function sourceKind(path: string): Source["kind"] {
+  const ext = extname(path);
+  if (ext === "md") return "markdown";
+  if (ext === "pdf") return "pdf";
+  if (VIEW_EXT.has(ext)) return "image";
+  if (["txt", "csv", "py", "r", "tex", "json", "ipynb", "sql"].includes(ext)) return "text";
+  return "other";
+}
+
+function cacheKey(s: Source): string {
+  return `extracts/${hash(`${s.size}:${Math.round(s.mtime)}:${extname(s.path)}`)}.json`;
+}
+
+function splitPages(text: string): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const m of text.matchAll(/\[page (\d+)\]\s*([\s\S]*?)(?=\n?\[page \d+\]|$)/g)) out.set(Number(m[1]), m[2].trim());
+  return out;
+}
+
+function headingsOf(md: string): string {
+  return md
+    .split("\n")
+    .filter((l) => /^#{2,3} /.test(l))
+    .map((l) => l.replace(/^#+ /, ""))
+    .slice(0, 12)
+    .join(" · ");
+}
+
+function feedbackText(job: SynthesisJob, f: SynthesisFeedback): string {
+  const lines: string[] = [];
+  for (const a of f.answers) if (a.answer.trim()) lines.push(`- Question « ${a.question} » → réponse : ${a.answer.trim()}`);
+  for (const c of f.ficheComments) {
+    const fiche = job.plan.fiches.find((x) => x.id === c.id);
+    if (c.comment.trim()) lines.push(`- Sur la fiche « ${fiche?.title ?? c.id} » : ${c.comment.trim()}`);
+  }
+  for (const t of f.transcriptions) lines.push(`- Transcription de ${job.sources.find((s) => s.id === t.sourceId)?.path ?? t.sourceId} corrigée à la main (la version corrigée est dans les sources ci-dessus).`);
+  if (f.general.trim()) lines.push(`- Commentaire général : ${f.general.trim()}`);
+  return lines.join("\n");
+}
+
+export function relativeLabel(path: string, folder: string): string {
+  return relativeTo(path, folder) || path;
+}

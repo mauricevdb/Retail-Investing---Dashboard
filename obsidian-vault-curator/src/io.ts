@@ -23,6 +23,15 @@ export interface VaultIO {
   pdfText(path: string, pages: number): Promise<{ text: string; pageCount: number } | null>;
   /** Image or PDF as base64, downscaled for images; null if not sendable. */
   binaryPayload(path: string): Promise<{ mediaType: string; base64: string } | null>;
+  /**
+   * Views of an image for a careful transcription: the whole picture (downscaled) and, for large
+   * pictures, overlapping crops at higher resolution. Each view has a payload for the API backend
+   * and, when possible, a file on disk for the Claude Code backend.
+   */
+  imageViews(path: string): Promise<{ label: string; mediaType: string; base64: string; absPath: string | null }[]>;
+  /** Small persistent cache outside the vault content (plugin folder). */
+  cacheRead(key: string): Promise<string | null>;
+  cacheWrite(key: string, value: string): Promise<void>;
   /** Subscribes to renames (whoever made them). */
   onRename(cb: (from: string, to: string) => void): void;
 }
