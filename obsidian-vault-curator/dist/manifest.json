@@ -1,7 +1,7 @@
 {
   "id": "course-curator",
   "name": "Vault Curator",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "minAppVersion": "1.5.0",
   "description": "Avec Claude : synthétise les documents bruts d'un cours (slides, photos du tableau et du cahier, notes) en fiches de révision reliées par un skill tree puis archive les sources ; range aussi n'importe quel autre dossier.",
   "author": "Maurice van den Boo",

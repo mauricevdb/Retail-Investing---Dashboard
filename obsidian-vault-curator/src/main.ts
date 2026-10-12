@@ -1,6 +1,6 @@
 import { debounce, FileSystemAdapter, Menu, Notice, Platform, Plugin, TAbstractFile, TFile, TFolder } from "obsidian";
 import { candidateFolders, VaultScan } from "./core/scan";
-import { CuratorSettings, DEFAULT_SETTINGS, guessLevel, mapPath, migrateSettings } from "./core/settings";
+import { courseCanvasPath, CuratorSettings, DEFAULT_SETTINGS, guessLevel, mapPath, migrateSettings } from "./core/settings";
 import { Feedback } from "./core/types";
 import { Engine, PluginData, PreparedPlan, Progress } from "./engine";
 import { AnthropicApiBackend } from "./llm/anthropicApi";
@@ -220,6 +220,16 @@ export default class VaultCuratorPlugin extends Plugin {
       const text = `${map?.kind ?? ""} ${s.instructions}`;
       s.mode = /cours|course|formation|module|matière|enseignement|master/i.test(text) ? "learning" : "files";
       if (s.mode === "learning") s.level = guessLevel(s.instructions);
+      changed = true;
+    }
+    // 0.5 named a course's skill tree "<course> — Dashboard": it now comes first, as "00 Skill tree — <course>".
+    for (const s of this.cfg.spaces) {
+      if (s.mode !== "learning" || s.level !== "course" || !s.canvas.endsWith(" — Dashboard.canvas")) continue;
+      const next = courseCanvasPath(s.folder, s.canvas.split("/").pop()!.replace(/ — Dashboard\.canvas$/, ""));
+      const io = this.engine.vault;
+      if (io.exists(next)) continue;
+      if (io.exists(s.canvas)) await this.engine.asPlugin(() => io.move(s.canvas, next));
+      s.canvas = next;
       changed = true;
     }
     if (changed) await this.saveData(this.data);
@@ -485,7 +495,7 @@ export default class VaultCuratorPlugin extends Plugin {
       if (result.action !== "apply") continue;
       const report = await this.syn.apply(result.job, p);
       const n = new Notice(
-        `${lot.name} : ${report.fiches.length} fiche(s) écrite(s), ${report.archived.length} document(s) archivé(s)${report.kept.length ? `, ${report.kept.length} gardé(s) en place (références, notebooks, données)` : ""}${report.pending.length ? `, ${report.pending.length} non archivé(s) (contenu pas entièrement intégré)` : ""}.\nCliquez pour ouvrir le skill tree.`,
+        `${lot.name} : ${report.fiches.length} fiche(s) écrite(s), ${report.archived.length + report.kept.length} source(s) rangée(s)${report.pending.length ? `, ${report.pending.length} pas encore intégrée(s) (laissées en place)` : ""}.\nCliquez pour ouvrir le canvas de la séance.`,
         12000,
       );
       n.noticeEl.onclick = () => void this.openFile(report.canvas);

@@ -227,7 +227,7 @@ export class SynthesisPlanModal extends AsyncModal<PlanReview> {
     const d = parent.createEl("details", { cls: "cc-section" });
     d.open = photos.length > 0;
     d.createEl("summary", { text: `Transcriptions (${photos.length} photo(s) à relire, ${others.length} autre(s) document(s))` });
-    d.createDiv({ cls: "cc-muted", text: "Corrige directement le texte si besoin : la version corrigée sera utilisée pour la rédaction et conservée dans l'archive." });
+    d.createDiv({ cls: "cc-muted", text: "Corrige directement le texte si besoin : la version corrigée sera utilisée pour la rédaction et conservée dans le document « Transcriptions » de la séance." });
     for (const s of photos) {
       const e = job.extracts.get(s.id);
       const box = d.createDiv({ cls: "cc-transcript" });
@@ -315,7 +315,7 @@ export class SynthesisResultModal extends AsyncModal<ResultReview> {
       li.appendText(`${c.kept ? "↷" : c.covered ? "✓" : "✗"} ${relativeTo(c.path, job.lot.space.folder) || c.path}${c.kept ? " (gardé en place)" : ""}`);
       if (!c.covered && c.missing.length) li.createDiv({ cls: "cc-muted", text: `Manque : ${c.missing.map((m) => m.item).join(" ; ")}` });
     }
-    cov.createDiv({ cls: "cc-muted", text: "Les documents ✓ seront déplacés dans l'archive, avec un document « Sources » qui garde leurs transcriptions. Les ✗ restent en place ; les ↷ (références, notebooks, données) restent en place et sont reliés au skill tree." });
+    cov.createDiv({ cls: "cc-muted", text: "Les documents ✓ iront dans le dossier « Sources » de la séance, avec un document « Transcriptions ». Les ✗ restent où ils sont, signalés sur le canvas de la séance ; les ↷ (références, notebooks, données) rejoignent « Sources » sans contrôle." });
 
     for (const w of job.written) {
       const det = contentEl.createEl("details", { cls: "cc-section" });
@@ -339,7 +339,7 @@ export class SynthesisResultModal extends AsyncModal<ResultReview> {
     }
 
     const footer = contentEl.createDiv({ cls: "cc-footer" });
-    footer.createDiv({ cls: "cc-footer-info", text: "« Appliquer » enregistre les fiches, archive les sources intégrées et met à jour le skill tree. Tout est annulable." });
+    footer.createDiv({ cls: "cc-footer-info", text: "« Appliquer » écrit les fiches dans « Fiches », range les sources dans « Sources », crée le canvas de la séance et met à jour le skill tree du cours. Tout est annulable." });
     const buttons = footer.createDiv({ cls: "cc-footer-buttons" });
     buttons.createEl("button", { text: "Abandonner" }).onclick = () => this.finish({ action: "cancel" });
     buttons.createEl("button", { text: "Appliquer", cls: "mod-cta" }).onclick = () => this.finish({ action: "apply", job: this.job });

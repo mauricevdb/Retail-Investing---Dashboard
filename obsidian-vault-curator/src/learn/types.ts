@@ -46,6 +46,8 @@ export interface FichePlan {
   /** Vault path of the note. */
   path: string;
   action: "create" | "extend";
+  /** An existing note being extended that moves into the session's notes folder (set by the plug-in). */
+  moveFrom?: string;
   objective: string;
   /** Sections, in order, each with what goes in it. */
   outline: string[];
@@ -70,6 +72,8 @@ export interface ModulePlan {
 /** What Claude proposes after reading everything: the user discusses it before anything is written. */
 export interface SynthesisPlan {
   session: string;
+  /** Language of the course material, used for the body of the notes ("English", "français"…). */
+  language: string;
   summary: string;
   /** What each source brings, and problems seen (contradictions, missing statements, illegible parts). */
   sources: { sourceId: string; role: string; contributes: string; disposition: Disposition }[];

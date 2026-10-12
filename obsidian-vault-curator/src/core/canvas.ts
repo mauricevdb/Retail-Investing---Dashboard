@@ -400,3 +400,120 @@ export function parseCanvas(raw: string): CanvasData | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Session canvas: the entry point of one session (week) of a course.
+
+export interface SessionLinks {
+  /** The course skill tree, to go back up. */
+  courseCanvas: string;
+  /** Raw documents not fully integrated yet, still lying in the session folder. */
+  pending: string[];
+}
+
+const FICHE_W = 420;
+const FICHE_H = 300;
+const SOURCE_W = 300;
+const SOURCE_H = 220;
+
+/**
+ * One canvas per session, placed in the session folder: the session's study notes (outputs) as
+ * note previews, ordered by prerequisites, then its sources (inputs: transcriptions, slides,
+ * exercise sheets, notebooks). Positions, sizes and colours the user changed are kept, as well as
+ * anything added by hand.
+ */
+export function buildSessionCanvas(section: SectionNode, links: SessionLinks, previous?: CanvasData): CanvasData {
+  const nodes: CanvasNode[] = [];
+  const edges: CanvasEdge[] = [];
+  const fiches = section.children.filter((c) => c.resources.some((r) => r.role === "fiche"));
+  const sources = section.resources.filter((r) => r.role !== "dashboard" && r.role !== "fiche");
+
+  const header = [
+    `# ${section.title}`,
+    section.summary,
+    `↩ [[${links.courseCanvas}|Skill tree du cours]]`,
+    "**Suivi** — colore une fiche : 🟨 jaune = en cours · 🟩 vert = maîtrisée",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const headerW = 2 * FICHE_W + 60;
+  nodes.push({ id: `${OWN}session`, type: "text", x: 0, y: 0, width: headerW, height: estimateHeight(header, headerW), text: header, color: "6" });
+
+  // Outputs: one row per prerequisite level, side by side within a row.
+  const siblings = new Set(fiches.map((f) => f.id));
+  const lvl = levels(fiches.map((f) => ({ ...f, dependsOn: f.dependsOn.filter((d) => siblings.has(d)) })));
+  const rows = new Map<number, SectionNode[]>();
+  for (const f of fiches) {
+    const l = Math.max(0, lvl.get(f.id) ?? 0);
+    rows.set(l, [...(rows.get(l) ?? []), f]);
+  }
+  const gap = 60;
+  const widest = Math.max(1, ...[...rows.values()].map((r) => r.length));
+  const width = Math.max(headerW, widest * FICHE_W + (widest - 1) * gap);
+  const pad = 30;
+  let y = nodes[0].height + 80;
+  const groupTop = y;
+  y += pad + 30;
+  for (const l of [...rows.keys()].sort((a, b) => a - b)) {
+    const row = rows.get(l)!;
+    let x = Math.round((width - (row.length * FICHE_W + (row.length - 1) * gap)) / 2);
+    for (const f of row) {
+      const file = f.resources.find((r) => r.role === "fiche")!.path;
+      nodes.push({ id: `${OWN}f-${f.id}`, type: "file", file, x, y, width: FICHE_W, height: FICHE_H, color: STATUS_COLOR[f.status ?? "todo"] });
+      x += FICHE_W + gap;
+    }
+    y += FICHE_H + 80;
+  }
+  if (fiches.length) {
+    nodes.push({ id: `${OWN}g-fiches`, type: "group", x: -pad, y: groupTop, width: width + 2 * pad, height: y - groupTop - 80 + pad, label: "Fiches" });
+  }
+  // Direct prerequisites only (transitive reduction), so the tree stays readable.
+  const deps = new Map(fiches.map((f) => [f.id, f.dependsOn.filter((d) => siblings.has(d) && d !== f.id)]));
+  const reaches = (from: string, to: string, seen = new Set<string>()): boolean =>
+    (deps.get(from) ?? []).some((d) => d === to || (!seen.has(d) && (seen.add(d), reaches(d, to, seen))));
+  for (const [id, ds] of deps) {
+    for (const d of ds) {
+      if (ds.some((o) => o !== d && reaches(o, d))) continue;
+      edges.push(edge(`${OWN}e-${d}--${id}`, `${OWN}f-${d}`, `${OWN}f-${id}`));
+    }
+  }
+
+  // Inputs: what the notes were made from, archived in the session's sources folder.
+  if (sources.length || links.pending.length) {
+    const top = y + 40;
+    const perRow = Math.max(1, Math.floor((width + gap) / (SOURCE_W + gap)));
+    const items = [...sources].sort((a, b) => (a.role === "archive" ? -1 : b.role === "archive" ? 1 : a.label.localeCompare(b.label, "fr", { numeric: true })));
+    let i = 0;
+    let sy = top + pad + 30;
+    for (const r of items) {
+      const col = i % perRow;
+      if (i && col === 0) sy += SOURCE_H + 40;
+      nodes.push({ id: `${OWN}s-${r.path}`, type: "file", file: r.path, x: col * (SOURCE_W + gap), y: sy, width: SOURCE_W, height: SOURCE_H });
+      i++;
+    }
+    let bottom = items.length ? sy + SOURCE_H : top + pad + 30;
+    if (links.pending.length) {
+      const text = `### ⚠️ Pas encore intégré\nCes documents restent dans le dossier de la séance : leur contenu n'est pas entièrement dans les fiches.\n\n${links.pending.map((p) => `- [[${p}|${stem(p)}]]`).join("\n")}`;
+      const h = estimateHeight(text, CARD_W);
+      nodes.push({ id: `${OWN}pending`, type: "text", x: 0, y: bottom + 40, width: CARD_W, height: h, text, color: "1" });
+      bottom += 40 + h;
+    }
+    nodes.push({ id: `${OWN}g-sources`, type: "group", x: -pad, y: top, width: width + 2 * pad, height: bottom - top + pad, label: "Sources" });
+  }
+
+  return mergePrevious({ nodes, edges }, previous);
+}
+
+/** Keeps what the user changed on the previous canvas: positions, sizes, colours, own nodes and edges. */
+function mergePrevious(next: CanvasData, previous?: CanvasData): CanvasData {
+  if (!previous) return next;
+  const prev = new Map(previous.nodes.map((n) => [n.id, n]));
+  const nodes = next.nodes.map((n) => {
+    const p = prev.get(n.id);
+    return p ? { ...n, x: p.x, y: p.y, width: p.width, height: p.height, ...(p.color !== undefined ? { color: p.color } : {}) } : n;
+  });
+  const ids = new Set(nodes.map((n) => n.id));
+  for (const n of previous.nodes) if (!n.id.startsWith(OWN)) nodes.push(n), ids.add(n.id);
+  const edges = [...next.edges, ...previous.edges.filter((e) => !e.id.startsWith(OWN) && ids.has(e.fromNode) && ids.has(e.toNode))];
+  return { nodes, edges };
+}

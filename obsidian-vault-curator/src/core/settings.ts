@@ -67,8 +67,17 @@ export interface CuratorSettings {
   profile: string;
   /** House rules applied to every folder; editable. */
   guidelines: string;
-  /** Vault-level folder where synthesised raw material is archived (mirrors the course path). */
+  /** Vault-level archive of version 0.4/0.5 (sources now go to each session's own sources folder). */
   archiveRoot: string;
+  /**
+   * Layout of a course session: <session>/<fichesFolder>/ holds the study notes (outputs),
+   * <session>/<sourcesFolder>/ the raw documents once integrated (inputs), <session>/<session>.canvas
+   * the synthesis linking both.
+   */
+  fichesFolder: string;
+  sourcesFolder: string;
+  /** Language of the study notes: that of the course material ("auto"), or forced. */
+  ficheLanguage: "auto" | "fr" | "en";
   /** Model used to transcribe photos of boards and notebooks (the hardest reading). */
   transcriptionModel: string;
   /** Second pass that checks each photo transcription against the image. */
@@ -139,6 +148,9 @@ export const DEFAULT_SETTINGS: CuratorSettings = {
   profile: "Étudiant en master Data & Finance.",
   guidelines: DEFAULT_GUIDELINES,
   archiveRoot: "Archive",
+  fichesFolder: "Fiches",
+  sourcesFolder: "Sources",
+  ficheLanguage: "auto",
   transcriptionModel: "claude-opus-5-5",
   verifyTranscriptions: true,
   maxPdfPages: 80,
@@ -165,10 +177,15 @@ export function newSpace(settings: CuratorSettings, folder: string, vaultName: s
     mode,
     ...(mode === "learning" ? { level: level ?? guessLevel(instructions) } : {}),
     instructions,
-    canvas: join(folder, `${fill(settings.canvasName)}.canvas`),
+    canvas: mode === "learning" && (level ?? guessLevel(instructions)) === "course" ? courseCanvasPath(folder, name) : join(folder, `${fill(settings.canvasName)}.canvas`),
     index: join(folder, `${fill(settings.indexName)}.md`),
     addedAt: new Date().toISOString(),
   };
+}
+
+/** A course's skill tree comes first in its folder: it is where one starts. */
+export function courseCanvasPath(folder: string, name: string): string {
+  return join(folder, `00 Skill tree — ${name}.canvas`);
 }
 
 /** A learning folder described as holding several courses ("un sous-dossier par cours", "mes cours de master"…). */

@@ -100,8 +100,11 @@ function inventory(config: SpaceConfig, files: VaultFile[], folders: string[], s
   const nested = settings.spaces.filter((s) => s.folder !== folder && isInside(s.folder, folder));
   // Only the outermost nested spaces are listed as sub-spaces.
   const subspaces = nested.filter((s) => !nested.some((o) => o !== s && isInside(s.folder, o.folder)));
+  // In a course, each session's sources folder holds raw documents already integrated into notes.
+  const sources = config.mode === "learning" && settings.sourcesFolder ? settings.sourcesFolder : null;
   const excluded = (p: string) =>
     isInside(p, archive) ||
+    (sources !== null && relativeTo(p, folder).split("/").slice(0, -1).includes(sources)) ||
     isInside(p, settings.inboxFolder) ||
     isIgnored(p, settings) ||
     nested.some((s) => isInside(p, s.folder)) ||

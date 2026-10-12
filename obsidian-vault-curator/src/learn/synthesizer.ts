@@ -8,8 +8,9 @@
 //   6. check    — coverage: every element of every source must be in a note; missing ones are added
 //   7. apply    — notes written, sources moved to the archive with an archive document, skill tree updated
 import { Engine, Progress } from "../engine";
-import { basename, dirname, extname, hash, isInside, join, matchPath, relativeTo, sanitizePath, slugify, uniquePath } from "../core/paths";
+import { basename, dirname, extname, hash, isInside, join, matchPath, relativeTo, sanitizePath, sanitizeSegment, slugify, uniquePath } from "../core/paths";
 import { allSections } from "../core/plan";
+import { buildSessionCanvas, parseCanvas } from "../core/canvas";
 import { fileKind, isIgnored, SpaceInventory } from "../core/scan";
 import { mapPath } from "../core/settings";
 import { DocType, JournalEntry, JournalStep, Resource, SectionNode, SpaceMap, VaultFile } from "../core/types";
@@ -87,6 +88,8 @@ export interface SynthesisReport {
   kept: string[];
   /** Left in place because their content is not fully in the notes yet. */
   pending: string[];
+  /** Where each moved source went (old path → new path). */
+  moved: Record<string, string>;
   archiveDoc: string;
   canvas: string;
 }
@@ -485,7 +488,12 @@ export class Synthesizer {
       return isInside(clean, space.folder) ? clean : join(space.folder, clean);
     };
     const plan = job.plan;
-    plan.module.folder = inSpace(plan.module.folder || plan.module.title);
+    // A session folder ("02 Nearest Neighbors") stays the session: its notes go to <session>/Fiches,
+    // its sources to <session>/Sources, its canvas next to them.
+    const sessionFolder = job.lot.folder && job.lot.folder !== space.folder ? job.lot.folder : null;
+    plan.module.folder = sessionFolder ?? inSpace(plan.module.folder || plan.module.title);
+    plan.language = this.settings.ficheLanguage === "en" ? "English" : this.settings.ficheLanguage === "fr" ? "français" : plan.language || job.map?.language || "";
+    const fichesDir = this.fichesDir(plan.module.folder);
     const seen = new Set<string>();
     const existingIds = new Set(job.map ? allSections(job.map).map((s) => s.id) : []);
     for (const f of plan.fiches) {
@@ -493,9 +501,14 @@ export class Synthesizer {
       while (seen.has(id) || (f.action === "create" && existingIds.has(id))) id = `${id}-b`;
       seen.add(id);
       f.id = id;
-      f.path = inSpace(f.path || join(plan.module.folder, `${f.title}.md`));
-      if (extname(f.path) !== "md") f.path = `${f.path}.md`;
-      if (f.action === "extend" && !this.io.exists(f.path)) f.action = "create";
+      delete f.moveFrom;
+      if (f.action === "extend") {
+        f.path = inSpace(f.path || "");
+        if (extname(f.path) !== "md") f.path = `${f.path}.md`;
+        if (!this.io.exists(f.path)) f.action = "create";
+        // A note of this session written elsewhere (by an older version, at the session root) joins the notes folder.
+        else if (dirname(f.path) !== fichesDir && isInside(f.path, plan.module.folder)) f.moveFrom = f.path;
+      }
       f.outline = f.outline ?? [];
       f.sources = (f.sources ?? []).filter((x) => job.sources.some((s) => s.id === x.sourceId));
       // The photos of a note go with it: the note alone is only links.
@@ -517,6 +530,7 @@ export class Synthesizer {
       const disposition: Disposition = forcedKeep ? "keep" : src.embeddedIn ? "integrate" : (g?.disposition ?? "integrate");
       return { sourceId: src.id, role: g?.role ?? "", contributes: g?.contributes ?? "", disposition };
     });
+    this.numberFiches(plan, fichesDir);
     const used = new Set(plan.fiches.flatMap((f) => f.sources.map((x) => x.sourceId)));
     job.unassigned = job.sources.filter((s) => !used.has(s.id) && this.disposition(job, s.id) === "integrate").map((s) => s.id);
     plan.questions = plan.questions ?? [];
@@ -524,6 +538,37 @@ export class Synthesizer {
     plan.issues = plan.issues ?? [];
     plan.preferences = plan.preferences ?? [];
     return job;
+  }
+
+  fichesDir(sessionFolder: string) {
+    return join(sessionFolder, this.settings.fichesFolder);
+  }
+  sourcesDir(sessionFolder: string) {
+    return join(sessionFolder, this.settings.sourcesFolder);
+  }
+  sessionCanvas(sessionFolder: string) {
+    return join(sessionFolder, `${basename(sessionFolder) || "Séance"}.canvas`);
+  }
+
+  /**
+   * Notes are numbered in learning order inside the notes folder ("01 - Distances and norms.md"):
+   * notes already there keep their name, new ones (and moved ones) follow.
+   */
+  private numberFiches(plan: SynthesisPlan, fichesDir: string) {
+    const staying = new Set(plan.fiches.filter((f) => f.action === "extend" && !f.moveFrom).map((f) => f.path));
+    const numberOf = (p: string) => Number(/^(\d+)/.exec(basename(p))?.[1] ?? 0);
+    const present = this.io.listFiles().filter((f) => dirname(f.path) === fichesDir && extname(f.path) === "md");
+    let n = Math.max(0, ...present.map((f) => numberOf(f.path)));
+    const taken = new Set(present.map((f) => f.path));
+    for (const f of plan.fiches) {
+      if (staying.has(f.path)) continue;
+      const title = sanitizeSegment(f.title.replace(/^\s*\d+\s*[-–.)]\s*/, "")).replace(/[\\/]/g, "-") || f.id;
+      let path: string;
+      do path = join(fichesDir, `${String(++n).padStart(2, "0")} - ${title}.md`);
+      while (taken.has(path));
+      taken.add(path);
+      f.path = path;
+    }
   }
 
   disposition(job: SynthesisJob, sourceId: string): Disposition {
@@ -570,16 +615,19 @@ export class Synthesizer {
 
   /** Where the lot's sources and its archive document will live. */
   archiveLayout(job: SynthesisJob) {
-    const dir = join(this.settings.archiveRoot, job.plan.module.folder);
+    const dir = this.sourcesDir(job.plan.module.folder);
     const taken = new Set<string>();
     const target = new Map<string, string>();
     for (const s of job.sources) {
-      const p = uniquePath(join(dir, basename(s.path)), (x) => taken.has(x) || this.io.exists(x));
+      // Notebooks and their data keep their relative layout, so the notebook still finds its files.
+      const keepTree = (s.kind === "notebook" || s.kind === "data") && job.lot.folder && isInside(s.path, job.lot.folder);
+      const rel = keepTree ? relativeTo(s.path, job.lot.folder!) : basename(s.path);
+      const p = uniquePath(join(dir, rel), (x) => taken.has(x) || (this.io.exists(x) && x !== s.path));
       taken.add(p);
       target.set(s.id, p);
     }
-    const doc = uniquePath(join(dir, `${sanitizePath(job.plan.session || job.lot.name)} — Sources.md`), (x) => this.io.exists(x));
-    return { dir, target, doc };
+    const doc = uniquePath(join(dir, `Transcriptions — ${sanitizeSegment(job.plan.session || job.lot.name).replace(/[\\/]/g, "-")}.md`), (x) => this.io.exists(x));
+    return { dir, target, doc, canvas: this.sessionCanvas(job.plan.module.folder) };
   }
 
   async write(job: SynthesisJob, progress: Progress, signal?: AbortSignal, comments = new Map<string, string>()): Promise<SynthesisJob> {
@@ -620,13 +668,13 @@ export class Synthesizer {
   }
 
   private async writeOne(job: SynthesisJob, fiche: FichePlan, layout: ReturnType<Synthesizer["archiveLayout"]>, comment: string, signal?: AbortSignal): Promise<WrittenFiche> {
-    const before = fiche.action === "extend" ? await this.io.read(fiche.path) : null;
+    const before = fiche.action === "extend" ? await this.io.read(fiche.moveFrom ?? fiche.path) : null;
     const used = job.sources.filter((s) => fiche.sources.some((x) => x.sourceId === s.id));
     const others = [
       ...job.plan.fiches.filter((f) => f.id !== fiche.id).map((f) => ({ title: f.title, path: f.path })),
       ...(job.map ? allSections(job.map).flatMap((s) => s.resources.filter((r) => r.role === "fiche").map((r) => ({ title: r.label, path: r.path }))) : []),
     ];
-    const links = [{ path: layout.doc, title: `Sources de la séance (${job.plan.session || job.lot.name})` }, ...used.map((s) => ({ path: this.disposition(job, s.id) === "keep" ? s.path : layout.target.get(s.id)!, title: basename(s.path) }))];
+    const links = [{ path: layout.doc, title: `Sources de la séance (${job.plan.session || job.lot.name})` }, ...used.filter((s) => s.kind !== "image").map((s) => ({ path: this.finalPath(job, layout, s), title: basename(s.path) }))];
     const frontmatter = [
       "curator: fiche",
       `cours: "${job.course.course.replace(/"/g, "'")}"`,
@@ -637,7 +685,7 @@ export class Synthesizer {
     const answer = await this.engine.backend().complete<WriteAnswer>({
       label: `rédaction de « ${fiche.title} »`,
       system: writeSystem(this.settings),
-      prompt: writePrompt(fiche, frontmatter, before, used, job.extracts, others, links, comment),
+      prompt: writePrompt(fiche, frontmatter, before, used, job.extracts, others, links, comment, job.plan.language),
       schema: WRITE_SCHEMA,
       model: this.settings.planModel,
       effort: "high",
@@ -750,14 +798,19 @@ export class Synthesizer {
       steps: [],
       mapsBefore: { [space.folder]: job.map },
     };
-    const report: SynthesisReport = { fiches: [], archived: [], kept: [], pending: [], archiveDoc: "", canvas: space.generated.canvas };
+    const report: SynthesisReport = { fiches: [], archived: [], kept: [], pending: [], archiveDoc: "", canvas: space.generated.canvas, moved: {} };
     const steps: JournalStep[] = entry.steps;
     const coveredIds = new Set(job.coverage.filter((c) => c.covered && !c.kept && c.sourceId.startsWith("S")).map((c) => c.sourceId));
+    const move = async (from: string, to: string) => {
+      await this.engine.mkdirp(dirname(to), steps);
+      await this.io.move(from, to);
+      steps.push({ type: "move", from, to });
+    };
 
     await this.engine.asPlugin(async () => {
       try {
-        // Notes.
-        if (job.written.length) await this.engine.mkdirp(job.plan.module.folder, steps);
+        // Outputs: the notes, in <session>/Fiches.
+        if (job.written.length) await this.engine.mkdirp(this.fichesDir(job.plan.module.folder), steps);
         for (const [i, w] of job.written.entries()) {
           progress("Écriture des fiches…", i, job.written.length);
           if (w.before === null) {
@@ -765,60 +818,72 @@ export class Synthesizer {
             w.plan.path = path;
             await this.engine.writeTracked(path, w.content, steps);
           } else {
-            const current = await this.io.read(w.plan.path);
-            if (current !== w.before) throw new Error(`« ${w.plan.path} » a changé depuis la préparation : relance la synthèse.`);
+            const from = w.plan.moveFrom ?? w.plan.path;
+            const current = await this.io.read(from);
+            if (current !== w.before) throw new Error(`« ${from} » a changé depuis la préparation : relance la synthèse.`);
+            if (w.plan.moveFrom) {
+              w.plan.path = uniquePath(w.plan.path, (p) => this.io.exists(p));
+              await move(from, w.plan.path);
+            }
             await this.engine.writeTracked(w.plan.path, w.content, steps);
           }
           report.fiches.push(w.plan.path);
         }
 
-        // Archive document, then the raw sources it describes.
+        // Inputs: the transcriptions document, then the raw documents, in <session>/Sources.
         if (coveredIds.size) {
           await this.engine.writeTracked(layout.doc, this.archiveDocument(job, layout, coveredIds), steps);
           report.archiveDoc = layout.doc;
         }
-        for (const s of job.sources) {
-          if (!coveredIds.has(s.id) || !this.io.exists(s.path)) {
-            (this.disposition(job, s.id) === "keep" ? report.kept : report.pending).push(s.path);
+        for (const src of job.sources) {
+          const keep = this.disposition(job, src.id) === "keep";
+          if (!this.io.exists(src.path) || (!keep && !coveredIds.has(src.id))) {
+            (keep ? report.kept : report.pending).push(src.path);
             continue;
           }
-          const to = layout.target.get(s.id)!;
-          await this.engine.mkdirp(dirname(to), steps);
-          await this.io.move(s.path, to);
-          steps.push({ type: "move", from: s.path, to });
-          report.archived.push(s.path);
+          const to = this.finalPath(job, layout, src);
+          if (to !== src.path) {
+            await move(src.path, to);
+            report.moved[src.path] = to;
+          }
+          (keep ? report.kept : report.archived).push(src.path);
         }
 
-        // The lot's folder, if it was a managed folder of its own (v0.2/0.3), goes too once empty.
+        // What an older version generated for this folder (its own dashboard, index and map) is retired.
         if (job.lot.folder && job.lot.folder !== space.folder) {
           const nested = this.settings.spaces.find((x) => x.folder === job.lot.folder);
-          if (nested && report.pending.length === 0 && report.kept.every((p) => !isInside(p, nested.folder))) {
+          if (nested) {
             for (const p of [nested.canvas, nested.index, mapPath(nested.folder)]) {
-              if (!this.io.exists(p)) continue;
-              const to = uniquePath(join(layout.dir, `ancien ${basename(p)}`), (x) => this.io.exists(x));
-              await this.engine.mkdirp(dirname(to), steps);
-              await this.io.move(p, to);
-              steps.push({ type: "move", from: p, to });
+              if (!this.io.exists(p) || p === layout.canvas) continue;
+              await move(p, uniquePath(join(layout.dir, "Anciens tableaux de bord", basename(p)), (x) => this.io.exists(x)));
             }
             this.settings.spaces = this.settings.spaces.filter((x) => x !== nested);
           }
         }
         await this.engine.removeEmptied(
-          report.archived.map((p, index) => ({ kind: "move", source: p, target: null, content: null, reason: "", index, error: null })),
+          Object.keys(report.moved).map((p, index) => ({ kind: "move", source: p, target: null, content: null, reason: "", index, error: null })),
           space.folder,
           steps,
         );
 
-        // Skill tree.
+        // Course skill tree, then the session canvas.
         const map = this.updateMap(job, layout, report);
         const live = this.engine.space(space.folder) ?? space;
         await this.engine.writeTracked(live.generated.map, JSON.stringify(map, null, 2), steps);
         await this.engine.renderDashboards(live, map, { keepLayout: true }, steps);
+        const section = map.sections.find((x) => x.resources.some((r) => r.path === layout.canvas));
+        if (section) {
+          const previous = this.io.exists(layout.canvas) ? parseCanvas(await this.io.read(layout.canvas)) : null;
+          const pending = report.pending.filter((p) => isInside(p, job.plan.module.folder));
+          const canvas = buildSessionCanvas(section, { courseCanvas: live.generated.canvas, pending }, previous ?? undefined);
+          await this.engine.writeTracked(layout.canvas, JSON.stringify(canvas, null, "\t"), steps);
+          report.canvas = layout.canvas;
+        }
 
         // Ledger: the notes are known; so are the lot's documents left in place (not proposed again
         // until they change). Other raw documents of the course stay "new" until they are synthesised.
         const ledger = this.engine.data.ledger;
-        const done = new Set([...report.fiches, ...report.kept, ...report.pending]);
+        const done = new Set([...report.fiches, ...report.kept.map((p) => report.moved[p] ?? p), ...report.pending]);
         for (const f of this.engine.space(space.folder)?.files ?? []) {
           if (done.has(f.path)) ledger[f.path] = { ...(ledger[f.path] ?? {}), fp: `${f.size}:${Math.round(f.mtime)}`, known: true };
         }
@@ -827,6 +892,17 @@ export class Synthesizer {
       }
     });
     return report;
+  }
+
+  /**
+   * Where a source ends up: integrated documents go to the session's sources folder; documents kept
+   * on purpose too when they belong to the session folder (a course-wide syllabus stays where it is).
+   */
+  private finalPath(job: SynthesisJob, layout: ReturnType<Synthesizer["archiveLayout"]>, src: Source): string {
+    if (isInside(src.path, layout.dir)) return src.path;
+    const keep = this.disposition(job, src.id) === "keep";
+    if (keep && !(job.lot.folder && job.lot.folder !== job.lot.space.folder && isInside(src.path, job.lot.folder))) return src.path;
+    return layout.target.get(src.id)!;
   }
 
   private archiveDocument(job: SynthesisJob, layout: ReturnType<Synthesizer["archiveLayout"]>, covered: Set<string>): string {
@@ -889,7 +965,8 @@ export class Synthesizer {
 
     // Raw documents now archived disappear from the map: the notes replace them. Sections left
     // empty (file groupings made by an older version) go too.
-    const archived = new Set(report.archived);
+    if (job.plan.language) map.language = job.plan.language;
+    const archived = new Set([...report.archived, ...Object.keys(report.moved)]);
     const strip = (rs: Resource[]) => rs.filter((r) => !archived.has(r.path));
     for (const s of allSections(map)) s.resources = strip(s.resources);
     map.transverse = strip(map.transverse);
@@ -899,15 +976,17 @@ export class Synthesizer {
     const m = job.plan.module;
     if (!job.written.length) {
       // Nothing to learn from here (syllabus, textbooks…): course-wide references.
-      for (const path of report.kept) {
+      for (const old of report.kept) {
+        const path = report.moved[old] ?? old;
         if (map.transverse.some((r) => r.path === path) || allSections(map).some((s) => s.resources.some((r) => r.path === path))) continue;
-        const src = job.sources.find((s) => s.path === path)!;
+        const src = job.sources.find((s) => s.path === old)!;
         map.transverse.push({ path, role: keptRole(src, job.plan.sources.find((x) => x.sourceId === src.id)?.role ?? ""), label: basename(path).replace(/\.[^.]+$/, "") });
       }
       map.updatedAt = new Date().toISOString();
       return map;
     }
-    let section = map.sections.find((s) => s.id === m.id) ?? (m.mode === "existing" ? map.sections.find((s) => s.title === m.title) : undefined);
+    let section =
+      map.sections.find((s) => s.id === m.id) ?? map.sections.find((s) => s.folder === m.folder) ?? (m.mode === "existing" ? map.sections.find((s) => s.title === m.title) : undefined);
     if (!section) {
       section = { id: slugify(m.id || m.title) || `module-${map.sections.length + 1}`, title: m.title, summary: m.summary, keywords: [], dependsOn: [], folder: m.folder, resources: [], children: [] };
       map.sections.push(section);
@@ -916,11 +995,15 @@ export class Synthesizer {
     section.summary = section.summary || m.summary;
     const sectionIds = new Set(map.sections.map((s) => s.id));
     section.dependsOn = [...new Set([...section.dependsOn, ...m.dependsOn.filter((d) => sectionIds.has(d) && d !== section!.id)])];
-    if (report.archiveDoc && !section.resources.some((r) => r.path === layout.doc)) section.resources.push({ path: layout.doc, role: "archive", label: `Sources — ${job.plan.session || job.lot.name}` });
-    // Documents kept on purpose stay reachable from the skill tree.
-    for (const path of report.kept) {
+    if (!section.resources.some((r) => r.path === layout.canvas)) section.resources.unshift({ path: layout.canvas, role: "dashboard", label: `Synthèse — ${section.title}` });
+    if (report.archiveDoc && !section.resources.some((r) => r.path === layout.doc)) section.resources.push({ path: layout.doc, role: "archive", label: `Transcriptions — ${job.plan.session || job.lot.name}` });
+    // The session's inputs stay reachable from its canvas: documents kept on purpose, and the archived
+    // slides, sheets and notes (photos are in the transcriptions document).
+    for (const old of [...report.kept, ...report.archived]) {
+      const src = job.sources.find((s) => s.path === old)!;
+      if (src.kind === "image") continue;
+      const path = report.moved[old] ?? old;
       if (allSections(map).some((s) => s.resources.some((r) => r.path === path)) || map.transverse.some((r) => r.path === path)) continue;
-      const src = job.sources.find((s) => s.path === path)!;
       section.resources.push({ path, role: keptRole(src, job.plan.sources.find((x) => x.sourceId === src.id)?.role ?? ""), label: basename(path).replace(/\.[^.]+$/, "") });
     }
 

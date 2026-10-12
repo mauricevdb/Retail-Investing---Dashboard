@@ -5,7 +5,8 @@ function context(settings: CuratorSettings): string {
   return `Tu fais partie de Vault Curator, un plug-in Obsidian qui transforme les documents bruts d'un cours (slides, feuilles d'exercices,
 photos du tableau et du cahier, notes tapées) en fiches de révision structurées, reliées par un skill tree.
 À propos de l'utilisateur : ${settings.profile || "(non renseigné)"}
-Le contenu est majoritairement en français ; écris en français. Mathématiques en LaTeX ($...$ en ligne, $$...$$ en bloc).`;
+Langue : les fiches suivent la langue du cours (celle des slides et du professeur) ; les échanges avec l'utilisateur (plan, questions,
+remarques) sont en français. Mathématiques en LaTeX ($...$ en ligne, $$...$$ en bloc).`;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,9 +95,14 @@ avant la rédaction. Procède ainsi :
    Les photos insérées dans une note (marquées « ⟨photo transcrite : voir Sx⟩ ») sont des sources à part entière : leur transcription est
    le vrai contenu de la note ; elles vont avec la note dans les mêmes fiches.
    S'il n'y a rien à apprendre dans le lot (que des références), fiches peut être vide.
-5. Module. La séance rejoint un module existant du cours (mode existing, même id) ou en ouvre un nouveau (mode new). folder : dossier du module
-   dans le cours, nommé selon les conventions existantes (sinon « NN Titre », numéroté dans l'ordre du cours). Les fiches vont dans ce dossier,
-   nommées « N - Titre.md » dans l'ordre d'apprentissage (ou selon les conventions existantes du cours).
+5. Module. La séance rejoint un module existant du cours (mode existing, même id) ou en ouvre un nouveau (mode new). Organisation d'une séance :
+   <séance>/Fiches (les fiches, numérotées « 01 - Titre » par le plug-in dans l'ordre où tu les donnes), <séance>/Sources (les documents
+   bruts une fois intégrés, avec leurs transcriptions) et <séance>/<séance>.canvas (la synthèse). Quand les documents viennent d'un dossier
+   de séance, ce dossier est gardé tel quel. Sinon folder : dossier de la séance dans le cours, nommé selon les conventions existantes
+   (sinon « NN Titre », numéroté dans l'ordre du cours). Donne les fiches dans l'ordre d'apprentissage, exercices corrigés en dernier.
+7. Langue (language) : celle des documents du cours (slides, poly, énoncés), par exemple « English ». Les titres et le corps des fiches
+   sont dans cette langue ; seules les explications ajoutées et remarques personnelles peuvent être en français. Le reste du plan
+   (summary, contributes, questions, issues) est en français.
 6. id des fiches : courts, stables, en minuscules avec tirets (« knn-principe »). Les prérequis vers des fiches existantes utilisent leurs ids
    tels que donnés dans la carte du cours.
 questions : ce qui changerait la structure et que tu ne peux pas trancher (avec ton hypothèse). summary : 2 à 4 phrases sur la séance et le plan.
@@ -175,6 +181,9 @@ Ta tâche ici : rédiger UNE fiche de révision à partir du contenu intégral d
 - Fidèle : si des sources se contredisent, dis-le dans un encadré > [!warning] ; garde [?] sur les passages incertains.
 - Obsidian : liens vers les autres fiches avec [[chemin|titre]] (liste fournie) ; pas d'image intégrée ; pas de lien après chaque phrase :
   les sources sont listées une fois, dans la section « Sources », avec les liens fournis.
+- Langue : le titre et le corps de la fiche (définitions, énoncés, théorèmes, méthode, exemples) sont dans la langue du cours indiquée ;
+  les explications que tu ajoutes et les remarques de l'étudiant peuvent rester en français (encadrés > [!note] par exemple). Ne traduis
+  pas les notes personnelles de l'étudiant : cite-les telles quelles.
 - Garde exactement le frontmatter fourni en tête du fichier.
 Si la fiche existe déjà (extension), réorganise-la librement pour intégrer le nouveau contenu, mais tout son contenu actuel doit rester présent.
 content : la fiche complète en Markdown. summary : une phrase sur ce qu'elle couvre.
@@ -192,9 +201,10 @@ export function writePrompt(
   others: { title: string; path: string }[],
   sourceLinks: { path: string; title: string }[],
   comment: string,
+  language = "",
 ): string {
   return [
-    `# Fiche à rédiger : ${fiche.title}\nChemin : ${fiche.path}\nObjectif : ${fiche.objective}`,
+    `# Fiche à rédiger : ${fiche.title}\nChemin : ${fiche.path}\nObjectif : ${fiche.objective}${language ? `\nLangue du cours (titre et corps de la fiche) : ${language}` : ""}`,
     `## Plan validé\n${fiche.outline.map((o, i) => `${i + 1}. ${o}`).join("\n")}`,
     `## Ce que chaque source apporte\n${fiche.sources.map((s) => `- ${s.sourceId} : ${s.what}`).join("\n")}`,
     `## Frontmatter à reprendre tel quel\n\`\`\`yaml\n${frontmatter}\n\`\`\``,

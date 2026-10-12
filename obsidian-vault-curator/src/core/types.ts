@@ -97,6 +97,8 @@ export interface SpaceMap {
   sections: SectionNode[];
   /** Folder-wide resources (syllabus, contacts, templates…). */
   transverse: Resource[];
+  /** Learning folders: language of the course material, used for the body of the study notes ("English"…). */
+  language?: string;
   /** Existing dashboards kept next to the generated one. */
   keptDashboards: string[];
   updatedAt: string;

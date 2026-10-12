@@ -10,6 +10,7 @@ import { Synthesizer } from "../src/learn/synthesizer";
 import { SynthesisPlan } from "../src/learn/types";
 import { LlmBackend, LlmRequest } from "../src/llm/types";
 import { NodeIO } from "./nodeIO";
+import { dirname } from "../src/core/paths";
 
 class FakeLlm implements LlmBackend {
   readonly name = "fake";
@@ -44,6 +45,7 @@ beforeEach(() => {
 
 const plan: SynthesisPlan = {
   session: "Semaine 2 — k-NN",
+  language: "English",
   summary: "Séance sur les k plus proches voisins.",
   sources: [
     { sourceId: "S1", role: "tableau", contributes: "règle de décision", disposition: "integrate" },
@@ -85,7 +87,7 @@ function setup(coverageMissing = true) {
       if (coverageMissing && coverageRound === 1) {
         return {
           sources: [
-            { sourceId: "S1", covered: false, missing: [{ item: "formule DW", fiche: "ML/02 k-NN/1 - Principe du k-NN.md" }] },
+            { sourceId: "S1", covered: false, missing: [{ item: "formule DW", fiche: "ML/Semaine 2/Fiches/01 - Principe du k-NN.md" }] },
             { sourceId: "S2", covered: true, missing: [] },
           ],
         };
@@ -118,8 +120,9 @@ describe("Synthesizer", () => {
     expect(planCall.prompt).toContain("question : pourquoi k impair ?");
     expect(planCall.prompt).toContain("ML/01 Régression/Fiche régression.md");
     // Paths are made safe; the .docx (not readable) is kept in place, never archived.
-    expect(job.plan.fiches[0].path).toBe("ML/02 k-NN/1 - Principe du k-NN.md");
-    expect(job.plan.module.folder).toBe("ML/02 k-NN");
+    // The session folder is kept; notes are numbered in its notes folder.
+    expect(job.plan.fiches[0].path).toBe("ML/Semaine 2/Fiches/01 - Principe du k-NN.md");
+    expect(job.plan.module.folder).toBe("ML/Semaine 2");
     expect(job.unassigned).toEqual([]);
     expect(syn.disposition(job, job.sources.find((s) => s.path.endsWith(".docx"))!.id)).toBe("keep");
 
@@ -139,32 +142,42 @@ describe("Synthesizer", () => {
     expect(job.coverage.find((c) => c.path.endsWith(".docx"))).toMatchObject({ kept: true });
 
     const report = await syn.apply(job, () => undefined);
-    expect(report.fiches).toEqual(["ML/02 k-NN/1 - Principe du k-NN.md"]);
+    expect(report.fiches).toEqual(["ML/Semaine 2/Fiches/01 - Principe du k-NN.md"]);
     expect(report.archived.sort()).toEqual(["ML/Semaine 2/IMG_1.jpg", "ML/Semaine 2/notes.md"]);
     expect(report.kept).toEqual(["ML/Semaine 2/slides.docx"]);
     expect(report.pending).toEqual([]);
-    expect(io.exists("Archive/ML/02 k-NN/IMG_1.jpg")).toBe(true);
+    // Inputs in the session's sources folder, the unreadable .docx with them.
+    expect(io.exists("ML/Semaine 2/Sources/IMG_1.jpg")).toBe(true);
+    expect(io.exists("ML/Semaine 2/Sources/slides.docx")).toBe(true);
+    expect(report.archiveDoc).toBe("ML/Semaine 2/Sources/Transcriptions — Semaine 2 — k-NN.md");
     const archive = await io.read(report.archiveDoc);
-    expect(archive).toContain("![[Archive/ML/02 k-NN/IMG_1.jpg]]");
+    expect(archive).toContain("![[ML/Semaine 2/Sources/IMG_1.jpg]]");
     expect(archive).toContain("$DW \\approx 2(1-\\rho)$");
     expect(archive).toContain("Gardé en place");
 
     const map = JSON.parse(await io.read("ML/_curator.json")) as SpaceMap;
     const module = map.sections.find((s) => s.id === "knn")!;
     expect(module.children.map((c) => c.id)).toEqual(["knn-principe"]);
-    expect(module.children[0].resources[0]).toMatchObject({ path: "ML/02 k-NN/1 - Principe du k-NN.md", role: "fiche" });
+    expect(module.children[0].resources[0]).toMatchObject({ path: "ML/Semaine 2/Fiches/01 - Principe du k-NN.md", role: "fiche" });
     expect(module.resources.some((r) => r.role === "archive")).toBe(true);
+    expect(module.resources[0]).toMatchObject({ path: "ML/Semaine 2/Semaine 2.canvas", role: "dashboard" });
+    expect(engine.space("ML")!.generated.canvas).toBe("ML/00 Skill tree — ML.canvas");
     expect(parseCanvas(await io.read(engine.space("ML")!.generated.canvas))!.nodes.some((n) => n.id === "cc-m-knn-principe")).toBe(true);
+    // The session canvas: the notes (outputs) then the sources (inputs), and a way back to the course.
+    const session = parseCanvas(await io.read("ML/Semaine 2/Semaine 2.canvas"))!;
+    expect(session.nodes.find((n) => n.id === "cc-f-knn-principe")).toMatchObject({ type: "file", file: "ML/Semaine 2/Fiches/01 - Principe du k-NN.md" });
+    expect(session.nodes.some((n) => n.type === "file" && n.file === report.archiveDoc)).toBe(true);
+    expect(session.nodes.find((n) => n.id === "cc-session")!.text).toContain("[[ML/00 Skill tree — ML.canvas|Skill tree du cours]]");
 
     // The new note is known; untouched raw material elsewhere in the course is still new.
     const fresh = engine.newFiles(engine.space("ML")!).map((f) => f.path);
-    expect(fresh).not.toContain("ML/02 k-NN/1 - Principe du k-NN.md");
+    expect(fresh).not.toContain("ML/Semaine 2/Fiches/01 - Principe du k-NN.md");
     expect(fresh).toContain("ML/01 Régression/Fiche régression.md");
 
     // Undo puts everything back.
     await engine.undoLast();
     expect(io.exists("ML/Semaine 2/IMG_1.jpg")).toBe(true);
-    expect(io.exists("ML/02 k-NN/1 - Principe du k-NN.md")).toBe(false);
+    expect(io.exists("ML/Semaine 2/Fiches/01 - Principe du k-NN.md")).toBe(false);
   });
 
   it("keeps corrected transcriptions and never re-reads them", async () => {
@@ -194,6 +207,40 @@ describe("Synthesizer", () => {
     expect(engine.space("ML")!.files.some((f) => f.path.startsWith("ML/Semaine 2/"))).toBe(false);
     const lot = await syn.lotFromFolder(engine.space("ML")!, "ML/Semaine 2");
     expect(lot.files.map((f) => f.path).sort()).toEqual(["ML/Semaine 2/IMG_1.jpg", "ML/Semaine 2/notes.md", "ML/Semaine 2/slides.docx"]);
+  });
+});
+
+describe("Session layout", () => {
+  it("moves a note an older version wrote at the session root into the notes folder, in learning order", async () => {
+    write("ML/Semaine 2/1 - Distances.md", "---\ncurator: fiche\n---\n# Distances\nNorme L2.");
+    const twoFiches: SynthesisPlan = {
+      ...plan,
+      fiches: [
+        { ...plan.fiches[0], id: "distances", title: "Distances and norms", path: "ML/Semaine 2/1 - Distances.md", action: "extend", sources: [{ sourceId: "S2", what: "notes" }] },
+        { ...plan.fiches[0], title: "2 - k-NN principle", dependsOn: ["distances"] },
+      ],
+    };
+    const llm = new FakeLlm((req) => {
+      if (req.label.startsWith("transcription")) return { description: "", transcript: "t", uncertain: [] };
+      if (req.label.startsWith("vérification")) return { transcript: "t", corrections: [], uncertain: [] };
+      if (req.label.startsWith("plan de synthèse")) return twoFiches;
+      if (req.label.startsWith("rédaction")) return { content: `# ${req.label}\nNorme L2.`, summary: "" };
+      if (req.label.startsWith("contrôle")) return { sources: [] };
+      throw new Error(req.label);
+    });
+    const engine = new Engine(io, () => llm, { data, save: async () => undefined }, "Vault");
+    const syn = new Synthesizer(engine);
+    await engine.addSpace("ML", "", "learning");
+    let job = await syn.plan(await syn.lotFromFolder(engine.space("ML")!, "ML/Semaine 2"), () => undefined);
+    expect(job.plan.fiches.map((f) => f.path)).toEqual(["ML/Semaine 2/Fiches/01 - Distances and norms.md", "ML/Semaine 2/Fiches/02 - k-NN principle.md"]);
+    expect(job.plan.fiches[0].moveFrom).toBe("ML/Semaine 2/1 - Distances.md");
+    job = await syn.write(job, () => undefined);
+    expect(job.written[0].before).toContain("Norme L2.");
+    await syn.apply(job, () => undefined);
+    expect(io.exists("ML/Semaine 2/1 - Distances.md")).toBe(false);
+    expect(await io.read("ML/Semaine 2/Fiches/01 - Distances and norms.md")).toContain("rédaction");
+    const session = parseCanvas(await io.read("ML/Semaine 2/Semaine 2.canvas"))!;
+    expect(session.edges.map((e) => e.id)).toEqual(["cc-e-distances--knn-principe"]);
   });
 });
 
@@ -255,6 +302,8 @@ describe("Synthesizer on the layout of a real master's vault", () => {
     const { llm, engine, syn } = realSetup();
     await engine.addSpace("DDDF", "Dossier contenant mes cours de master. Un sous-dossier par cours.", "learning");
     await engine.addSpace(week, "Cours 2, k-NN", "learning");
+    const oldCanvas = data.settings.spaces.find((s) => s.folder === week)!.canvas;
+    write(oldCanvas, '{"nodes":[],"edges":[]}');
     expect(data.settings.spaces[0].level).toBe("programme");
 
     expect(await syn.courseFor("DDDF/À faire.md")).toBeNull();
@@ -283,7 +332,7 @@ describe("Synthesizer on the layout of a real master's vault", () => {
     expect(planCall.prompt).toContain("(pour l'ensemble des cours) Dossier contenant mes cours de master.");
     // The photos follow their note into the fiche; the notebook and the data stay in place.
     expect(job.plan.fiches[0].sources.map((x) => x.sourceId)).toEqual(expect.arrayContaining(photos.map((p) => p.id)));
-    expect(job.plan.fiches[0].path).toBe("DDDF/Machine Learning I/02 k-NN/1 - Principe du k-NN.md");
+    expect(job.plan.fiches[0].path).toBe(`${week}/Fiches/01 - Principe du k-NN.md`);
     const nb = job.sources.find((s) => s.kind === "notebook")!;
     expect(syn.disposition(job, nb.id)).toBe("keep");
     expect(job.unassigned).toEqual([]);
@@ -292,12 +341,22 @@ describe("Synthesizer on the layout of a real master's vault", () => {
     const report = await syn.apply(job, () => undefined);
     expect(report.archived.sort()).toEqual(["Attachments/IMG_20261012_123151.jpg", "Attachments/IMG_20261012_123205.jpg", `${week}/99 Archive/Photos CM.md`, `${week}/CM - Prise de notes.md`]);
     expect(report.kept.sort()).toEqual([`${week}/02 PC/Lab2_KNN.ipynb`, `${week}/02 PC/data.csv`]);
-    expect(io.exists("Archive/DDDF/Machine Learning I/02 k-NN/IMG_20261012_123151.jpg")).toBe(true);
+    expect(io.exists(`${week}/Sources/IMG_20261012_123151.jpg`)).toBe(true);
+    // The notebook and its data move together, so its relative paths still work.
+    expect(report.moved[`${week}/02 PC/Lab2_KNN.ipynb`]).toBe(`${week}/Sources/02 PC/Lab2_KNN.ipynb`);
+    expect(report.moved[`${week}/02 PC/data.csv`]).toBe(`${week}/Sources/02 PC/data.csv`);
+    // What the older version generated for the week is retired; emptied folders go.
+    expect(io.exists(`${week}/Sources/Anciens tableaux de bord/${oldCanvas.split("/").pop()}`)).toBe(true);
+    expect(data.settings.spaces.some((s) => s.folder === week)).toBe(false);
+    expect(io.exists(`${week}/02 PC`)).toBe(false);
+    expect(io.exists(`${week}/99 Archive`)).toBe(false);
+    expect(io.listFiles().filter((f) => dirname(f.path) === week).map((f) => f.path)).toEqual([`${week}/02 Nearest Neighbors.canvas`]);
     // The skill tree is the course's, not the whole master's; the notebook is reachable from it.
     expect(io.exists("DDDF/_curator.json")).toBe(false);
     const map = JSON.parse(await io.read("DDDF/Machine Learning I/_curator.json")) as SpaceMap;
     const module = map.sections.find((s) => s.id === "knn")!;
-    expect(module.resources.find((r) => r.path.endsWith("Lab2_KNN.ipynb"))).toMatchObject({ role: "code" });
+    expect(module.resources.find((r) => r.path.endsWith("Lab2_KNN.ipynb"))).toMatchObject({ role: "code", path: `${week}/Sources/02 PC/Lab2_KNN.ipynb` });
+    expect(map.language).toBe("English");
   });
 
   it("archives a note of photos only with all its photos", async () => {

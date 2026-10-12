@@ -13,6 +13,7 @@ export const PDF_SCHEMA = obj({ text: str, uncertain: strs });
 
 export const PLAN_SCHEMA = obj({
   session: str,
+  language: str,
   summary: str,
   sources: arr(obj({ sourceId: str, role: str, contributes: str, disposition: { type: "string", enum: ["integrate", "keep"] } })),
   issues: strs,

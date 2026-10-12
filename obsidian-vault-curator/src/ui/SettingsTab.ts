@@ -148,7 +148,19 @@ export class CuratorSettingTab extends PluginSettingTab {
     numberSetting(containerEl, "Pages lues par PDF", "Texte extrait localement pour identifier un PDF.", s.pdfPages, async (v) => ((s.pdfPages = v), save()));
 
     new Setting(containerEl).setName("Synthèse des cours (dossiers en mode apprentissage)").setHeading();
-    textSetting(containerEl, "Dossier d'archive", "Où vont les documents bruts une fois entièrement transcrits et intégrés aux fiches (le chemin du cours y est reproduit).", s.archiveRoot, async (v) => ((s.archiveRoot = v || "Archive"), save()));
+    textSetting(containerEl, "Dossier des fiches", "Dans chaque séance : les fiches générées (sorties).", s.fichesFolder, async (v) => ((s.fichesFolder = v || "Fiches"), save()));
+    textSetting(containerEl, "Dossier des sources", "Dans chaque séance : les documents bruts une fois intégrés (entrées), avec leurs transcriptions.", s.sourcesFolder, async (v) => ((s.sourcesFolder = v || "Sources"), save()));
+    new Setting(containerEl)
+      .setName("Langue des fiches")
+      .setDesc("Automatique : la langue du cours (slides, professeur) pour le corps des fiches ; les explications ajoutées peuvent être en français.")
+      .addDropdown((d) =>
+        d
+          .addOption("auto", "Langue du cours")
+          .addOption("en", "Anglais")
+          .addOption("fr", "Français")
+          .setValue(s.ficheLanguage)
+          .onChange(async (v) => ((s.ficheLanguage = v as "auto" | "fr" | "en"), await save())),
+      );
     new Setting(containerEl)
       .setName("Modèle de transcription")
       .setDesc("Lit les photos de tableau et de cahier : c'est la lecture la plus difficile, le modèle le plus capable est conseillé.")
