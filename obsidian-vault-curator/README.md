@@ -41,9 +41,32 @@ Claude ne touche jamais au vault : il propose, tu discutes et valides, le plug-i
    ▼ 6. RELECTURE
    │   fiches rendues (LaTeX compris), rapport de couverture ; « Réécrire cette fiche » avec un commentaire
    ▼ 7. APPLICATION                                (« Appliquer », annulable)
-       fiches dans le dossier du module · sources entièrement intégrées → Archive/<cours>/<module>/
-       avec un document « Sources » (transcriptions + originaux) · skill tree du cours mis à jour
+       fiches → <séance>/Fiches · sources → <séance>/Sources (+ « Transcriptions ») ·
+       canvas de la séance · skill tree du cours mis à jour
 ```
+
+**Organisation d'un cours** :
+
+```
+Machine Learning I/
+├── 02 Nearest Neighbors/                  une séance (le nom du dossier est gardé)
+│   ├── Fiches/                            SORTIES — ce que tu révises
+│   │   ├── 01 - Distances and norms.md       numérotées dans l'ordre d'apprentissage
+│   │   ├── 02 - k-NN principle.md
+│   │   └── 05 - Worked exercises PC2.md
+│   ├── Sources/                           ENTRÉES — slides, énoncés, photos, notebook,
+│   │   └── Transcriptions — ….md             + toutes les transcriptions
+│   └── 02 Nearest Neighbors.canvas        SYNTHÈSE — point d'entrée de la séance
+├── 00 Skill tree — Machine Learning I.canvas   le cours entier, séance par séance
+└── Syllabus.pdf                           référence du cours
+```
+
+Le canvas d'une séance montre les fiches (aperçu de chaque note, flèches de prérequis), puis ses sources ;
+il renvoie au skill tree du cours, qui renvoie à chaque séance. Ce qui n'a pas pu être entièrement intégré
+reste à la racine de la séance et apparaît en rouge sur son canvas : rien d'autre n'y traîne.
+
+**Langue** : les fiches sont écrites dans la langue du cours (slides, professeur) — en anglais pour un cours
+en anglais —, les explications ajoutées et tes remarques pouvant rester en français. Réglable.
 
 **Un cours ou tout le master** : un dossier en mode apprentissage est soit *un cours*, soit *plusieurs
 cours* (un sous-dossier par cours, comme « DDDF »). Dans le second cas, chaque cours a son propre skill
@@ -66,16 +89,18 @@ formules, méthode, exemples du tableau rédigés pas à pas, pièges, à reteni
 sources. Les questions de tes notes trouvent leur réponse quand les sources la donnent ; les
 contradictions entre sources sont signalées, les passages incertains gardent leur [?].
 
-**L'archive** : `Archive/` à la racine du vault (réglable), avec le chemin du cours reproduit. Un document
-n'y part que si le contrôle de couverture confirme que tout son contenu est dans les fiches ; sinon il
-reste en place, signalé. Le document « Sources » de chaque séance garde la photo ou le PDF d'origine et sa
-transcription intégrale.
+**Les sources** : un document ne rejoint `Sources/` que si le contrôle de couverture confirme que tout son
+contenu est dans les fiches ; sinon il reste à la racine de la séance, signalé. Le document « Transcriptions »
+garde chaque photo ou PDF d'origine avec sa transcription intégrale. Les notebooks gardent leur
+arborescence avec leurs données (les chemins relatifs continuent de marcher).
 
 **Reprendre ce qu'ont produit les versions précédentes** : synthétise le dossier concerné. Les notes
 fusionnées, les transcriptions séparées et les photos renommées deviennent des sources comme les autres ;
 les notes de photos rangées dans un « 99 Archive » local sans avoir été intégrées sont reprises ; une
 ancienne transcription « <photo> — transcription.md » sert de brouillon à vérifier contre la photo ; les
-dossiers « Semaine N » gérés à part sont rattachés au cours, puis retirés une fois vidés.
+dossiers « Semaine N » gérés à part sont rattachés au cours, leur ancien dashboard et index rangés dans
+`Sources/Anciens tableaux de bord` ; une fiche écrite par la 0.5 à la racine de la séance rejoint `Fiches/`
+quand la nouvelle synthèse la complète.
 
 **Garde-fous** : une note de photos n'est archivée qu'avec toutes ses photos, et une photo seulement si
 sa transcription est entièrement dans les fiches ; un document illisible n'est jamais archivé.
