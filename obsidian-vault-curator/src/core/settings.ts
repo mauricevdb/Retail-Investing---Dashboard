@@ -14,6 +14,11 @@ export type SpaceMode = "learning" | "files";
 export interface SpaceConfig {
   folder: string;
   mode: SpaceMode;
+  /**
+   * Learning folders only: "course" (one course, one skill tree) or "programme" (a folder of courses,
+   * one sub-folder per course: each course gets its own skill tree).
+   */
+  level?: "course" | "programme";
   /** What the user said about this folder when adding it (optional). */
   instructions: string;
   /** Generated dashboard paths (kept here so renames and legacy names survive). */
@@ -152,17 +157,25 @@ export function spaceName(folder: string, vaultName: string): string {
   return folder === "" ? vaultName : basename(folder);
 }
 
-export function newSpace(settings: CuratorSettings, folder: string, vaultName: string, instructions = "", mode: SpaceMode = "files"): SpaceConfig {
+export function newSpace(settings: CuratorSettings, folder: string, vaultName: string, instructions = "", mode: SpaceMode = "files", level?: SpaceConfig["level"]): SpaceConfig {
   const name = spaceName(folder, vaultName);
   const fill = (pattern: string) => pattern.replace(/\{name\}|\{course\}/g, name);
   return {
     folder,
     mode,
+    ...(mode === "learning" ? { level: level ?? guessLevel(instructions) } : {}),
     instructions,
     canvas: join(folder, `${fill(settings.canvasName)}.canvas`),
     index: join(folder, `${fill(settings.indexName)}.md`),
     addedAt: new Date().toISOString(),
   };
+}
+
+/** A learning folder described as holding several courses ("un sous-dossier par cours", "mes cours de master"…). */
+export function guessLevel(instructions: string): "course" | "programme" {
+  return /(sous-dossiers?|dossiers?) par (cours|mati[eè]re)|un (sous-)?dossier par|mes cours|cours de (mon )?master|ensemble de cours|plusieurs cours|one (sub)?folder per course/i.test(instructions)
+    ? "programme"
+    : "course";
 }
 
 /**

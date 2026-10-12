@@ -71,9 +71,16 @@ export class CuratorView extends ItemView {
     for (const space of scan.spaces) {
       const card = el.createDiv({ cls: "cc-card" });
       const head = card.createDiv({ cls: "cc-card-head" });
-      head.createEl("strong", { text: `${space.config.mode === "learning" ? "🎓 " : "🗂️ "}${space.folder || "/ (tout le vault)"}` });
-      const fresh = space.hasMap ? plugin.engine.newFiles(space).length : 0;
-      const status = space.hasMap ? (fresh ? `${fresh} nouveau(x)` : "à jour") : "pas encore organisé";
+      const programme = space.config.mode === "learning" && space.config.level === "programme";
+      head.createEl("strong", { text: `${programme ? "📚 " : space.config.mode === "learning" ? "🎓 " : "🗂️ "}${space.folder || "/ (tout le vault)"}` });
+      const fresh = space.hasMap || space.config.mode === "learning" ? plugin.engine.newFiles(space).length : 0;
+      const status = programme
+        ? `${plugin.syn.coursesOf(space.folder).length} cours${fresh ? ` · ${fresh} nouveau(x)` : ""}`
+        : space.hasMap
+          ? fresh
+            ? `${fresh} nouveau(x)`
+            : "à jour"
+          : "pas encore synthétisé";
       head.createSpan({ cls: `cc-badge ${space.hasMap ? (fresh ? "cc-badge-new" : "cc-badge-ok") : "cc-badge-todo"}`, text: status });
       card.createDiv({
         cls: "cc-muted",
@@ -91,7 +98,10 @@ export class CuratorView extends ItemView {
         link(learning ? "Skill tree" : "Dashboard", () => void plugin.openFile(space.generated.canvas));
         link("Index", () => void plugin.openFile(space.generated.index));
       }
-      if (learning) {
+      if (programme) {
+        if (fresh) link(`Synthétiser ${fresh} nouveau(x)`, () => void plugin.aggregate([space.folder]), "mod-cta");
+        link("Synthétiser un cours…", () => void plugin.organise([space.folder]), fresh ? "" : "mod-cta");
+      } else if (learning) {
         if (fresh || !space.hasMap) link(fresh ? `Synthétiser ${fresh} nouveau(x)` : "Synthétiser le cours", () => void (fresh ? plugin.aggregate([space.folder]) : plugin.organise([space.folder])), "mod-cta");
         link("Synthétiser un dossier…", () => plugin.pickLotFolder());
       } else if (space.hasMap) {

@@ -27,6 +27,10 @@ export class ObsidianIO implements VaultIO {
     return this.app.vault.getFiles().map((f) => ({ path: f.path, size: f.stat.size, mtime: f.stat.mtime }));
   }
 
+  resolveLink(link: string, from: string): string | null {
+    return this.app.metadataCache.getFirstLinkpathDest(link, from)?.path ?? null;
+  }
+
   listFolders(): string[] {
     return this.app.vault
       .getAllLoadedFiles()

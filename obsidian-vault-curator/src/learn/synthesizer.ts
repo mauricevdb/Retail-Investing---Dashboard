@@ -10,9 +10,9 @@
 import { Engine, Progress } from "../engine";
 import { basename, dirname, extname, hash, isInside, join, matchPath, relativeTo, sanitizePath, slugify, uniquePath } from "../core/paths";
 import { allSections } from "../core/plan";
-import { fileKind, SpaceInventory } from "../core/scan";
+import { fileKind, isIgnored, SpaceInventory } from "../core/scan";
 import { mapPath } from "../core/settings";
-import { JournalEntry, JournalStep, Resource, SectionNode, SpaceMap, VaultFile } from "../core/types";
+import { DocType, JournalEntry, JournalStep, Resource, SectionNode, SpaceMap, VaultFile } from "../core/types";
 import { Attachment } from "../llm/types";
 import {
   completePrompt,
@@ -45,7 +45,8 @@ import {
   WRITE_SCHEMA,
   WriteAnswer,
 } from "./schemas";
-import { Coverage, Extract, FichePlan, Source, SynthesisPlan, WrittenFiche } from "./types";
+import { annotateEmbeds, dataPreview, embedsOf, notebookText } from "./content";
+import { Coverage, Disposition, Extract, FichePlan, Source, SynthesisPlan, WrittenFiche } from "./types";
 
 export interface Lot {
   space: SpaceInventory;
@@ -82,12 +83,19 @@ export interface SynthesisJob {
 export interface SynthesisReport {
   fiches: string[];
   archived: string[];
+  /** Left in place on purpose: reference material, notebooks, data. */
   kept: string[];
+  /** Left in place because their content is not fully in the notes yet. */
+  pending: string[];
   archiveDoc: string;
   canvas: string;
 }
 
 const PDF_CHUNK = 10;
+/** Text files above this size are data, not something to read. */
+const DATA_TEXT_LIMIT = 300 * 1024;
+/** Pages of a long PDF given to the plan when it is only skimmed. */
+const SURVEY_PAGES = 6;
 const VIEW_EXT = new Set(["png", "jpg", "jpeg", "webp", "gif"]);
 
 export class Synthesizer {
@@ -98,6 +106,83 @@ export class Synthesizer {
   }
   private get settings() {
     return this.engine.settings;
+  }
+
+  // -------------------------------------------------------------------------
+  // 0. Courses
+
+  /**
+   * The course a path belongs to. In a "programme" folder (one sub-folder per course), the course is the
+   * first-level sub-folder, registered as a learning folder of its own the first time (its own map and
+   * skill tree). Elsewhere, the outermost learning folder containing the path: week folders managed on
+   * their own by an older version belong to their course.
+   */
+  async courseFor(path: string): Promise<SpaceInventory | null> {
+    const learning = this.settings.spaces.filter((s) => s.mode === "learning" && isInside(path, s.folder)).sort((a, b) => a.folder.length - b.folder.length);
+    if (!learning.length) return null;
+    const programme = learning.find((s) => s.level === "programme");
+    if (!programme) return this.engine.space(learning[0].folder) ?? null;
+    const rel = relativeTo(path, programme.folder);
+    const first = rel.split("/")[0];
+    if (!first) return null;
+    const folder = join(programme.folder, first);
+    if (!this.io.listFolders().includes(folder)) return null; // a loose file at the programme's root
+    const existing = this.settings.spaces.find((s) => s.folder === folder);
+    if (!existing) await this.engine.addSpace(folder, "", "learning", "course");
+    else if (existing.mode !== "learning" || existing.level !== "course") {
+      existing.mode = "learning";
+      existing.level = "course";
+    }
+    return this.engine.space(folder) ?? null;
+  }
+
+  /** The programme folder a course lives in, if any. */
+  programmeOf(folder: string) {
+    return this.settings.spaces.find((s) => s.mode === "learning" && s.level === "programme" && s.folder !== folder && isInside(folder, s.folder)) ?? null;
+  }
+
+  /** Sub-folders of a programme that are courses (they hold files). */
+  coursesOf(programmeFolder: string): string[] {
+    const depth = programmeFolder ? programmeFolder.split("/").length + 1 : 1;
+    const archive = this.settings.archiveFolder;
+    return this.io
+      .listFolders()
+      .filter((f) => isInside(f, programmeFolder) && f.split("/").length === depth && basename(f) !== archive && basename(f) !== this.settings.archiveRoot)
+      .filter((f) => !isIgnored(f, this.settings))
+      .filter((f) => this.io.listFiles().some((x) => isInside(x.path, f)))
+      .sort();
+  }
+
+  /** One lot per sub-folder holding raw documents, plus the loose documents at the course root. */
+  async courseLots(space: SpaceInventory): Promise<Lot[]> {
+    const folders = new Map<string, string[]>();
+    for (const f of space.files) {
+      const rel = relativeTo(f.path, space.folder);
+      const top = rel.includes("/") ? join(space.folder, rel.split("/")[0]) : space.folder;
+      folders.set(top, [...(folders.get(top) ?? []), f.path]);
+    }
+    // Sub-folders managed on their own by an older version, or holding only a legacy archive, are part of the course.
+    for (const sub of space.subspaces) {
+      const rel = relativeTo(sub.folder, space.folder);
+      const top = join(space.folder, rel.split("/")[0]);
+      folders.set(top, folders.get(top) ?? []);
+    }
+    for (const folder of this.legacyArchives(space.folder)) {
+      const rel = relativeTo(folder, space.folder);
+      if (rel.includes("/")) folders.set(join(space.folder, rel.split("/")[0]), folders.get(join(space.folder, rel.split("/")[0])) ?? []);
+    }
+    const lots: Lot[] = [];
+    for (const [folder, paths] of [...folders].sort(([a], [b]) => a.localeCompare(b))) {
+      const lot = folder === space.folder ? await this.lotFromFiles(space, paths, `Documents à la racine de ${space.name}`) : await this.lotFromFolder(space, folder);
+      if (lot.files.length) lots.push(lot);
+    }
+    return lots;
+  }
+
+  /** "99 Archive" folders an older version filled inside a course, often with material never integrated. */
+  private legacyArchives(folder: string): string[] {
+    const name = this.settings.archiveFolder;
+    return this.io.listFolders().filter((f) => isInside(f, folder) && f !== folder && basename(f) === name);
   }
 
   // -------------------------------------------------------------------------
@@ -112,6 +197,14 @@ export class Synthesizer {
       .spaces.filter((s) => isInside(s.folder, space.folder))
       .flatMap((s) => s.files)
       .filter((f) => isInside(f.path, folder) && !seen.has(f.path) && seen.add(f.path));
+    // What an older version moved to a local "99 Archive" without integrating it (notes of photos…) is raw material too.
+    const legacy = this.legacyArchives(folder);
+    for (const f of this.io.listFiles()) {
+      if (legacy.some((a) => isInside(f.path, a)) && !seen.has(f.path) && fileKind(f.path) !== "canvas") {
+        seen.add(f.path);
+        files.push(f);
+      }
+    }
     return { space, name: basename(folder) || space.name, folder, files: await this.rawOnly(files) };
   }
 
@@ -136,7 +229,7 @@ export class Synthesizer {
   private async rawOnly(files: VaultFile[]): Promise<VaultFile[]> {
     const out: VaultFile[] = [];
     for (const f of files) {
-      if (fileKind(f.path) === "canvas") continue;
+      if (fileKind(f.path) === "canvas" || basename(f.path) === "_curator.json") continue;
       if (fileKind(f.path) === "markdown" && /^---[\s\S]*?\ncurator:\s*(fiche|index)\b/m.test((await this.io.read(f.path)).slice(0, 600))) continue;
       out.push(f);
     }
@@ -146,17 +239,55 @@ export class Synthesizer {
   // -------------------------------------------------------------------------
   // 2. Extraction
 
+  /**
+   * The lot's documents, plus the photos and PDFs embedded in its notes, wherever Obsidian stored them
+   * (attachments folder, vault root…): a note "Photos CM" made of `![[IMG_….jpg]]` is a set of photos to transcribe.
+   */
+  async collect(lot: Lot): Promise<{ sources: Source[]; notes: Map<string, { text: string; embeds: Map<string, string>; missing: string[] }> }> {
+    const sources: Source[] = lot.files.map((f, i) => ({ id: `S${i + 1}`, path: f.path, kind: sourceKind(f.path, f.size), size: f.size, mtime: f.mtime }));
+    const stats = new Map(this.io.listFiles().map((f) => [f.path, f]));
+    const notes = new Map<string, { text: string; embeds: Map<string, string>; missing: string[] }>();
+    for (const note of sources.filter((s) => s.kind === "markdown")) {
+      const text = await this.io.read(note.path);
+      const embeds = new Map<string, string>();
+      const missing: string[] = [];
+      for (const e of embedsOf(text)) {
+        const target = this.io.resolveLink(e.link, note.path);
+        if (!target) {
+          if (VIEW_EXT.has(extname(e.link)) || extname(e.link) === "pdf") missing.push(e.link);
+          continue;
+        }
+        const kind = sourceKind(target, stats.get(target)?.size ?? 0);
+        if (kind !== "image" && kind !== "pdf") continue;
+        let child = sources.find((s) => s.path === target);
+        if (!child) {
+          const st = stats.get(target);
+          child = { id: `S${sources.length + 1}`, path: target, kind, size: st?.size ?? 0, mtime: st?.mtime ?? 0, embeddedIn: note.id };
+          sources.push(child);
+        } else if (!child.embeddedIn && child.id !== note.id) child.embeddedIn = note.id;
+        embeds.set(e.raw, child.id);
+      }
+      notes.set(note.id, { text, embeds, missing });
+    }
+    return { sources, notes };
+  }
+
   async extract(lot: Lot, progress: Progress, signal?: AbortSignal): Promise<{ sources: Source[]; extracts: Map<string, Extract> }> {
-    const sources: Source[] = lot.files.map((f, i) => ({
-      id: `S${i + 1}`,
-      path: f.path,
-      kind: sourceKind(f.path),
-      size: f.size,
-      mtime: f.mtime,
-    }));
+    const { sources, notes } = await this.collect(lot);
     const extracts = new Map<string, Extract>();
     const todo: Source[] = [];
     for (const s of sources) {
+      const note = notes.get(s.id);
+      if (note) {
+        // Notes are read as they are, with the place and source of each embedded photo marked.
+        const uncertain = note.missing.map((m) => `image insérée introuvable dans le vault : ${m}`);
+        extracts.set(s.id, { sourceId: s.id, path: s.path, text: annotateEmbeds(note.text, note.embeds), uncertain, description: note.embeds.size ? `note contenant ${note.embeds.size} photo(s)/document(s) inséré(s)` : "" });
+        continue;
+      }
+      if (s.kind === "text" || s.kind === "notebook" || s.kind === "data" || s.kind === "other") {
+        extracts.set(s.id, await this.extractOne(s, signal));
+        continue;
+      }
       const cached = await this.io.cacheRead(cacheKey(s));
       if (cached) extracts.set(s.id, { ...(JSON.parse(cached) as Extract), sourceId: s.id, path: s.path });
       else todo.push(s);
@@ -189,6 +320,12 @@ export class Synthesizer {
   private async extractOne(s: Source, signal?: AbortSignal): Promise<Extract> {
     const base = { sourceId: s.id, path: s.path, uncertain: [] as string[], description: "" };
     if (s.kind === "markdown" || s.kind === "text") return { ...base, text: await this.io.read(s.path) };
+    if (s.kind === "notebook") return { ...base, text: notebookText(await this.io.read(s.path)), description: "notebook Jupyter (cellules et sorties texte)" };
+    if (s.kind === "data") {
+      const readable = ["csv", "tsv", "txt", "json", "dat"].includes(extname(s.path)) && s.size < 20 * 1024 * 1024;
+      const text = readable ? dataPreview((await this.io.read(s.path)).slice(0, 20000), s.size) : `Fichier de données (${Math.round(s.size / 1024)} Ko, .${extname(s.path)}), non lu.`;
+      return { ...base, text, description: "fichier de données", survey: true };
+    }
     if (s.kind === "image") return this.extractPhoto(s, signal);
     if (s.kind === "pdf") return this.extractPdf(s, signal);
     return { ...base, text: `(format non lu automatiquement : .${extname(s.path)} — à intégrer à la main)`, description: "document non lu" };
@@ -205,10 +342,11 @@ export class Synthesizer {
       load: async () => ({ mediaType: v.mediaType, base64: v.base64 }),
     }));
     const labels = views.map((v) => v.label);
+    const prior = await this.priorTranscription(s.path);
     const draft = await backend.complete<PhotoAnswer>({
       label: `transcription de ${basename(s.path)}`,
       system: photoSystem(this.settings),
-      prompt: photoPrompt(s.path, labels, readsFiles),
+      prompt: photoPrompt(s.path, labels, readsFiles, prior),
       schema: PHOTO_SCHEMA,
       model: this.settings.transcriptionModel,
       effort: "high",
@@ -236,12 +374,34 @@ export class Synthesizer {
     return { sourceId: s.id, path: s.path, text, uncertain, description: draft.description ?? "" };
   }
 
+  /** A transcription an older version wrote for this photo ("<photo> — transcription.md"), used as a draft to check. */
+  private async priorTranscription(photo: string): Promise<string | null> {
+    const stem = basename(photo).replace(/\.[^.]+$/, "");
+    const note = this.io.listFiles().find((f) => basename(f.path) === `${stem} — transcription.md`);
+    if (!note) return null;
+    const text = (await this.io.read(note.path)).replace(/^!\[\[[^\]]*\]\]\s*$/gm, "").trim();
+    return text || null;
+  }
+
   private async extractPdf(s: Source, signal?: AbortSignal): Promise<Extract> {
     const backend = this.engine.backend();
     const readsFiles = backend.name === "Claude Code";
     const layer = await this.io.pdfText(s.path, this.settings.maxPdfPages);
     const pageCount = layer?.pageCount || 1;
     const pages = layer ? splitPages(layer.text) : new Map<number, string>();
+    if (pageCount > this.settings.maxPdfPages) {
+      // A textbook, a lecture-notes volume, a Moodle dump: skimmed (first pages, table of contents), kept as a reference.
+      const head = [...pages].filter(([n]) => n <= SURVEY_PAGES).map(([n, t]) => `[page ${n}] ${t}`).join("\n").slice(0, 12000);
+      return {
+        sourceId: s.id,
+        path: s.path,
+        text: head || "(pas de texte extractible)",
+        uncertain: [],
+        description: `${pageCount} pages — document long, seulement survolé (premières pages)`,
+        truncated: `document de ${pageCount} pages, au-delà de la limite de lecture intégrale (${this.settings.maxPdfPages} pages) : document de référence`,
+        survey: true,
+      };
+    }
     const last = Math.min(pageCount, this.settings.maxPdfPages);
     const parts: string[] = [];
     const uncertain: string[] = [];
@@ -338,16 +498,36 @@ export class Synthesizer {
       if (f.action === "extend" && !this.io.exists(f.path)) f.action = "create";
       f.outline = f.outline ?? [];
       f.sources = (f.sources ?? []).filter((x) => job.sources.some((s) => s.id === x.sourceId));
+      // The photos of a note go with it: the note alone is only links.
+      for (const x of [...f.sources]) {
+        for (const child of job.sources.filter((s) => s.embeddedIn === x.sourceId)) {
+          if (!f.sources.some((y) => y.sourceId === child.id)) f.sources.push({ sourceId: child.id, what: `photo insérée dans ${x.sourceId}` });
+        }
+      }
       f.dependsOn = f.dependsOn ?? [];
       f.keywords = f.keywords ?? [];
     }
+    // Every source gets a disposition. What was only skimmed, notebooks and data stay in place;
+    // embedded photos are always integrated (their transcription is the point).
+    const given = new Map((plan.sources ?? []).map((x) => [x.sourceId, x]));
+    plan.sources = job.sources.map((src) => {
+      const g = given.get(src.id);
+      const e = job.extracts.get(src.id);
+      const forcedKeep = e?.survey || src.kind === "notebook" || src.kind === "data" || src.kind === "other";
+      const disposition: Disposition = forcedKeep ? "keep" : src.embeddedIn ? "integrate" : (g?.disposition ?? "integrate");
+      return { sourceId: src.id, role: g?.role ?? "", contributes: g?.contributes ?? "", disposition };
+    });
     const used = new Set(plan.fiches.flatMap((f) => f.sources.map((x) => x.sourceId)));
-    job.unassigned = job.sources.filter((s) => !used.has(s.id)).map((s) => s.id);
+    job.unassigned = job.sources.filter((s) => !used.has(s.id) && this.disposition(job, s.id) === "integrate").map((s) => s.id);
     plan.questions = plan.questions ?? [];
     plan.changes = plan.changes ?? [];
     plan.issues = plan.issues ?? [];
     plan.preferences = plan.preferences ?? [];
     return job;
+  }
+
+  disposition(job: SynthesisJob, sourceId: string): Disposition {
+    return job.plan.sources.find((x) => x.sourceId === sourceId)?.disposition ?? "integrate";
   }
 
   private async courseContext(space: SpaceInventory, map: SpaceMap | null): Promise<CourseContext> {
@@ -366,14 +546,22 @@ export class Synthesizer {
     // Notes of the course not in the map yet (e.g. written by hand or by an older version).
     const listed = new Set(map ? allSections(map).flatMap((s) => s.resources.map((r) => r.path)) : []);
     const loose = space.files.filter((f) => fileKind(f.path) === "markdown" && !listed.has(f.path)).slice(0, 60);
-    if (loose.length) lines.push(`Autres notes du cours : ${loose.map((f) => f.path).join(" ; ")}`);
+    if (loose.length) {
+      lines.push("Autres notes du cours (écrites à la main ou par une version précédente ; à compléter plutôt que dupliquer) :");
+      for (const [i, f] of loose.entries()) {
+        const headings = i < 40 ? headingsOf(await this.io.read(f.path)) : "";
+        lines.push(`    - ${f.path}${headings ? ` — sections : ${headings}` : ""}`);
+      }
+    }
+    const programme = this.programmeOf(space.folder);
+    const instructions = [programme?.instructions ? `(pour l'ensemble des cours) ${programme.instructions}` : "", space.config.instructions].filter(Boolean).join("\n");
     return {
       course: space.name,
       folder: space.folder,
       outline: lines.join("\n"),
       conventions: map?.conventions ?? "",
       preferences: map?.preferences ?? [],
-      instructions: space.config.instructions,
+      instructions,
     };
   }
 
@@ -397,6 +585,11 @@ export class Synthesizer {
   async write(job: SynthesisJob, progress: Progress, signal?: AbortSignal, comments = new Map<string, string>()): Promise<SynthesisJob> {
     const layout = this.archiveLayout(job);
     const fiches = job.plan.fiches;
+    if (!fiches.length) {
+      job.written = [];
+      await this.checkCoverage(job, progress, signal);
+      return job;
+    }
     const written: WrittenFiche[] = new Array(fiches.length);
     let done = 0;
     let next = 0;
@@ -433,7 +626,7 @@ export class Synthesizer {
       ...job.plan.fiches.filter((f) => f.id !== fiche.id).map((f) => ({ title: f.title, path: f.path })),
       ...(job.map ? allSections(job.map).flatMap((s) => s.resources.filter((r) => r.role === "fiche").map((r) => ({ title: r.label, path: r.path }))) : []),
     ];
-    const links = [{ path: layout.doc, title: `Sources de la séance (${job.plan.session || job.lot.name})` }, ...used.map((s) => ({ path: layout.target.get(s.id)!, title: basename(s.path) }))];
+    const links = [{ path: layout.doc, title: `Sources de la séance (${job.plan.session || job.lot.name})` }, ...used.map((s) => ({ path: this.disposition(job, s.id) === "keep" ? s.path : layout.target.get(s.id)!, title: basename(s.path) }))];
     const frontmatter = [
       "curator: fiche",
       `cours: "${job.course.course.replace(/"/g, "'")}"`,
@@ -463,7 +656,18 @@ export class Synthesizer {
     const pseudo: Source[] = extended.map((w, i) => ({ id: `E${i + 1}`, path: w.plan.path, kind: "markdown", size: 0, mtime: 0 }));
     const extracts = new Map(job.extracts);
     extended.forEach((w, i) => extracts.set(`E${i + 1}`, { sourceId: `E${i + 1}`, path: w.plan.path, text: w.before!, uncertain: [], description: "contenu actuel de la fiche" }));
-    const all = [...job.sources.filter((s) => s.kind !== "other"), ...pseudo];
+    const integrate = job.sources.filter((s) => this.disposition(job, s.id) === "integrate" && s.kind !== "other");
+    const readable = integrate.filter((s) => job.extracts.has(s.id));
+    const all = [...readable, ...pseudo];
+    const keepEntry = (s: Source): Coverage => ({ sourceId: s.id, path: s.path, covered: true, kept: true, missing: [] });
+
+    if (!job.written.length) {
+      job.coverage = [
+        ...job.sources.filter((s) => this.disposition(job, s.id) === "keep").map(keepEntry),
+        ...integrate.map((s) => ({ sourceId: s.id, path: s.path, covered: false, missing: [{ item: "aucune fiche ne reprend ce document", fiche: "" }] })),
+      ];
+      return;
+    }
 
     const run = async (subset: Source[]) => {
       const answer = await this.engine.backend().complete<CoverageAnswer>({
@@ -517,10 +721,20 @@ export class Synthesizer {
     }
     job.coverage = all.map((s) => {
       const r = result.find((x) => x.sourceId === s.id);
-      const covered = s.kind !== "other" && !job.unassigned.includes(s.id) && (r ? r.covered || !r.missing.length : false);
+      const covered = !job.unassigned.includes(s.id) && (r ? r.covered || !r.missing.length : false);
       return { sourceId: s.id, path: s.path, covered, missing: r?.missing ?? [] };
     });
-    for (const s of job.sources.filter((x) => x.kind === "other")) job.coverage.push({ sourceId: s.id, path: s.path, covered: false, missing: [{ item: "format non lu automatiquement", fiche: "" }] });
+    for (const s of integrate.filter((x) => !job.extracts.has(x.id))) job.coverage.push({ sourceId: s.id, path: s.path, covered: false, missing: [{ item: "document illisible : pas de transcription", fiche: "" }] });
+    // A note of photos is archived only with all its photos: otherwise the photos would be orphaned.
+    for (const c of job.coverage) {
+      const children = job.sources.filter((s) => s.embeddedIn === c.sourceId && this.disposition(job, s.id) === "integrate");
+      const open = children.filter((ch) => !job.coverage.find((x) => x.sourceId === ch.id)?.covered);
+      if (c.covered && open.length) {
+        c.covered = false;
+        c.missing.push({ item: `photo(s) pas entièrement intégrée(s) : ${open.map((o) => o.id).join(", ")}`, fiche: "" });
+      }
+    }
+    for (const s of job.sources.filter((x) => this.disposition(job, x.id) === "keep")) job.coverage.push(keepEntry(s));
   }
 
   // -------------------------------------------------------------------------
@@ -536,14 +750,14 @@ export class Synthesizer {
       steps: [],
       mapsBefore: { [space.folder]: job.map },
     };
-    const report: SynthesisReport = { fiches: [], archived: [], kept: [], archiveDoc: layout.doc, canvas: space.generated.canvas };
+    const report: SynthesisReport = { fiches: [], archived: [], kept: [], pending: [], archiveDoc: "", canvas: space.generated.canvas };
     const steps: JournalStep[] = entry.steps;
-    const coveredIds = new Set(job.coverage.filter((c) => c.covered && c.sourceId.startsWith("S")).map((c) => c.sourceId));
+    const coveredIds = new Set(job.coverage.filter((c) => c.covered && !c.kept && c.sourceId.startsWith("S")).map((c) => c.sourceId));
 
     await this.engine.asPlugin(async () => {
       try {
         // Notes.
-        await this.engine.mkdirp(job.plan.module.folder, steps);
+        if (job.written.length) await this.engine.mkdirp(job.plan.module.folder, steps);
         for (const [i, w] of job.written.entries()) {
           progress("Écriture des fiches…", i, job.written.length);
           if (w.before === null) {
@@ -559,10 +773,13 @@ export class Synthesizer {
         }
 
         // Archive document, then the raw sources it describes.
-        await this.engine.writeTracked(layout.doc, this.archiveDocument(job, layout, coveredIds), steps);
+        if (coveredIds.size) {
+          await this.engine.writeTracked(layout.doc, this.archiveDocument(job, layout, coveredIds), steps);
+          report.archiveDoc = layout.doc;
+        }
         for (const s of job.sources) {
           if (!coveredIds.has(s.id) || !this.io.exists(s.path)) {
-            report.kept.push(s.path);
+            (this.disposition(job, s.id) === "keep" ? report.kept : report.pending).push(s.path);
             continue;
           }
           const to = layout.target.get(s.id)!;
@@ -575,7 +792,7 @@ export class Synthesizer {
         // The lot's folder, if it was a managed folder of its own (v0.2/0.3), goes too once empty.
         if (job.lot.folder && job.lot.folder !== space.folder) {
           const nested = this.settings.spaces.find((x) => x.folder === job.lot.folder);
-          if (nested && report.kept.length === 0) {
+          if (nested && report.pending.length === 0 && report.kept.every((p) => !isInside(p, nested.folder))) {
             for (const p of [nested.canvas, nested.index, mapPath(nested.folder)]) {
               if (!this.io.exists(p)) continue;
               const to = uniquePath(join(layout.dir, `ancien ${basename(p)}`), (x) => this.io.exists(x));
@@ -601,7 +818,7 @@ export class Synthesizer {
         // Ledger: the notes are known; so are the lot's documents left in place (not proposed again
         // until they change). Other raw documents of the course stay "new" until they are synthesised.
         const ledger = this.engine.data.ledger;
-        const done = new Set([...report.fiches, ...report.kept]);
+        const done = new Set([...report.fiches, ...report.kept, ...report.pending]);
         for (const f of this.engine.space(space.folder)?.files ?? []) {
           if (done.has(f.path)) ledger[f.path] = { ...(ledger[f.path] ?? {}), fp: `${f.size}:${Math.round(f.mtime)}`, known: true };
         }
@@ -630,8 +847,11 @@ export class Synthesizer {
       const e = job.extracts.get(s.id);
       const archived = covered.has(s.id);
       const where = archived ? layout.target.get(s.id)! : s.path;
+      const parent = s.embeddedIn ? job.sources.find((x) => x.id === s.embeddedIn) : null;
       lines.push(`## ${s.id} — ${basename(s.path)}`);
-      lines.push(archived ? `Archivé depuis \`${s.path}\`.` : `> [!warning] Non archivé (contenu pas entièrement intégré) : reste à \`${s.path}\`.`);
+      if (archived) lines.push(`Archivé depuis \`${s.path}\`${parent ? ` (photo insérée dans ${parent.id}, ${basename(parent.path)})` : ""}.`);
+      else if (this.disposition(job, s.id) === "keep") lines.push(`Gardé en place (référence, notebook ou données) : [[${s.path}]].`);
+      else lines.push(`> [!warning] Non archivé (contenu pas entièrement intégré) : reste à \`${s.path}\`.`);
       if (s.kind === "image") lines.push("", `![[${where}]]`);
       else lines.push("", `[[${where}|Ouvrir l'original]]`);
       if (e?.description) lines.push("", `*${e.description}*`);
@@ -677,6 +897,16 @@ export class Synthesizer {
     map.sections = map.sections.filter((s) => s.resources.length || s.children.length || s.id === job.plan.module.id);
 
     const m = job.plan.module;
+    if (!job.written.length) {
+      // Nothing to learn from here (syllabus, textbooks…): course-wide references.
+      for (const path of report.kept) {
+        if (map.transverse.some((r) => r.path === path) || allSections(map).some((s) => s.resources.some((r) => r.path === path))) continue;
+        const src = job.sources.find((s) => s.path === path)!;
+        map.transverse.push({ path, role: keptRole(src, job.plan.sources.find((x) => x.sourceId === src.id)?.role ?? ""), label: basename(path).replace(/\.[^.]+$/, "") });
+      }
+      map.updatedAt = new Date().toISOString();
+      return map;
+    }
     let section = map.sections.find((s) => s.id === m.id) ?? (m.mode === "existing" ? map.sections.find((s) => s.title === m.title) : undefined);
     if (!section) {
       section = { id: slugify(m.id || m.title) || `module-${map.sections.length + 1}`, title: m.title, summary: m.summary, keywords: [], dependsOn: [], folder: m.folder, resources: [], children: [] };
@@ -686,7 +916,13 @@ export class Synthesizer {
     section.summary = section.summary || m.summary;
     const sectionIds = new Set(map.sections.map((s) => s.id));
     section.dependsOn = [...new Set([...section.dependsOn, ...m.dependsOn.filter((d) => sectionIds.has(d) && d !== section!.id)])];
-    if (!section.resources.some((r) => r.path === layout.doc)) section.resources.push({ path: layout.doc, role: "archive", label: `Sources — ${job.plan.session || job.lot.name}` });
+    if (report.archiveDoc && !section.resources.some((r) => r.path === layout.doc)) section.resources.push({ path: layout.doc, role: "archive", label: `Sources — ${job.plan.session || job.lot.name}` });
+    // Documents kept on purpose stay reachable from the skill tree.
+    for (const path of report.kept) {
+      if (allSections(map).some((s) => s.resources.some((r) => r.path === path)) || map.transverse.some((r) => r.path === path)) continue;
+      const src = job.sources.find((s) => s.path === path)!;
+      section.resources.push({ path, role: keptRole(src, job.plan.sources.find((x) => x.sourceId === src.id)?.role ?? ""), label: basename(path).replace(/\.[^.]+$/, "") });
+    }
 
     for (const w of job.written) {
       const f = w.plan;
@@ -721,13 +957,27 @@ function keepFrontmatter(previous: string, next: string): string {
   return `${fm && !body.startsWith("---") ? `${fm}\n${body}` : body}\n`;
 }
 
-function sourceKind(path: string): Source["kind"] {
+function sourceKind(path: string, size: number): Source["kind"] {
   const ext = extname(path);
   if (ext === "md") return "markdown";
   if (ext === "pdf") return "pdf";
   if (VIEW_EXT.has(ext)) return "image";
-  if (["txt", "csv", "py", "r", "tex", "json", "ipynb", "sql"].includes(ext)) return "text";
+  if (ext === "ipynb") return "notebook";
+  if (["csv", "tsv", "xlsx", "xls", "zip", "parquet", "h5", "hdf5", "pkl", "pickle", "sav", "dta", "sas7bdat", "mat", "rds", "rdata", "db", "sqlite", "dat", "gz"].includes(ext)) return "data";
+  if (["txt", "py", "r", "tex", "json", "sql", "rmd", "qmd"].includes(ext)) return size > DATA_TEXT_LIMIT ? "data" : "text";
   return "other";
+}
+
+/** Skill-tree role of a document kept in place. */
+function keptRole(s: Source, role: string): DocType {
+  if (s.kind === "notebook") return "code";
+  if (s.kind === "data") return "donnees";
+  const text = `${role} ${basename(s.path)}`;
+  if (/syllab|planning|programme du cours|organisation/i.test(text)) return "planning";
+  if (/annale|exam|exercice|problem|td\b|pc\b|homework|devoir/i.test(text)) return "exercices";
+  if (/corrig|solution/i.test(text)) return "corrige";
+  if (/livre|book|manuel|ouvrage|lecture|r[ée]f[ée]rence|notes de cours|lecture notes|proofs|esl|islr/i.test(text)) return "lecture";
+  return "cours";
 }
 
 function cacheKey(s: Source): string {

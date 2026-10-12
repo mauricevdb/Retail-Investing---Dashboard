@@ -38,6 +38,13 @@ export class NodeIO implements VaultIO {
   listFiles() {
     return this.walk().files;
   }
+  resolveLink(link: string, from: string) {
+    const files = this.listFiles().map((f) => f.path);
+    const exact = files.find((f) => f === link) ?? files.find((f) => f === path.posix.join(path.posix.dirname(from), link));
+    if (exact) return exact;
+    const withExt = /\.[a-z0-9]+$/i.test(link) ? link : `${link}.md`;
+    return files.find((f) => f === withExt || f.endsWith(`/${withExt}`)) ?? null;
+  }
   listFolders() {
     return this.walk().folders;
   }

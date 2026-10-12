@@ -29,6 +29,8 @@ export interface VaultIO {
    * and, when possible, a file on disk for the Claude Code backend.
    */
   imageViews(path: string): Promise<{ label: string; mediaType: string; base64: string; absPath: string | null }[]>;
+  /** File a wikilink or Markdown link points to, resolved like Obsidian does (shortest path, attachments folder…). */
+  resolveLink(link: string, from: string): string | null;
   /** Small persistent cache outside the vault content (plugin folder). */
   cacheRead(key: string): Promise<string | null>;
   cacheWrite(key: string, value: string): Promise<void>;

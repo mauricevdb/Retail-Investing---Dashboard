@@ -24,12 +24,13 @@ export class FolderPicker extends FuzzySuggestModal<string> {
   }
 }
 
-export type AddChoice = { action: "organise" | "add"; instructions: string; mode: SpaceMode } | null;
+export type AddChoice = { action: "organise" | "add"; instructions: string; mode: SpaceMode; level?: "course" | "programme" } | null;
 
 /** Asks what the folder is about before managing it; the answer guides Claude's understanding. */
 export class AddSpaceModal extends Modal {
   private instructions = "";
   private mode: SpaceMode = "learning";
+  private level: "course" | "programme" = "course";
   private resolve!: (c: AddChoice) => void;
   private done = false;
 
@@ -82,26 +83,32 @@ export class AddSpaceModal extends Modal {
     if (!this.editOnly) {
       new Setting(contentEl)
         .setName("Type de dossier")
-        .setDesc("Apprentissage : les documents bruts deviennent des fiches de révision reliées par un skill tree, puis sont archivés. Documents : rangement et renommage des fichiers.")
+        .setDesc(
+          "Cours : les documents bruts deviennent des fiches de révision reliées par un skill tree, puis sont archivés. Plusieurs cours : un sous-dossier par cours, chacun avec son propre skill tree. Documents : rangement et renommage des fichiers.",
+        )
         .addDropdown((d) =>
           d
-            .addOption("learning", "Cours / apprentissage")
+            .addOption("course", "Un cours")
+            .addOption("programme", "Plusieurs cours (un sous-dossier par cours)")
             .addOption("files", "Documents (rangement)")
-            .setValue(this.mode)
-            .onChange((v) => (this.mode = v as SpaceMode)),
+            .setValue(this.mode === "files" ? "files" : this.level)
+            .onChange((v) => {
+              this.mode = v === "files" ? "files" : "learning";
+              if (v !== "files") this.level = v as "course" | "programme";
+            }),
         );
     }
 
     const s = new Setting(contentEl);
     if (this.editOnly) {
-      s.addButton((b) => b.setButtonText("Enregistrer").setCta().onClick(() => this.finish({ action: "add", instructions: this.instructions.trim(), mode: this.mode })));
+      s.addButton((b) => b.setButtonText("Enregistrer").setCta().onClick(() => this.finish({ action: "add", instructions: this.instructions.trim(), mode: this.mode, level: this.level })));
     } else {
-      s.addButton((b) => b.setButtonText("Ajouter seulement").onClick(() => this.finish({ action: "add", instructions: this.instructions.trim(), mode: this.mode })));
+      s.addButton((b) => b.setButtonText("Ajouter seulement").onClick(() => this.finish({ action: "add", instructions: this.instructions.trim(), mode: this.mode, level: this.level })));
       s.addButton((b) =>
         b
           .setButtonText("Ajouter et organiser")
           .setCta()
-          .onClick(() => this.finish({ action: "organise", instructions: this.instructions.trim(), mode: this.mode })),
+          .onClick(() => this.finish({ action: "organise", instructions: this.instructions.trim(), mode: this.mode, level: this.level })),
       );
     }
   }

@@ -7,10 +7,19 @@ export interface Source {
   /** Short id used in prompts: S1, S2… */
   id: string;
   path: string;
-  kind: "pdf" | "image" | "markdown" | "text" | "other";
+  kind: "pdf" | "image" | "markdown" | "text" | "notebook" | "data" | "other";
   size: number;
   mtime: number;
+  /** Id of the note this photo (or PDF) is embedded in: `![[photo.jpg]]` in "Photos CM.md". */
+  embeddedIn?: string;
 }
+
+/**
+ * What happens to a source once the notes are written: "integrate" (its whole content goes into the notes,
+ * then it is archived) or "keep" (reference material — textbook, syllabus, annals —, notebooks and data
+ * files: linked from the skill tree, left in place).
+ */
+export type Disposition = "integrate" | "keep";
 
 /** Faithful, complete content of a source (not a summary). */
 export interface Extract {
@@ -26,6 +35,8 @@ export interface Extract {
   editedByUser?: boolean;
   /** Pages left out of a long PDF. */
   truncated?: string | null;
+  /** Only skimmed (long PDF, data file): its content cannot be integrated, it can only be kept as a reference. */
+  survey?: boolean;
 }
 
 export interface FichePlan {
@@ -61,7 +72,7 @@ export interface SynthesisPlan {
   session: string;
   summary: string;
   /** What each source brings, and problems seen (contradictions, missing statements, illegible parts). */
-  sources: { sourceId: string; role: string; contributes: string }[];
+  sources: { sourceId: string; role: string; contributes: string; disposition: Disposition }[];
   issues: string[];
   module: ModulePlan;
   fiches: FichePlan[];
@@ -81,5 +92,7 @@ export interface Coverage {
   sourceId: string;
   path: string;
   covered: boolean;
+  /** Kept in place on purpose (reference, notebook, data): nothing to check. */
+  kept?: boolean;
   missing: { item: string; fiche: string }[];
 }

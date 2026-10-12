@@ -19,9 +19,14 @@ Claude ne touche jamais au vault : il propose, tu discutes et valides, le plug-i
    │   PDF / slides : toutes les pages, transcrites page par page (formules en LaTeX)
    │   photos : vue d'ensemble + 4 vues zoomées, transcription par le modèle le plus capable,
    │            puis 2e lecture de vérification contre la photo
-   │   notes : telles quelles
+   │   photos collées dans une note (« Photos CM » = ![[IMG_….jpg]]…) : retrouvées où Obsidian
+   │            les range (dossier de pièces jointes compris) et transcrites comme les autres
+   │   notes : telles quelles, avec l'emplacement de chaque photo marqué
+   │   notebooks : cellules et sorties texte · données : premières lignes · PDF très longs : survolés
    ▼ 2. ANALYSE ET PLAN
-   │   ce que chaque document apporte, notions et prérequis (y compris avec les fiches existantes),
+   │   ce que chaque document apporte et ce qu'il devient : à intégrer puis archiver, ou à garder
+   │   en place (manuel, syllabus, annales, notebook, données — reliés au skill tree),
+   │   notions et prérequis (y compris avec les fiches existantes),
    │   problèmes repérés (contradictions, énoncé sans corrigé, passages illisibles),
    │   fiches proposées : une par notion (20-40 min de travail) + une fiche d'exercices corrigés,
    │   leur plan, leurs sources, leur place dans le skill tree, le module du cours
@@ -39,6 +44,11 @@ Claude ne touche jamais au vault : il propose, tu discutes et valides, le plug-i
        fiches dans le dossier du module · sources entièrement intégrées → Archive/<cours>/<module>/
        avec un document « Sources » (transcriptions + originaux) · skill tree du cours mis à jour
 ```
+
+**Un cours ou tout le master** : un dossier en mode apprentissage est soit *un cours*, soit *plusieurs
+cours* (un sous-dossier par cours, comme « DDDF »). Dans le second cas, chaque cours a son propre skill
+tree, sa carte et son index, créés au premier passage ; le dossier du master sert de conteneur. Les
+consignes données au niveau du master valent pour tous les cours.
 
 **Lancer une synthèse** : clic droit sur le dossier d'une séance (« Semaine 2 ») → *synthétiser ce
 dossier en fiches* ; ou sélectionne des fichiers → *synthétiser ces documents* ; ou « Synthétiser un
@@ -63,7 +73,12 @@ transcription intégrale.
 
 **Reprendre ce qu'ont produit les versions précédentes** : synthétise le dossier concerné. Les notes
 fusionnées, les transcriptions séparées et les photos renommées deviennent des sources comme les autres ;
-les dossiers « Semaine N » gérés à part sont rattachés au cours, puis retirés une fois vidés.
+les notes de photos rangées dans un « 99 Archive » local sans avoir été intégrées sont reprises ; une
+ancienne transcription « <photo> — transcription.md » sert de brouillon à vérifier contre la photo ; les
+dossiers « Semaine N » gérés à part sont rattachés au cours, puis retirés une fois vidés.
+
+**Garde-fous** : une note de photos n'est archivée qu'avec toutes ses photos, et une photo seulement si
+sa transcription est entièrement dans les fiches ; un document illisible n'est jamais archivé.
 
 ## Dossiers en mode documents
 

@@ -197,13 +197,13 @@ export class Engine {
   // Managed folders
 
   /** Starts managing a folder. Returns an error message when it cannot. */
-  async addSpace(folder: string, instructions = "", mode: SpaceMode = "files"): Promise<string | null> {
+  async addSpace(folder: string, instructions = "", mode: SpaceMode = "files", level?: SpaceConfig["level"]): Promise<string | null> {
     folder = normalize(folder);
     const s = this.settings;
     if (folder !== "" && !this.io.listFolders().includes(folder)) return `Le dossier « ${folder} » n'existe pas.`;
     if (s.spaces.some((x) => x.folder === folder)) return `« ${folder || "La racine du vault"} » est déjà géré.`;
     if (isInside(folder, s.inboxFolder)) return "La boîte de réception ne peut pas être un dossier géré.";
-    s.spaces.push(newSpace(s, folder, this.vaultName, instructions, mode));
+    s.spaces.push(newSpace(s, folder, this.vaultName, instructions, mode, level));
     await this.store.save();
     return null;
   }

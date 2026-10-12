@@ -150,8 +150,24 @@ export class SynthesisPlanModal extends AsyncModal<PlanReview> {
     for (const s of job.sources) {
       const info = plan.sources.find((x) => x.sourceId === s.id);
       const li = ul.createEl("li");
-      li.createEl("code", { text: relativeTo(s.path, job.lot.space.folder) || s.path });
-      li.appendText(` — ${info ? `${info.role} : ${info.contributes}` : "(non décrit)"}`);
+      li.createEl("code", { text: `${s.id} · ${relativeTo(s.path, job.lot.space.folder) || s.path}` });
+      if (s.embeddedIn) li.appendText(` (photo de ${s.embeddedIn})`);
+      li.appendText(` — ${info ? `${info.role} : ${info.contributes}` : "(non décrit)"} `);
+      if (info) {
+        const forced = job.extracts.get(s.id)?.survey || s.kind === "notebook" || s.kind === "data" || s.kind === "other";
+        const select = li.createEl("select", { cls: "dropdown cc-disposition" });
+        select.createEl("option", { value: "integrate", text: "à intégrer puis archiver" });
+        select.createEl("option", { value: "keep", text: "à garder en place (référence)" });
+        select.value = info.disposition;
+        select.disabled = forced || !!s.embeddedIn;
+        select.onchange = () => {
+          info.disposition = select.value as "integrate" | "keep";
+          const used = plan.fiches.some((f) => f.sources.some((x) => x.sourceId === s.id));
+          job.unassigned = job.unassigned.filter((id) => id !== s.id);
+          if (info.disposition === "integrate" && !used) job.unassigned.push(s.id);
+          this.render();
+        };
+      }
       if (job.unassigned.includes(s.id)) li.createDiv({ cls: "cc-warning-text", text: "⚠ Aucune fiche n'utilise ce document : il ne sera pas archivé. Signale-le dans tes retours." });
     }
     if (plan.issues.length) {
@@ -289,17 +305,17 @@ export class SynthesisResultModal extends AsyncModal<ResultReview> {
     if (this.busy) return this.renderBusy();
     this.showError(contentEl);
 
-    const covered = job.coverage.filter((c) => c.sourceId.startsWith("S") && c.covered).length;
-    const total = job.sources.length;
+    const covered = job.coverage.filter((c) => c.sourceId.startsWith("S") && c.covered && !c.kept).length;
+    const total = job.coverage.filter((c) => c.sourceId.startsWith("S") && !c.kept).length;
     const cov = contentEl.createDiv({ cls: `callout ${covered === total ? "cc-ok" : "cc-questions"}` });
     cov.createDiv({ cls: "callout-title", text: `Contrôle de couverture : ${covered}/${total} document(s) entièrement intégrés` });
     const ul = cov.createEl("ul");
     for (const c of job.coverage) {
       const li = ul.createEl("li");
-      li.appendText(`${c.covered ? "✓" : "✗"} ${relativeTo(c.path, job.lot.space.folder) || c.path}`);
+      li.appendText(`${c.kept ? "↷" : c.covered ? "✓" : "✗"} ${relativeTo(c.path, job.lot.space.folder) || c.path}${c.kept ? " (gardé en place)" : ""}`);
       if (!c.covered && c.missing.length) li.createDiv({ cls: "cc-muted", text: `Manque : ${c.missing.map((m) => m.item).join(" ; ")}` });
     }
-    cov.createDiv({ cls: "cc-muted", text: "Les documents ✓ seront déplacés dans l'archive, avec un document « Sources » qui garde leurs transcriptions. Les ✗ restent en place." });
+    cov.createDiv({ cls: "cc-muted", text: "Les documents ✓ seront déplacés dans l'archive, avec un document « Sources » qui garde leurs transcriptions. Les ✗ restent en place ; les ↷ (références, notebooks, données) restent en place et sont reliés au skill tree." });
 
     for (const w of job.written) {
       const det = contentEl.createEl("details", { cls: "cc-section" });

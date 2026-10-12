@@ -27,9 +27,12 @@ et exacte, que l'étudiant puisse utiliser à la place de la photo.
 description : ce qu'est la photo (tableau, cahier, feuille), son sujet et tout repère visible (séance, exercice, date).`;
 }
 
-export function photoPrompt(path: string, labels: string[], readWithTool: boolean): string {
+export function photoPrompt(path: string, labels: string[], readWithTool: boolean, prior: string | null = null): string {
   const views = labels.map((l, i) => `- vue ${i + 1} : ${l}`).join("\n");
-  return `Photo : ${path}\nVues fournies${readWithTool ? " (à lire avec l'outil Read)" : " (jointes ci-dessus)"} :\n${views}`;
+  const old = prior
+    ? `\n\n## Transcription antérieure (version précédente de l'outil)\nSers-t'en comme aide à la lecture, sans la recopier aveuglément : la photo fait foi, corrige-la et complète-la.\n\`\`\`markdown\n${prior}\n\`\`\``
+    : "";
+  return `Photo : ${path}\nVues fournies${readWithTool ? " (à lire avec l'outil Read)" : " (jointes ci-dessus)"} :\n${views}${old}`;
 }
 
 export function verifySystem(settings: CuratorSettings): string {
@@ -82,8 +85,15 @@ avant la rédaction. Procède ainsi :
    complète-la (action = extend, path = son chemin) plutôt que d'en créer une concurrente.
    Pour chaque fiche : objectif (ce qu'on sait faire après), plan des sections dans l'ordre (avec ce que contient chacune, inspiré du gabarit),
    sources qui l'alimentent avec ce que chacune apporte, prérequis (ids de fiches, nouvelles ou existantes), mots-clés.
-4. Tout le contenu de chaque source doit trouver sa place dans au moins une fiche : chaque source apparaît dans les sources d'au moins une fiche.
-   Les sources seront archivées une fois intégrées.
+4. Destination de chaque source (disposition, dans sources) :
+   - integrate : son contenu entier va dans les fiches, puis elle est archivée. C'est le cas des slides et polys de la séance, des feuilles
+     d'exercices, des photos, des notes personnelles. Une source integrate apparaît dans les sources d'au moins une fiche.
+   - keep : elle reste en place, reliée au skill tree, sans être transcrite dans les fiches : manuel ou livre, notes de cours complètes
+     d'un autre auteur, syllabus, annales servant d'entraînement, notebooks et données (à citer dans la fiche qui en parle). Les documents
+     seulement survolés (signalés comme tels) sont forcément keep.
+   Les photos insérées dans une note (marquées « ⟨photo transcrite : voir Sx⟩ ») sont des sources à part entière : leur transcription est
+   le vrai contenu de la note ; elles vont avec la note dans les mêmes fiches.
+   S'il n'y a rien à apprendre dans le lot (que des références), fiches peut être vide.
 5. Module. La séance rejoint un module existant du cours (mode existing, même id) ou en ouvre un nouveau (mode new). folder : dossier du module
    dans le cours, nommé selon les conventions existantes (sinon « NN Titre », numéroté dans l'ordre du cours). Les fiches vont dans ce dossier,
    nommées « N - Titre.md » dans l'ordre d'apprentissage (ou selon les conventions existantes du cours).
@@ -111,7 +121,7 @@ export function sourcesBlock(sources: Source[], extracts: Map<string, Extract>):
   return sources
     .map((s) => {
       const e = extracts.get(s.id);
-      const head = `### ${s.id} — ${s.path}${e?.description ? `\n(${e.description})` : ""}${e?.editedByUser ? "\n(transcription relue et corrigée par l'utilisateur)" : ""}`;
+      const head = `### ${s.id} — ${s.path}${s.embeddedIn ? ` (photo insérée dans ${s.embeddedIn})` : ""}${e?.survey ? "\n(document seulement survolé : à garder comme référence)" : ""}${e?.description ? `\n(${e.description})` : ""}${e?.editedByUser ? "\n(transcription relue et corrigée par l'utilisateur)" : ""}`;
       if (!e) return `${head}\n(contenu non disponible)`;
       const unc = e.uncertain.length ? `\nPassages incertains : ${e.uncertain.join(" ; ")}` : "";
       const trunc = e.truncated ? `\n(${e.truncated})` : "";
