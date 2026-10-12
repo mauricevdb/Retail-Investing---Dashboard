@@ -1,7 +1,7 @@
-# Vault Curator — export pour diagnostic.
-# Rassemble, pour les dossiers gérés par le plug-in : la liste de tous les fichiers (chemin, taille),
-# le contenu des notes (.md), canvas et cartes (_curator.json), et les données du plug-in sans la clé API.
-# Les photos et PDF ne sont PAS copiés (seulement listés), sauf avec -WithMedia.
+# Vault Curator - export pour diagnostic.
+# Rassemble, pour les dossiers geres par le plug-in : la liste de tous les fichiers (chemin, taille),
+# le contenu des notes (.md), canvas et cartes (_curator.json), et les donnees du plug-in sans la cle API.
+# Les photos et PDF ne sont PAS copies (seulement listes), sauf avec -WithMedia.
 # Usage : powershell -ExecutionPolicy Bypass -File export-diagnostic.ps1 -Vault "C:\Obsidian"
 param(
   [string]$Vault = "C:\Obsidian",
@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 $plugin = Join-Path $Vault ".obsidian\plugins\course-curator"
 $dataFile = Join-Path $plugin "data.json"
-if (-not (Test-Path $dataFile)) { throw "data.json introuvable dans $plugin : le plug-in a-t-il déjà été utilisé ?" }
+if (-not (Test-Path $dataFile)) { throw "data.json introuvable dans $plugin : le plug-in a-t-il deja ete utilise ?" }
 $out = Join-Path ([Environment]::GetFolderPath("Desktop")) "vault-curator-diagnostic"
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Path $out | Out-Null
@@ -48,4 +48,4 @@ $zip = "$out.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path "$out\*" -DestinationPath $zip
 Remove-Item $out -Recurse -Force
-Write-Host "Export prêt : $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) Mo)"
+Write-Host "Export pret : $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) Mo)"

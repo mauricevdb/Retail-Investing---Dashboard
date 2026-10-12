@@ -1,9 +1,9 @@
-# Vault Curator — export des cours pour un essai complet sur une copie.
+# Vault Curator - export des cours pour un essai complet sur une copie.
 # Un zip par cours (sous-dossier du dossier des cours), avec tout son contenu (PDF, photos, notes,
-# notebooks) et les images collées dans ses notes, retrouvées où Obsidian les a rangées (pièces jointes).
-# Ne sont pas copiés : les fichiers de données (csv, zip, gros txt…) et les fichiers de plus de -MaxMB Mo
-# (seulement listés). Un zip "_racine" contient le reste du dossier des cours (99 Archive, À faire…) et les
-# données du plug-in sans la clé API.
+# notebooks) et les images collees dans ses notes, retrouvees ou Obsidian les a rangees (pieces jointes).
+# Ne sont pas copies : les fichiers de donnees (csv, zip, gros txt...) et les fichiers de plus de -MaxMB Mo
+# (seulement listes). Un zip "_racine" contient le reste du dossier des cours (99 Archive, A faire...) et les
+# donnees du plug-in sans la cle API.
 # Usage : powershell -ExecutionPolicy Bypass -File export-courses.ps1 -Vault "C:\Obsidian" -Root "DDDF"
 param(
   [string]$Vault = "C:\Obsidian",
@@ -86,4 +86,4 @@ if (Test-Path $dataFile) {
 Export-Set "_racine" $rest
 $listing | Export-Csv (Join-Path $out "fichiers.csv") -NoTypeInformation -Encoding UTF8
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-Write-Host "`nExport prêt dans $out — dépose tout le dossier dans Google Drive."
+Write-Host "`nExport pret dans $out - depose tout le dossier dans Google Drive."
