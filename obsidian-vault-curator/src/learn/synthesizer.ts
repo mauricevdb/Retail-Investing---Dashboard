@@ -88,6 +88,8 @@ export interface SynthesisReport {
   kept: string[];
   /** Left in place because their content is not fully in the notes yet. */
   pending: string[];
+  /** Existing notes and non-course files: left as they are. */
+  untouched: string[];
   /** Where each moved source went (old path → new path). */
   moved: Record<string, string>;
   archiveDoc: string;
@@ -458,7 +460,7 @@ export class Synthesizer {
       maxTokens: 32000,
       signal,
     });
-    return this.prepare({ lot, sources, extracts, course, map, plan, request, round: 1, history: [], unassigned: [], written: [], coverage: [] });
+    return await this.prepare({ lot, sources, extracts, course, map, plan, request, round: 1, history: [], unassigned: [], written: [], coverage: [] });
   }
 
   async revise(job: SynthesisJob, feedback: SynthesisFeedback, progress: Progress, signal?: AbortSignal): Promise<SynthesisJob> {
@@ -477,11 +479,11 @@ export class Synthesizer {
       maxTokens: 32000,
       signal,
     });
-    return this.prepare({ ...job, plan, request: { ...job.request, prompt: original }, round: job.round + 1, history: [...job.history, text || "(aucun commentaire)"], written: [], coverage: [] });
+    return await this.prepare({ ...job, plan, request: { ...job.request, prompt: original }, round: job.round + 1, history: [...job.history, text || "(aucun commentaire)"], written: [], coverage: [] });
   }
 
   /** Makes Claude's plan safe: paths inside the course, unique ids, every source accounted for. */
-  private prepare(job: SynthesisJob): SynthesisJob {
+  private async prepare(job: SynthesisJob): Promise<SynthesisJob> {
     const space = job.lot.space;
     const inSpace = (p: string) => {
       const clean = sanitizePath(p);
@@ -496,18 +498,22 @@ export class Synthesizer {
     const fichesDir = this.fichesDir(plan.module.folder);
     const seen = new Set<string>();
     const existingIds = new Set(job.map ? allSections(job.map).map((s) => s.id) : []);
+    // Existing notes placed in the tree as they are must exist.
+    plan.fiches = plan.fiches.filter((f) => f.action !== "keep" || (f.path && this.io.exists(inSpace(f.path))));
     for (const f of plan.fiches) {
       let id = slugify(f.id || f.title) || "fiche";
       while (seen.has(id) || (f.action === "create" && existingIds.has(id))) id = `${id}-b`;
       seen.add(id);
       f.id = id;
       delete f.moveFrom;
+      if (f.action === "keep") f.path = inSpace(f.path);
       if (f.action === "extend") {
         f.path = inSpace(f.path || "");
         if (extname(f.path) !== "md") f.path = `${f.path}.md`;
         if (!this.io.exists(f.path)) f.action = "create";
-        // A note of this session written elsewhere (by an older version, at the session root) joins the notes folder.
-        else if (dirname(f.path) !== fichesDir && isInside(f.path, plan.module.folder)) f.moveFrom = f.path;
+        // A note an older version of the plug-in wrote at the session root joins the notes folder.
+        // Notes the user organised elsewhere stay where they are.
+        else if (dirname(f.path) === plan.module.folder && /^---[\s\S]*?\ncurator:\s*fiche\b/m.test((await this.io.read(f.path)).slice(0, 600))) f.moveFrom = f.path;
       }
       f.outline = f.outline ?? [];
       f.sources = (f.sources ?? []).filter((x) => job.sources.some((s) => s.id === x.sourceId));
@@ -520,16 +526,23 @@ export class Synthesizer {
       f.dependsOn = f.dependsOn ?? [];
       f.keywords = f.keywords ?? [];
     }
-    // Every source gets a disposition. What was only skimmed, notebooks and data stay in place;
-    // embedded photos are always integrated (their transcription is the point).
+    // Every document gets a disposition. A note the plan keeps or extends is a note, not a source; what was
+    // only skimmed is a reference; notebooks and data are never transcribed; embedded photos always are.
     const given = new Map((plan.sources ?? []).map((x) => [x.sourceId, x]));
+    const notes = new Set(plan.fiches.filter((f) => f.action !== "create").map((f) => f.moveFrom ?? f.path));
     plan.sources = job.sources.map((src) => {
       const g = given.get(src.id);
       const e = job.extracts.get(src.id);
-      const forcedKeep = e?.survey || src.kind === "notebook" || src.kind === "data" || src.kind === "other";
-      const disposition: Disposition = forcedKeep ? "keep" : src.embeddedIn ? "integrate" : (g?.disposition ?? "integrate");
+      const asked = g?.disposition ?? "integrate";
+      let disposition: Disposition = asked;
+      if (notes.has(src.path)) disposition = "note";
+      else if (src.embeddedIn) disposition = "integrate";
+      else if (e?.survey && src.kind !== "data") disposition = asked === "ignore" ? "ignore" : "reference";
+      else if (src.kind === "notebook" || src.kind === "data" || src.kind === "other") disposition = asked === "integrate" ? "keep" : asked;
       return { sourceId: src.id, role: g?.role ?? "", contributes: g?.contributes ?? "", disposition };
     });
+    // A note kept or extended is not a source of the other notes.
+    for (const f of plan.fiches) f.sources = f.sources.filter((x) => this.dispositionIn(plan, x.sourceId) !== "note" || f.action === "extend");
     this.numberFiches(plan, fichesDir);
     plan.tree = { moduleOrder: plan.tree?.moduleOrder ?? [], updates: (plan.tree?.updates ?? []).filter((u) => u.id && !plan.fiches.some((f) => f.id === u.id)) };
     const used = new Set(plan.fiches.flatMap((f) => f.sources.map((x) => x.sourceId)));
@@ -557,7 +570,7 @@ export class Synthesizer {
    * notes already there keep their name, new ones (and moved ones) follow.
    */
   private numberFiches(plan: SynthesisPlan, fichesDir: string) {
-    const staying = new Set(plan.fiches.filter((f) => f.action === "extend" && !f.moveFrom).map((f) => f.path));
+    const staying = new Set(plan.fiches.filter((f) => f.action === "keep" || (f.action === "extend" && !f.moveFrom)).map((f) => f.path));
     const numberOf = (p: string) => Number(/^(\d+)/.exec(basename(p))?.[1] ?? 0);
     const present = this.io.listFiles().filter((f) => dirname(f.path) === fichesDir && extname(f.path) === "md");
     let n = Math.max(0, ...present.map((f) => numberOf(f.path)));
@@ -574,7 +587,10 @@ export class Synthesizer {
   }
 
   disposition(job: SynthesisJob, sourceId: string): Disposition {
-    return job.plan.sources.find((x) => x.sourceId === sourceId)?.disposition ?? "integrate";
+    return this.dispositionIn(job.plan, sourceId);
+  }
+  private dispositionIn(plan: SynthesisPlan, sourceId: string): Disposition {
+    return plan.sources.find((x) => x.sourceId === sourceId)?.disposition ?? "integrate";
   }
 
   private async courseContext(space: SpaceInventory, map: SpaceMap | null): Promise<CourseContext> {
@@ -634,7 +650,7 @@ export class Synthesizer {
 
   async write(job: SynthesisJob, progress: Progress, signal?: AbortSignal, comments = new Map<string, string>()): Promise<SynthesisJob> {
     const layout = this.archiveLayout(job);
-    const fiches = job.plan.fiches;
+    const fiches = job.plan.fiches.filter((f) => f.action !== "keep");
     if (!fiches.length) {
       job.written = [];
       await this.checkCoverage(job, progress, signal);
@@ -713,7 +729,7 @@ export class Synthesizer {
 
     if (!job.written.length) {
       job.coverage = [
-        ...job.sources.filter((s) => this.disposition(job, s.id) === "keep").map(keepEntry),
+        ...job.sources.filter((s) => this.disposition(job, s.id) !== "integrate").map(keepEntry),
         ...integrate.map((s) => ({ sourceId: s.id, path: s.path, covered: false, missing: [{ item: "aucune fiche ne reprend ce document", fiche: "" }] })),
       ];
       return;
@@ -784,7 +800,7 @@ export class Synthesizer {
         c.missing.push({ item: `photo(s) pas entièrement intégrée(s) : ${open.map((o) => o.id).join(", ")}`, fiche: "" });
       }
     }
-    for (const s of job.sources.filter((x) => this.disposition(job, x.id) === "keep")) job.coverage.push(keepEntry(s));
+    for (const s of job.sources.filter((x) => this.disposition(job, x.id) !== "integrate")) job.coverage.push(keepEntry(s));
   }
 
   // -------------------------------------------------------------------------
@@ -800,7 +816,7 @@ export class Synthesizer {
       steps: [],
       mapsBefore: { [space.folder]: job.map },
     };
-    const report: SynthesisReport = { fiches: [], archived: [], kept: [], pending: [], archiveDoc: "", canvas: space.generated.canvas, moved: {} };
+    const report: SynthesisReport = { fiches: [], archived: [], kept: [], pending: [], untouched: [], archiveDoc: "", canvas: space.generated.canvas, moved: {} };
     const steps: JournalStep[] = entry.steps;
     const coveredIds = new Set(job.coverage.filter((c) => c.covered && !c.kept && c.sourceId.startsWith("S")).map((c) => c.sourceId));
     const move = async (from: string, to: string) => {
@@ -838,7 +854,12 @@ export class Synthesizer {
           report.archiveDoc = layout.doc;
         }
         for (const src of job.sources) {
-          const keep = this.disposition(job, src.id) === "keep";
+          const disposition = this.disposition(job, src.id);
+          if (disposition === "note" || disposition === "ignore") {
+            report.untouched.push(src.path);
+            continue;
+          }
+          const keep = disposition !== "integrate";
           if (!this.io.exists(src.path) || (!keep && !coveredIds.has(src.id))) {
             (keep ? report.kept : report.pending).push(src.path);
             continue;
@@ -885,7 +906,7 @@ export class Synthesizer {
         // Ledger: the notes are known; so are the lot's documents left in place (not proposed again
         // until they change). Other raw documents of the course stay "new" until they are synthesised.
         const ledger = this.engine.data.ledger;
-        const done = new Set([...report.fiches, ...report.kept.map((p) => report.moved[p] ?? p), ...report.pending]);
+        const done = new Set([...report.fiches, ...report.kept.map((p) => report.moved[p] ?? p), ...report.pending, ...report.untouched]);
         for (const f of this.engine.space(space.folder)?.files ?? []) {
           if (done.has(f.path)) ledger[f.path] = { ...(ledger[f.path] ?? {}), fp: `${f.size}:${Math.round(f.mtime)}`, known: true };
         }
@@ -902,7 +923,9 @@ export class Synthesizer {
    */
   private finalPath(job: SynthesisJob, layout: ReturnType<Synthesizer["archiveLayout"]>, src: Source): string {
     if (isInside(src.path, layout.dir)) return src.path;
-    const keep = this.disposition(job, src.id) === "keep";
+    const disposition = this.disposition(job, src.id);
+    if (disposition === "reference" || disposition === "note" || disposition === "ignore") return src.path;
+    const keep = disposition === "keep";
     if (keep && !(job.lot.folder && job.lot.folder !== job.lot.space.folder && isInside(src.path, job.lot.folder))) return src.path;
     return layout.target.get(src.id)!;
   }
@@ -928,7 +951,7 @@ export class Synthesizer {
       const parent = s.embeddedIn ? job.sources.find((x) => x.id === s.embeddedIn) : null;
       lines.push(`## ${s.id} — ${basename(s.path)}`);
       if (archived) lines.push(`Archivé depuis \`${s.path}\`${parent ? ` (photo insérée dans ${parent.id}, ${basename(parent.path)})` : ""}.`);
-      else if (this.disposition(job, s.id) === "keep") lines.push(`Gardé en place (référence, notebook ou données) : [[${s.path}]].`);
+      else if (this.disposition(job, s.id) !== "integrate") lines.push(`Non transcrit (${this.disposition(job, s.id)}) : [[${this.finalPath(job, layout, s)}]].`);
       else lines.push(`> [!warning] Non archivé (contenu pas entièrement intégré) : reste à \`${s.path}\`.`);
       if (s.kind === "image") lines.push("", `![[${where}]]`);
       else lines.push("", `[[${where}|Ouvrir l'original]]`);
@@ -958,7 +981,8 @@ export class Synthesizer {
           linkKind: "prerequisite",
           sections: [],
           transverse: [],
-          keptDashboards: [],
+          // Skill trees or dashboards the user made for this course stay, linked from ours.
+          keptDashboards: (this.engine.space(space.folder) ?? space).files.map((f) => f.path).filter((p) => fileKind(p) === "canvas" && p !== space.generated.canvas),
           updatedAt: new Date().toISOString(),
         };
     if (map.linkKind === "none") map.linkKind = "prerequisite";
@@ -976,9 +1000,15 @@ export class Synthesizer {
     map.sections = map.sections.filter((s) => s.resources.length || s.children.length || s.id === job.plan.module.id);
 
     const m = job.plan.module;
-    if (!job.written.length) {
-      // Nothing to learn from here (syllabus, textbooks…): course-wide references.
-      for (const old of report.kept) {
+    // Course-wide references (syllabus, textbooks…) sit beside the tree, not in a session.
+    const isRef = (old: string) => this.disposition(job, job.sources.find((x) => x.path === old)!.id) === "reference";
+    for (const old of report.kept.filter(isRef)) {
+      if (map.transverse.some((r) => r.path === old) || allSections(map).some((s) => s.resources.some((r) => r.path === old))) continue;
+      const src = job.sources.find((s) => s.path === old)!;
+      map.transverse.push({ path: old, role: keptRole(src, job.plan.sources.find((x) => x.sourceId === src.id)?.role ?? ""), label: basename(old).replace(/\.[^.]+$/, "") });
+    }
+    if (!job.plan.fiches.length) {
+      for (const old of report.kept.filter((p) => !isRef(p))) {
         const path = report.moved[old] ?? old;
         if (map.transverse.some((r) => r.path === path) || allSections(map).some((s) => s.resources.some((r) => r.path === path))) continue;
         const src = job.sources.find((s) => s.path === old)!;
@@ -1000,7 +1030,7 @@ export class Synthesizer {
     if (report.archiveDoc && !section.resources.some((r) => r.path === layout.doc)) section.resources.push({ path: layout.doc, role: "archive", label: `Transcriptions — ${job.plan.session || job.lot.name}` });
     // The session's inputs stay reachable from the skill tree: documents kept on purpose, and the archived
     // slides, sheets and notes (photos are in the transcriptions document).
-    for (const old of [...report.kept, ...report.archived]) {
+    for (const old of [...report.kept.filter((p) => !isRef(p)), ...report.archived]) {
       const src = job.sources.find((s) => s.path === old)!;
       if (src.kind === "image") continue;
       const path = report.moved[old] ?? old;
@@ -1008,8 +1038,7 @@ export class Synthesizer {
       section.resources.push({ path, role: keptRole(src, job.plan.sources.find((x) => x.sourceId === src.id)?.role ?? ""), label: basename(path).replace(/\.[^.]+$/, "") });
     }
 
-    for (const w of job.written) {
-      const f = w.plan;
+    for (const f of job.plan.fiches) {
       const node: SectionNode = {
         id: f.id,
         title: f.title,

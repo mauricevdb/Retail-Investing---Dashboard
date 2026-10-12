@@ -154,7 +154,7 @@ describe("Synthesizer", () => {
     const archive = await io.read(report.archiveDoc);
     expect(archive).toContain("![[ML/Semaine 2/Sources/IMG_1.jpg]]");
     expect(archive).toContain("$DW \\approx 2(1-\\rho)$");
-    expect(archive).toContain("Gardé en place");
+    expect(archive).toContain("Non transcrit (keep)");
 
     const map = JSON.parse(await io.read("ML/_curator.json")) as SpaceMap;
     const module = map.sections.find((s) => s.id === "knn")!;
@@ -280,6 +280,56 @@ describe("Session layout", () => {
     expect(await io.read("ML/Semaine 2/Fiches/01 - Distances and norms.md")).toContain("rédaction");
     const map = JSON.parse(await io.read("ML/_curator.json")) as SpaceMap;
     expect(map.sections[0].children.map((c) => [c.id, c.dependsOn])).toEqual([["distances", []], ["knn-principe", ["distances"]]]);
+  });
+});
+
+describe("A course the student already organised", () => {
+  it("keeps their study notes as notes of the tree, extends them in place and leaves their tools alone", async () => {
+    write("LA/modules/M01 Vector spaces.md", "# M01 Vector spaces\n## Notions\nBasis, dimension.");
+    write("LA/modules/M11 SVD.md", "# M11 SVD\n## Notions\nA = U Σ V^T.");
+    write("LA/README.md", "# Pi course modules\nUse `learn M07`.");
+    write("LA/00 Skill tree.canvas", '{"nodes":[],"edges":[]}');
+    write("LA/2026-10-02 - Tableau - SVD.jpg", fs.readFileSync(path.join(__dirname, "fixtures/board.jpg")));
+    const ids = new Map<string, string>();
+    const llm = new FakeLlm((req) => {
+      if (req.label.startsWith("transcription")) return { description: "tableau", transcript: "SVD au tableau", uncertain: [] };
+      if (req.label.startsWith("vérification")) return { transcript: "SVD au tableau : rang = nombre de valeurs singulières", corrections: [], uncertain: [] };
+      if (req.label.startsWith("plan de synthèse")) {
+        for (const m of req.prompt.matchAll(/^### (S\d+) — (\S.*?)$/gm)) ids.set(m[2], m[1]);
+        const id = (suffix: string) => [...ids].find(([p]) => p.endsWith(suffix))![1];
+        return {
+          ...plan,
+          sources: [{ sourceId: id("README.md"), role: "outil", contributes: "", disposition: "ignore" }],
+          module: { ...plan.module, id: "svd", title: "SVD", folder: "LA/modules" },
+          fiches: [
+            { ...plan.fiches[0], id: "m01", title: "M01 Vector spaces", path: "LA/modules/M01 Vector spaces.md", action: "keep", sources: [], dependsOn: [] },
+            { ...plan.fiches[0], id: "m11", title: "M11 SVD", path: "LA/modules/M11 SVD.md", action: "extend", sources: [{ sourceId: id("SVD.jpg"), what: "tableau" }], dependsOn: ["m01"] },
+          ],
+        };
+      }
+      if (req.label.startsWith("rédaction")) return { content: "# M11 SVD\n## Notions\nA = U Σ V^T.\nRang = nombre de valeurs singulières.", summary: "" };
+      if (req.label.startsWith("contrôle")) return { sources: [...ids.values()].map((sourceId) => ({ sourceId, covered: true, missing: [] })) };
+      throw new Error(req.label);
+    });
+    const engine = new Engine(io, () => llm, { data, save: async () => undefined }, "Vault");
+    const syn = new Synthesizer(engine);
+    await engine.addSpace("LA", "", "learning");
+    const lots = await syn.courseLots(engine.space("LA")!);
+    let job = await syn.plan(lots.find((l) => l.folder === null)!, () => undefined);
+    // Lots are per folder: the root lot has the photo and the README; modules are the student's notes.
+    expect(job.plan.fiches.map((f) => [f.action, f.path])).toEqual([["keep", "LA/modules/M01 Vector spaces.md"], ["extend", "LA/modules/M11 SVD.md"]]);
+    expect(job.plan.fiches[1].moveFrom).toBeUndefined();
+    expect(syn.disposition(job, ids.get("LA/README.md")!)).toBe("ignore");
+    job = await syn.write(job, () => undefined);
+    expect(job.written.map((w) => w.plan.id)).toEqual(["m11"]);
+    const report = await syn.apply(job, () => undefined);
+    expect(await io.read("LA/modules/M01 Vector spaces.md")).toBe("# M01 Vector spaces\n## Notions\nBasis, dimension.");
+    expect(await io.read("LA/modules/M11 SVD.md")).toContain("Rang = nombre de valeurs singulières.");
+    expect(await io.read("LA/README.md")).toContain("learn M07");
+    expect(report.untouched).toEqual(["LA/README.md"]);
+    const map = JSON.parse(await io.read("LA/_curator.json")) as SpaceMap;
+    expect(map.sections[0].children.map((c) => [c.id, c.dependsOn])).toEqual([["m01", []], ["m11", ["m01"]]]);
+    expect(map.keptDashboards).toEqual(["LA/00 Skill tree.canvas"]);
   });
 });
 

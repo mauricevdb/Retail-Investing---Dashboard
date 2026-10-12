@@ -86,12 +86,18 @@ avant la rédaction. Procède ainsi :
    complète-la (action = extend, path = son chemin) plutôt que d'en créer une concurrente.
    Pour chaque fiche : objectif (ce qu'on sait faire après), plan des sections dans l'ordre (avec ce que contient chacune, inspiré du gabarit),
    sources qui l'alimentent avec ce que chacune apporte, prérequis (ids de fiches, nouvelles ou existantes), mots-clés.
-4. Destination de chaque source (disposition, dans sources) :
-   - integrate : son contenu entier va dans les fiches, puis elle est archivée. C'est le cas des slides et polys de la séance, des feuilles
-     d'exercices, des photos, des notes personnelles. Une source integrate apparaît dans les sources d'au moins une fiche.
-   - keep : elle reste en place, reliée au skill tree, sans être transcrite dans les fiches : manuel ou livre, notes de cours complètes
-     d'un autre auteur, syllabus, annales servant d'entraînement, notebooks et données (à citer dans la fiche qui en parle). Les documents
-     seulement survolés (signalés comme tels) sont forcément keep.
+4. Destination de chaque document (disposition, dans sources) :
+   - integrate : son contenu entier va dans les fiches, puis il rejoint le dossier Sources de la séance. C'est le cas des slides et polys
+     de la séance, des feuilles d'exercices, des photos, des notes brutes prises en cours. Il apparaît dans les sources d'au moins une fiche.
+   - keep : matériel de la séance non transcrit (notebook, données, annexe) : rejoint Sources, relié au skill tree, cité par la fiche concernée.
+   - reference : référence du cours entier (syllabus, manuel, polycopié complet d'un autre auteur, annales) : reste où il est, relié au
+     skill tree. Les documents seulement survolés (signalés comme tels) sont des références.
+   - ignore : pas du contenu de cours (README d'un outil, journal de session, fichier de configuration, consignes pour un autre assistant) :
+     on n'y touche pas.
+   Les fiches de révision DÉJÀ STRUCTURÉES (rédigées par l'étudiant ou un autre outil : notions, exemples, exercices organisés) ne sont pas
+   des sources : ce sont des fiches. Mets-les dans fiches avec leur chemin et action « keep » (gardée telle quelle, placée dans le
+   skill tree avec ses prérequis) ou « extend » si les documents bruts de la séance les complètent. Ne propose jamais une fiche
+   concurrente d'une fiche existante. Respecte l'organisation que l'étudiant a déjà construite (ses noms, ses dossiers, ses modules).
    Les photos insérées dans une note (marquées « ⟨photo transcrite : voir Sx⟩ ») sont des sources à part entière : leur transcription est
    le vrai contenu de la note ; elles vont avec la note dans les mêmes fiches.
    S'il n'y a rien à apprendre dans le lot (que des références), fiches peut être vide.

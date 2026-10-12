@@ -15,11 +15,14 @@ export interface Source {
 }
 
 /**
- * What happens to a source once the notes are written: "integrate" (its whole content goes into the notes,
- * then it is archived) or "keep" (reference material — textbook, syllabus, annals —, notebooks and data
- * files: linked from the skill tree, left in place).
+ * What happens to a document of the lot once the notes are written:
+ * - integrate: its whole content goes into the notes, then it moves to the session's Sources folder;
+ * - keep: session material not transcribed (notebook, data, annex): moves to Sources, linked from the tree;
+ * - reference: course-wide reference (syllabus, textbook, lecture-notes volume): stays where it is, linked;
+ * - note: already a structured study note: stays where it is and is a note of the skill tree (set by the plug-in);
+ * - ignore: not course content (a tool's README, logs, configuration): left untouched, not in the tree.
  */
-export type Disposition = "integrate" | "keep";
+export type Disposition = "integrate" | "keep" | "reference" | "note" | "ignore";
 
 /** Faithful, complete content of a source (not a summary). */
 export interface Extract {
@@ -45,7 +48,8 @@ export interface FichePlan {
   title: string;
   /** Vault path of the note. */
   path: string;
-  action: "create" | "extend";
+  /** keep: an existing study note placed in the skill tree as it is (nothing written). */
+  action: "create" | "extend" | "keep";
   /** An existing note being extended that moves into the session's notes folder (set by the plug-in). */
   moveFrom?: string;
   objective: string;

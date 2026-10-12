@@ -158,11 +158,16 @@ export class SynthesisPlanModal extends AsyncModal<PlanReview> {
         const forced = job.extracts.get(s.id)?.survey || s.kind === "notebook" || s.kind === "data" || s.kind === "other";
         const select = li.createEl("select", { cls: "dropdown cc-disposition" });
         select.createEl("option", { value: "integrate", text: "à intégrer puis archiver" });
-        select.createEl("option", { value: "keep", text: "à garder en place (référence)" });
+        select.createEl("option", { value: "keep", text: "à ranger dans Sources sans transcrire" });
+        select.createEl("option", { value: "reference", text: "référence du cours (reste en place)" });
+        select.createEl("option", { value: "ignore", text: "hors cours (on n'y touche pas)" });
+        if (info.disposition === "note") select.createEl("option", { value: "note", text: "fiche existante" });
         select.value = info.disposition;
-        select.disabled = forced || !!s.embeddedIn;
+        if (forced) select.querySelector('option[value="integrate"]')?.remove();
+        select.value = info.disposition;
+        select.disabled = !!s.embeddedIn || info.disposition === "note";
         select.onchange = () => {
-          info.disposition = select.value as "integrate" | "keep";
+          info.disposition = select.value as "integrate" | "keep" | "reference" | "ignore";
           const used = plan.fiches.some((f) => f.sources.some((x) => x.sourceId === s.id));
           job.unassigned = job.unassigned.filter((id) => id !== s.id);
           if (info.disposition === "integrate" && !used) job.unassigned.push(s.id);
@@ -294,7 +299,7 @@ export class SynthesisPlanModal extends AsyncModal<PlanReview> {
       const card = d.createDiv({ cls: "cc-fiche" });
       const head = card.createDiv({ cls: "cc-fiche-head" });
       head.createEl("strong", { text: `${i + 1}. ${f.title}` });
-      head.createSpan({ cls: "cc-muted", text: ` ${f.action === "extend" ? "· complète une fiche existante" : "· nouvelle fiche"} · ${relativeTo(f.path, job.lot.space.folder)}` });
+      head.createSpan({ cls: "cc-muted", text: ` ${f.action === "extend" ? "· complète une fiche existante" : f.action === "keep" ? "· fiche existante, placée telle quelle dans le skill tree" : "· nouvelle fiche"} · ${relativeTo(f.path, job.lot.space.folder)}` });
       card.createDiv({ text: `Objectif : ${f.objective}` });
       if (f.dependsOn.length) card.createDiv({ cls: "cc-muted", text: `Prérequis : ${f.dependsOn.map((id) => titles.get(id) ?? id).join(", ")}` });
       const ol = card.createEl("ol", { cls: "cc-outline" });

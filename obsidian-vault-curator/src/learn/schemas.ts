@@ -15,7 +15,7 @@ export const PLAN_SCHEMA = obj({
   session: str,
   language: str,
   summary: str,
-  sources: arr(obj({ sourceId: str, role: str, contributes: str, disposition: { type: "string", enum: ["integrate", "keep"] } })),
+  sources: arr(obj({ sourceId: str, role: str, contributes: str, disposition: { type: "string", enum: ["integrate", "keep", "reference", "ignore"] } })),
   issues: strs,
   module: obj({ id: str, title: str, mode: { type: "string", enum: ["new", "existing"] }, folder: str, dependsOn: strs, summary: str }),
   fiches: arr(
@@ -23,7 +23,7 @@ export const PLAN_SCHEMA = obj({
       id: str,
       title: str,
       path: str,
-      action: { type: "string", enum: ["create", "extend"] },
+      action: { type: "string", enum: ["create", "extend", "keep"] },
       objective: str,
       outline: strs,
       sources: arr(obj({ sourceId: str, what: str })),
