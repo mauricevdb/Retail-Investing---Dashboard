@@ -80,9 +80,18 @@ export interface SynthesisPlan {
   issues: string[];
   module: ModulePlan;
   fiches: FichePlan[];
+  /** How the course skill tree is reshaped around the new material (existing modules and notes included). */
+  tree: CourseTreeChanges;
   questions: string[];
   changes: string[];
   preferences: string[];
+}
+
+export interface CourseTreeChanges {
+  /** Every module of the course (new one included), in learning order. */
+  moduleOrder: string[];
+  /** Existing modules or notes whose prerequisites or summary change: dependsOn replaces the old list. */
+  updates: { id: string; dependsOn: string[]; summary: string; why: string }[];
 }
 
 export interface WrittenFiche {

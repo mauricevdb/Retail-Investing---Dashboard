@@ -10,7 +10,7 @@
 import { Engine, Progress } from "../engine";
 import { basename, dirname, extname, hash, isInside, join, matchPath, relativeTo, sanitizePath, sanitizeSegment, slugify, uniquePath } from "../core/paths";
 import { allSections } from "../core/plan";
-import { buildSessionCanvas, parseCanvas } from "../core/canvas";
+import { parseCanvas } from "../core/canvas";
 import { fileKind, isIgnored, SpaceInventory } from "../core/scan";
 import { mapPath } from "../core/settings";
 import { DocType, JournalEntry, JournalStep, Resource, SectionNode, SpaceMap, VaultFile } from "../core/types";
@@ -489,7 +489,7 @@ export class Synthesizer {
     };
     const plan = job.plan;
     // A session folder ("02 Nearest Neighbors") stays the session: its notes go to <session>/Fiches,
-    // its sources to <session>/Sources, its canvas next to them.
+    // its sources to <session>/Sources; the course has one skill tree, reshaped around them.
     const sessionFolder = job.lot.folder && job.lot.folder !== space.folder ? job.lot.folder : null;
     plan.module.folder = sessionFolder ?? inSpace(plan.module.folder || plan.module.title);
     plan.language = this.settings.ficheLanguage === "en" ? "English" : this.settings.ficheLanguage === "fr" ? "français" : plan.language || job.map?.language || "";
@@ -531,6 +531,7 @@ export class Synthesizer {
       return { sourceId: src.id, role: g?.role ?? "", contributes: g?.contributes ?? "", disposition };
     });
     this.numberFiches(plan, fichesDir);
+    plan.tree = { moduleOrder: plan.tree?.moduleOrder ?? [], updates: (plan.tree?.updates ?? []).filter((u) => u.id && !plan.fiches.some((f) => f.id === u.id)) };
     const used = new Set(plan.fiches.flatMap((f) => f.sources.map((x) => x.sourceId)));
     job.unassigned = job.sources.filter((s) => !used.has(s.id) && this.disposition(job, s.id) === "integrate").map((s) => s.id);
     plan.questions = plan.questions ?? [];
@@ -546,7 +547,8 @@ export class Synthesizer {
   sourcesDir(sessionFolder: string) {
     return join(sessionFolder, this.settings.sourcesFolder);
   }
-  sessionCanvas(sessionFolder: string) {
+  /** Where version 0.6 put a per-session canvas (retired: one skill tree per course). */
+  private legacySessionCanvas(sessionFolder: string) {
     return join(sessionFolder, `${basename(sessionFolder) || "Séance"}.canvas`);
   }
 
@@ -627,7 +629,7 @@ export class Synthesizer {
       target.set(s.id, p);
     }
     const doc = uniquePath(join(dir, `Transcriptions — ${sanitizeSegment(job.plan.session || job.lot.name).replace(/[\\/]/g, "-")}.md`), (x) => this.io.exists(x));
-    return { dir, target, doc, canvas: this.sessionCanvas(job.plan.module.folder) };
+    return { dir, target, doc };
   }
 
   async write(job: SynthesisJob, progress: Progress, signal?: AbortSignal, comments = new Map<string, string>()): Promise<SynthesisJob> {
@@ -854,11 +856,18 @@ export class Synthesizer {
           const nested = this.settings.spaces.find((x) => x.folder === job.lot.folder);
           if (nested) {
             for (const p of [nested.canvas, nested.index, mapPath(nested.folder)]) {
-              if (!this.io.exists(p) || p === layout.canvas) continue;
+              if (!this.io.exists(p)) continue;
               await move(p, uniquePath(join(layout.dir, "Anciens tableaux de bord", basename(p)), (x) => this.io.exists(x)));
             }
             this.settings.spaces = this.settings.spaces.filter((x) => x !== nested);
           }
+        }
+        // The per-session canvas of version 0.6 goes too: the course skill tree is the only one.
+        const legacy = this.legacySessionCanvas(job.plan.module.folder);
+        if (this.io.exists(legacy) && parseCanvas(await this.io.read(legacy))?.nodes.some((n) => n.id === "cc-session")) {
+          const to = uniquePath(join(layout.dir, "Anciens tableaux de bord", basename(legacy)), (x) => this.io.exists(x));
+          await move(legacy, to);
+          report.moved[legacy] = to;
         }
         await this.engine.removeEmptied(
           Object.keys(report.moved).map((p, index) => ({ kind: "move", source: p, target: null, content: null, reason: "", index, error: null })),
@@ -866,19 +875,12 @@ export class Synthesizer {
           steps,
         );
 
-        // Course skill tree, then the session canvas.
+        // The course skill tree, reshaped and completed.
         const map = this.updateMap(job, layout, report);
         const live = this.engine.space(space.folder) ?? space;
         await this.engine.writeTracked(live.generated.map, JSON.stringify(map, null, 2), steps);
         await this.engine.renderDashboards(live, map, { keepLayout: true }, steps);
-        const section = map.sections.find((x) => x.resources.some((r) => r.path === layout.canvas));
-        if (section) {
-          const previous = this.io.exists(layout.canvas) ? parseCanvas(await this.io.read(layout.canvas)) : null;
-          const pending = report.pending.filter((p) => isInside(p, job.plan.module.folder));
-          const canvas = buildSessionCanvas(section, { courseCanvas: live.generated.canvas, pending }, previous ?? undefined);
-          await this.engine.writeTracked(layout.canvas, JSON.stringify(canvas, null, "\t"), steps);
-          report.canvas = layout.canvas;
-        }
+        report.canvas = live.generated.canvas;
 
         // Ledger: the notes are known; so are the lot's documents left in place (not proposed again
         // until they change). Other raw documents of the course stay "new" until they are synthesised.
@@ -995,9 +997,8 @@ export class Synthesizer {
     section.summary = section.summary || m.summary;
     const sectionIds = new Set(map.sections.map((s) => s.id));
     section.dependsOn = [...new Set([...section.dependsOn, ...m.dependsOn.filter((d) => sectionIds.has(d) && d !== section!.id)])];
-    if (!section.resources.some((r) => r.path === layout.canvas)) section.resources.unshift({ path: layout.canvas, role: "dashboard", label: `Synthèse — ${section.title}` });
     if (report.archiveDoc && !section.resources.some((r) => r.path === layout.doc)) section.resources.push({ path: layout.doc, role: "archive", label: `Transcriptions — ${job.plan.session || job.lot.name}` });
-    // The session's inputs stay reachable from its canvas: documents kept on purpose, and the archived
+    // The session's inputs stay reachable from the skill tree: documents kept on purpose, and the archived
     // slides, sheets and notes (photos are in the transcriptions document).
     for (const old of [...report.kept, ...report.archived]) {
       const src = job.sources.find((s) => s.path === old)!;
@@ -1025,6 +1026,20 @@ export class Synthesizer {
       } else if (!section.children.some((c) => c.id === f.id)) {
         section.children.push(node);
       }
+    }
+    // The course tree reshaped around the new session: prerequisites and summaries of earlier
+    // modules and notes, and the order of the modules.
+    const nodes = new Map(allSections(map).map((s) => [s.id, s]));
+    for (const u of job.plan.tree.updates) {
+      const node = nodes.get(u.id);
+      if (!node) continue;
+      node.dependsOn = [...new Set(u.dependsOn)];
+      if (u.summary.trim()) node.summary = u.summary.trim();
+    }
+    const rank = new Map(job.plan.tree.moduleOrder.map((id, i) => [id === m.id ? section.id : id, i]));
+    if (rank.size) {
+      const before = new Map(map.sections.map((s, i) => [s.id, i]));
+      map.sections.sort((a, b) => (rank.get(a.id) ?? 1e6 + before.get(a.id)!) - (rank.get(b.id) ?? 1e6 + before.get(b.id)!));
     }
     const known = new Set(allSections(map).map((s) => s.id));
     for (const s of allSections(map)) s.dependsOn = s.dependsOn.filter((d) => known.has(d) && d !== s.id);

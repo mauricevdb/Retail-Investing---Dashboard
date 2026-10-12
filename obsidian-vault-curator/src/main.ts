@@ -495,7 +495,7 @@ export default class VaultCuratorPlugin extends Plugin {
       if (result.action !== "apply") continue;
       const report = await this.syn.apply(result.job, p);
       const n = new Notice(
-        `${lot.name} : ${report.fiches.length} fiche(s) écrite(s), ${report.archived.length + report.kept.length} source(s) rangée(s)${report.pending.length ? `, ${report.pending.length} pas encore intégrée(s) (laissées en place)` : ""}.\nCliquez pour ouvrir le canvas de la séance.`,
+        `${lot.name} : ${report.fiches.length} fiche(s) écrite(s), ${report.archived.length + report.kept.length} source(s) rangée(s)${report.pending.length ? `, ${report.pending.length} pas encore intégrée(s) (laissées en place)` : ""}.\nCliquez pour ouvrir le skill tree du cours.`,
         12000,
       );
       n.noticeEl.onclick = () => void this.openFile(report.canvas);

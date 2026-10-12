@@ -31,6 +31,7 @@ export const PLAN_SCHEMA = obj({
       keywords: strs,
     }),
   ),
+  tree: obj({ moduleOrder: strs, updates: arr(obj({ id: str, dependsOn: strs, summary: str, why: str })) }),
   questions: strs,
   changes: strs,
   preferences: strs,

@@ -1,5 +1,6 @@
 import { App, Component, MarkdownRenderer, Modal, TFile } from "obsidian";
 import { relativeTo } from "../core/paths";
+import { allSections } from "../core/plan";
 import { SynthesisFeedback, SynthesisJob } from "../learn/synthesizer";
 
 export type PlanReview = { action: "write"; job: SynthesisJob; comments: Map<string, string> } | { action: "skip" } | { action: "stop" };
@@ -179,6 +180,7 @@ export class SynthesisPlanModal extends AsyncModal<PlanReview> {
 
     this.renderTranscriptions(contentEl);
     this.renderStructure(contentEl);
+    this.renderTree(contentEl);
 
     if (plan.questions.length) {
       const q = contentEl.createDiv({ cls: "callout cc-questions" });
@@ -250,6 +252,34 @@ export class SynthesisPlanModal extends AsyncModal<PlanReview> {
       det.createEl("summary", { text: `${s.id} — ${relativeTo(s.path, job.lot.space.folder) || s.path}${e?.truncated ? ` (${e.truncated})` : ""}` });
       det.createEl("pre", { cls: "cc-merge", text: (e?.text ?? "(contenu indisponible)").slice(0, 20000) });
     }
+  }
+
+  /** How the course skill tree changes: order of the modules, earlier notes re-linked. */
+  private renderTree(parent: HTMLElement) {
+    const { job } = this;
+    const { plan } = job;
+    const existing = job.map ? allSections(job.map) : [];
+    const title = (id: string) => (id === plan.module.id ? plan.module.title : (plan.fiches.find((f) => f.id === id)?.title ?? existing.find((x) => x.id === id)?.title ?? id));
+    const d = parent.createEl("details", { cls: "cc-section" });
+    d.open = plan.tree.updates.length > 0;
+    d.createEl("summary", { text: `Skill tree du cours${plan.tree.updates.length ? ` — ${plan.tree.updates.length} modification(s) de l'existant` : ""}` });
+    if (plan.tree.moduleOrder.length) {
+      const ol = d.createEl("ol", { cls: "cc-outline" });
+      for (const id of plan.tree.moduleOrder) {
+        const li = ol.createEl("li", { text: title(id) });
+        if (id === plan.module.id) li.createSpan({ cls: "cc-muted", text: plan.module.mode === "new" ? " (nouveau)" : " (complété)" });
+      }
+    }
+    if (plan.tree.updates.length) {
+      const ul = d.createEl("ul");
+      for (const u of plan.tree.updates) {
+        const li = ul.createEl("li");
+        li.createEl("strong", { text: title(u.id) });
+        li.appendText(` — prérequis : ${u.dependsOn.map(title).join(", ") || "aucun"}${u.summary ? ` ; nouveau résumé : ${u.summary}` : ""}`);
+        if (u.why) li.createDiv({ cls: "cc-muted", text: u.why });
+      }
+    } else d.createDiv({ cls: "cc-muted", text: "Aucun changement sur les modules et fiches existants." });
+    d.createDiv({ cls: "cc-muted", text: "Un commentaire sur la place de la séance dans le cours ? Écris-le dans le commentaire général." });
   }
 
   private renderStructure(parent: HTMLElement) {

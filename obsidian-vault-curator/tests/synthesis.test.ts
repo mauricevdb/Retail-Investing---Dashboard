@@ -69,6 +69,7 @@ const plan: SynthesisPlan = {
       keywords: ["vote majoritaire"],
     },
   ],
+  tree: { moduleOrder: [], updates: [] },
   questions: ["Un module par semaine ?"],
   changes: [],
   preferences: [],
@@ -160,14 +161,11 @@ describe("Synthesizer", () => {
     expect(module.children.map((c) => c.id)).toEqual(["knn-principe"]);
     expect(module.children[0].resources[0]).toMatchObject({ path: "ML/Semaine 2/Fiches/01 - Principe du k-NN.md", role: "fiche" });
     expect(module.resources.some((r) => r.role === "archive")).toBe(true);
-    expect(module.resources[0]).toMatchObject({ path: "ML/Semaine 2/Semaine 2.canvas", role: "dashboard" });
-    expect(engine.space("ML")!.generated.canvas).toBe("ML/00 Skill tree — ML.canvas");
-    expect(parseCanvas(await io.read(engine.space("ML")!.generated.canvas))!.nodes.some((n) => n.id === "cc-m-knn-principe")).toBe(true);
-    // The session canvas: the notes (outputs) then the sources (inputs), and a way back to the course.
-    const session = parseCanvas(await io.read("ML/Semaine 2/Semaine 2.canvas"))!;
-    expect(session.nodes.find((n) => n.id === "cc-f-knn-principe")).toMatchObject({ type: "file", file: "ML/Semaine 2/Fiches/01 - Principe du k-NN.md" });
-    expect(session.nodes.some((n) => n.type === "file" && n.file === report.archiveDoc)).toBe(true);
-    expect(session.nodes.find((n) => n.id === "cc-session")!.text).toContain("[[ML/00 Skill tree — ML.canvas|Skill tree du cours]]");
+    // One skill tree, the course's: the note's card links to the note in its session folder.
+    expect(report.canvas).toBe("ML/00 Skill tree — ML.canvas");
+    const tree = parseCanvas(await io.read(report.canvas))!;
+    expect(tree.nodes.find((n) => n.id === "cc-m-knn-principe")!.text).toContain("[[ML/Semaine 2/Fiches/01 - Principe du k-NN.md|");
+    expect(io.listFiles().filter((f) => f.path.endsWith(".canvas")).map((f) => f.path)).toEqual(["ML/00 Skill tree — ML.canvas"]);
 
     // The new note is known; untouched raw material elsewhere in the course is still new.
     const fresh = engine.newFiles(engine.space("ML")!).map((f) => f.path);
@@ -211,8 +209,47 @@ describe("Synthesizer", () => {
 });
 
 describe("Session layout", () => {
+  it("reshapes the course skill tree around a new session", async () => {
+    const reshaped: SynthesisPlan = {
+      ...plan,
+      tree: { moduleOrder: ["knn", "regression"], updates: [{ id: "biais-variance", dependsOn: ["knn-principe"], summary: "Vu avec le k-NN.", why: "Le compromis est introduit sur k." }] },
+    };
+    const llm = new FakeLlm((req) => {
+      if (req.label.startsWith("transcription")) return { description: "", transcript: "t", uncertain: [] };
+      if (req.label.startsWith("vérification")) return { transcript: "t", corrections: [], uncertain: [] };
+      if (req.label.startsWith("plan de synthèse")) return reshaped;
+      if (req.label.startsWith("rédaction")) return { content: "# k-NN", summary: "" };
+      if (req.label.startsWith("contrôle")) return { sources: [] };
+      throw new Error(req.label);
+    });
+    const engine = new Engine(io, () => llm, { data, save: async () => undefined }, "Vault");
+    const syn = new Synthesizer(engine);
+    await engine.addSpace("ML", "", "learning");
+    const fiche = "ML/01 Régression/Fiche régression.md";
+    const existing: SpaceMap = {
+      version: 2, name: "ML", folder: "ML", kind: "cours", summary: "", purpose: "", usage: "", conventions: "", preferences: [],
+      dashboardTitle: "Skill tree", linkKind: "prerequisite", transverse: [], keptDashboards: [], updatedAt: "",
+      sections: [{ id: "regression", title: "Régression", summary: "", keywords: [], dependsOn: [], folder: "ML/01 Régression", resources: [], children: [
+        { id: "biais-variance", title: "Biais et variance", summary: "Ancien résumé", keywords: [], dependsOn: [], folder: null, resources: [{ path: fiche, role: "fiche", label: "Biais et variance" }], children: [] },
+      ] }],
+    };
+    write("ML/_curator.json", JSON.stringify(existing));
+    let job = await syn.plan(await syn.lotFromFolder(engine.space("ML")!, "ML/Semaine 2"), () => undefined);
+    // The plan sees the whole course tree, with ids, to re-link it.
+    expect(llm.calls.find((c) => c.label.startsWith("plan de synthèse"))!.prompt).toContain("fiche biais-variance « Biais et variance »");
+    job = await syn.write(job, () => undefined);
+    await syn.apply(job, () => undefined);
+    const map = JSON.parse(await io.read("ML/_curator.json")) as SpaceMap;
+    expect(map.sections.map((x) => x.id)).toEqual(["knn", "regression"]);
+    expect(map.sections[1].children[0]).toMatchObject({ dependsOn: ["knn-principe"], summary: "Vu avec le k-NN." });
+    // Cross-session prerequisite drawn on the course skill tree.
+    const tree = parseCanvas(await io.read(engine.space("ML")!.generated.canvas))!;
+    expect(tree.edges.some((e) => e.fromNode === "cc-m-knn-principe" && e.toNode === "cc-m-biais-variance")).toBe(true);
+  });
+
   it("moves a note an older version wrote at the session root into the notes folder, in learning order", async () => {
     write("ML/Semaine 2/1 - Distances.md", "---\ncurator: fiche\n---\n# Distances\nNorme L2.");
+    write("ML/Semaine 2/Semaine 2.canvas", JSON.stringify({ nodes: [{ id: "cc-session", type: "text", x: 0, y: 0, width: 1, height: 1, text: "" }], edges: [] }));
     const twoFiches: SynthesisPlan = {
       ...plan,
       fiches: [
@@ -238,9 +275,11 @@ describe("Session layout", () => {
     expect(job.written[0].before).toContain("Norme L2.");
     await syn.apply(job, () => undefined);
     expect(io.exists("ML/Semaine 2/1 - Distances.md")).toBe(false);
+    // The 0.6 session canvas is retired: one skill tree per course.
+    expect(io.exists("ML/Semaine 2/Sources/Anciens tableaux de bord/Semaine 2.canvas")).toBe(true);
     expect(await io.read("ML/Semaine 2/Fiches/01 - Distances and norms.md")).toContain("rédaction");
-    const session = parseCanvas(await io.read("ML/Semaine 2/Semaine 2.canvas"))!;
-    expect(session.edges.map((e) => e.id)).toEqual(["cc-e-distances--knn-principe"]);
+    const map = JSON.parse(await io.read("ML/_curator.json")) as SpaceMap;
+    expect(map.sections[0].children.map((c) => [c.id, c.dependsOn])).toEqual([["distances", []], ["knn-principe", ["distances"]]]);
   });
 });
 
@@ -350,7 +389,7 @@ describe("Synthesizer on the layout of a real master's vault", () => {
     expect(data.settings.spaces.some((s) => s.folder === week)).toBe(false);
     expect(io.exists(`${week}/02 PC`)).toBe(false);
     expect(io.exists(`${week}/99 Archive`)).toBe(false);
-    expect(io.listFiles().filter((f) => dirname(f.path) === week).map((f) => f.path)).toEqual([`${week}/02 Nearest Neighbors.canvas`]);
+    expect(io.listFiles().filter((f) => dirname(f.path) === week)).toEqual([]);
     // The skill tree is the course's, not the whole master's; the notebook is reachable from it.
     expect(io.exists("DDDF/_curator.json")).toBe(false);
     const map = JSON.parse(await io.read("DDDF/Machine Learning I/_curator.json")) as SpaceMap;

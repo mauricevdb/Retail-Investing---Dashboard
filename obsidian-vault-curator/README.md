@@ -42,7 +42,7 @@ Claude ne touche jamais au vault : il propose, tu discutes et valides, le plug-i
    │   fiches rendues (LaTeX compris), rapport de couverture ; « Réécrire cette fiche » avec un commentaire
    ▼ 7. APPLICATION                                (« Appliquer », annulable)
        fiches → <séance>/Fiches · sources → <séance>/Sources (+ « Transcriptions ») ·
-       canvas de la séance · skill tree du cours mis à jour
+       skill tree du cours remodelé et complété
 ```
 
 **Organisation d'un cours** :
@@ -54,16 +54,18 @@ Machine Learning I/
 │   │   ├── 01 - Distances and norms.md       numérotées dans l'ordre d'apprentissage
 │   │   ├── 02 - k-NN principle.md
 │   │   └── 05 - Worked exercises PC2.md
-│   ├── Sources/                           ENTRÉES — slides, énoncés, photos, notebook,
-│   │   └── Transcriptions — ….md             + toutes les transcriptions
-│   └── 02 Nearest Neighbors.canvas        SYNTHÈSE — point d'entrée de la séance
-├── 00 Skill tree — Machine Learning I.canvas   le cours entier, séance par séance
+│   └── Sources/                           ENTRÉES — slides, énoncés, photos, notebook,
+│       └── Transcriptions — ….md             + toutes les transcriptions
+├── 00 Skill tree — Machine Learning I.canvas   LE skill tree : toutes les fiches de toutes les séances
 └── Syllabus.pdf                           référence du cours
 ```
 
-Le canvas d'une séance montre les fiches (aperçu de chaque note, flèches de prérequis), puis ses sources ;
-il renvoie au skill tree du cours, qui renvoie à chaque séance. Ce qui n'a pas pu être entièrement intégré
-reste à la racine de la séance et apparaît en rouge sur son canvas : rien d'autre n'y traîne.
+Un seul skill tree par cours : un groupe par séance, une carte par fiche avec le lien vers la fiche rangée
+dans sa séance, des flèches de prérequis y compris d'une séance à l'autre. Synthétiser une séance écrit ses
+fiches dans la séance, puis **remodèle** le skill tree du cours : place de la séance dans l'ordre du cours,
+prérequis et résumés des fiches et modules existants revus à la lumière du nouveau contenu. Ces changements
+sont montrés dans le plan (« Skill tree du cours ») et se discutent comme le reste. Ce qui n'a pas pu être
+entièrement intégré reste à la racine de la séance et apparaît dans « À classer » sur le skill tree.
 
 **Langue** : les fiches sont écrites dans la langue du cours (slides, professeur) — en anglais pour un cours
 en anglais —, les explications ajoutées et tes remarques pouvant rester en français. Réglable.

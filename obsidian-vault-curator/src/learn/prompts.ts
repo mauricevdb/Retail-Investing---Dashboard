@@ -100,6 +100,14 @@ avant la rédaction. Procède ainsi :
    bruts une fois intégrés, avec leurs transcriptions) et <séance>/<séance>.canvas (la synthèse). Quand les documents viennent d'un dossier
    de séance, ce dossier est gardé tel quel. Sinon folder : dossier de la séance dans le cours, nommé selon les conventions existantes
    (sinon « NN Titre », numéroté dans l'ordre du cours). Donne les fiches dans l'ordre d'apprentissage, exercices corrigés en dernier.
+   Il n'y a qu'un skill tree, celui du cours entier : les fiches de chaque séance y sont des nœuds reliés par leurs prérequis.
+8. Skill tree du cours (tree) : la nouvelle séance s'insère dans le cours ; remodèle le skill tree en conséquence.
+   moduleOrder : les ids de TOUS les modules du cours (existants et nouveau) dans l'ordre d'apprentissage.
+   updates : les modules ou fiches EXISTANTS dont les prérequis ou le résumé doivent changer à la lumière du nouveau contenu
+   (une fiche d'une séance précédente qui s'appuie en fait sur une notion de cette séance, un module mal placé, un résumé
+   devenu inexact…) : dependsOn = la nouvelle liste complète de ses prérequis, summary = nouveau résumé ou "" pour le garder,
+   why = la raison en une phrase. Vide si rien ne change. Les prérequis des nouvelles fiches peuvent viser des fiches d'autres
+   séances : c'est ce qui relie le skill tree d'une séance à l'autre.
 7. Langue (language) : celle des documents du cours (slides, poly, énoncés), par exemple « English ». Les titres et le corps des fiches
    sont dans cette langue ; seules les explications ajoutées et remarques personnelles peuvent être en français. Le reste du plan
    (summary, contributes, questions, issues) est en français.

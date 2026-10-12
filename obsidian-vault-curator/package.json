@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault-curator",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Obsidian plugin that organises any vault folder with Claude: understands its use, discusses a structuring plan with the user, generates a canvas dashboard and aggregates new material after review.",
   "main": "main.js",
   "private": true,
