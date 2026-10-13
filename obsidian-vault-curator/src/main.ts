@@ -625,6 +625,8 @@ function normaliseSettings(raw: Record<string, unknown>): CuratorSettings {
     transcribeHandwriting?: boolean;
   };
   if (raw.handwriting === undefined && s.transcribeHandwriting === false) s.handwriting = "off";
+  // 0.4-0.7 skimmed every PDF over 80 pages, lecture slides included: they are now read in full.
+  if (raw.maxPdfPages === 80) s.maxPdfPages = DEFAULT_SETTINGS.maxPdfPages;
   delete s.transcribeHandwriting;
   return s;
 }

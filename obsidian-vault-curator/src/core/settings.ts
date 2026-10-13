@@ -153,7 +153,7 @@ export const DEFAULT_SETTINGS: CuratorSettings = {
   ficheLanguage: "auto",
   transcriptionModel: "claude-opus-5-5",
   verifyTranscriptions: true,
-  maxPdfPages: 80,
+  maxPdfPages: 300,
   ficheTemplate: DEFAULT_FICHE_TEMPLATE,
   checkOnStart: true,
   aggregateOnStart: false,

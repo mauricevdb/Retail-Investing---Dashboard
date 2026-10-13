@@ -10,7 +10,6 @@
 import { Engine, Progress } from "../engine";
 import { basename, dirname, extname, hash, isInside, join, matchPath, relativeTo, sanitizePath, sanitizeSegment, slugify, uniquePath } from "../core/paths";
 import { allSections } from "../core/plan";
-import { parseCanvas } from "../core/canvas";
 import { fileKind, isIgnored, SpaceInventory } from "../core/scan";
 import { mapPath } from "../core/settings";
 import { DocType, JournalEntry, JournalStep, Resource, SectionNode, SpaceMap, VaultFile } from "../core/types";
@@ -101,6 +100,10 @@ const PDF_CHUNK = 10;
 const DATA_TEXT_LIMIT = 300 * 1024;
 /** Pages of a long PDF given to the plan when it is only skimmed. */
 const SURVEY_PAGES = 6;
+/** A textbook, a volume of lecture notes or anything in a resources folder is skimmed beyond this. */
+const REFERENCE_PAGES = 40;
+const REFERENCE_FOLDER = /(^|\/)(\d+ )?(ressources?|resources?|r[ée]f[ée]rences?|books?|livres?|biblio\w*)\//i;
+const REFERENCE_NAME = /\b(book|textbook|manuel|primer|ESL\w*|ISLR|proofs?|lecture[ _-]?notes|polycopi\w*|handbook)\b/i;
 const VIEW_EXT = new Set(["png", "jpg", "jpeg", "webp", "gif"]);
 
 export class Synthesizer {
@@ -401,10 +404,12 @@ export class Synthesizer {
   private async extractPdf(s: Source, signal?: AbortSignal): Promise<Extract> {
     const backend = this.engine.backend();
     const readsFiles = backend.name === "Claude Code";
-    const layer = await this.io.pdfText(s.path, this.settings.maxPdfPages);
+    // Lecture slides are read in full, however long; references only up to a few dozen pages.
+    const limit = REFERENCE_FOLDER.test(s.path) || REFERENCE_NAME.test(basename(s.path)) ? REFERENCE_PAGES : this.settings.maxPdfPages;
+    const layer = await this.io.pdfText(s.path, limit);
     const pageCount = layer?.pageCount || 1;
     const pages = layer ? splitPages(layer.text) : new Map<number, string>();
-    if (pageCount > this.settings.maxPdfPages) {
+    if (pageCount > limit) {
       // A textbook, a lecture-notes volume, a Moodle dump: skimmed (first pages, table of contents), kept as a reference.
       const head = [...pages].filter(([n]) => n <= SURVEY_PAGES).map(([n, t]) => `[page ${n}] ${t}`).join("\n").slice(0, 12000);
       return {
@@ -413,11 +418,11 @@ export class Synthesizer {
         text: head || "(pas de texte extractible)",
         uncertain: [],
         description: `${pageCount} pages — document long, seulement survolé (premières pages)`,
-        truncated: `document de ${pageCount} pages, au-delà de la limite de lecture intégrale (${this.settings.maxPdfPages} pages) : document de référence`,
+        truncated: `document de ${pageCount} pages, au-delà de la limite de lecture intégrale (${limit} pages) : document de référence`,
         survey: true,
       };
     }
-    const last = Math.min(pageCount, this.settings.maxPdfPages);
+    const last = Math.min(pageCount, limit);
     const parts: string[] = [];
     const uncertain: string[] = [];
     const attachment: Attachment = { path: s.path, absPath: this.io.absolutePath(s.path), kind: "pdf", load: () => this.io.binaryPayload(s.path) };
@@ -575,10 +580,6 @@ export class Synthesizer {
   }
   sourcesDir(sessionFolder: string) {
     return join(sessionFolder, this.settings.sourcesFolder);
-  }
-  /** Where version 0.6 put a per-session canvas (retired: one skill tree per course). */
-  private legacySessionCanvas(sessionFolder: string) {
-    return join(sessionFolder, `${basename(sessionFolder) || "Séance"}.canvas`);
   }
 
   /**
@@ -899,12 +900,19 @@ export class Synthesizer {
             this.settings.spaces = this.settings.spaces.filter((x) => x !== nested);
           }
         }
-        // The per-session canvas of version 0.6 goes too: the course skill tree is the only one.
-        const legacy = this.legacySessionCanvas(job.plan.module.folder);
-        if (this.io.exists(legacy) && parseCanvas(await this.io.read(legacy))?.nodes.some((n) => n.id === "cc-session")) {
-          const to = uniquePath(join(layout.dir, "Anciens tableaux de bord", basename(legacy)), (x) => this.io.exists(x));
-          await move(legacy, to);
-          report.moved[legacy] = to;
+        // What an older version wrote at the session root and the new notes replace — its notes, its
+        // canvases (week dashboards, 0.6 session canvas) — goes to Sources, out of the way.
+        const sessionFolder = job.lot.folder && job.lot.folder !== space.folder ? job.lot.folder : null;
+        for (const f of sessionFolder ? this.io.listFiles().filter((x) => dirname(x.path) === sessionFolder) : []) {
+          if (report.fiches.includes(f.path) || report.moved[f.path]) continue;
+          const ext = extname(f.path);
+          const head = ext === "md" || ext === "canvas" ? await this.io.read(f.path) : "";
+          const oldNote = ext === "md" && /^---[\s\S]*?\ncurator:\s*fiche\b/m.test(head.slice(0, 600));
+          const oldCanvas = ext === "canvas" && /"id":\s*"cc-/.test(head);
+          if (!oldNote && !oldCanvas) continue;
+          const to = uniquePath(join(layout.dir, oldNote ? "Anciennes fiches" : "Anciens tableaux de bord", basename(f.path)), (x) => this.io.exists(x));
+          await move(f.path, to);
+          report.moved[f.path] = to;
         }
         await this.engine.removeEmptied(
           Object.keys(report.moved).map((p, index) => ({ kind: "move", source: p, target: null, content: null, reason: "", index, error: null })),
@@ -1126,7 +1134,9 @@ function keptRole(s: Source, role: string): DocType {
 }
 
 function cacheKey(s: Source): string {
-  return `extracts/${hash(`${s.size}:${Math.round(s.mtime)}:${extname(s.path)}`)}.json`;
+  // PDFs: v2 since long lecture slides are read in full (0.7 only skimmed them).
+  const version = s.kind === "pdf" ? ":v2" : "";
+  return `extracts/${hash(`${s.size}:${Math.round(s.mtime)}:${extname(s.path)}${version}`)}.json`;
 }
 
 function splitPages(text: string): Map<number, string> {

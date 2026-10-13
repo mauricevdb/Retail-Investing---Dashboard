@@ -250,6 +250,7 @@ describe("Session layout", () => {
   it("moves a note an older version wrote at the session root into the notes folder, in learning order", async () => {
     write("ML/Semaine 2/1 - Distances.md", "---\ncurator: fiche\n---\n# Distances\nNorme L2.");
     write("ML/Semaine 2/Semaine 2.canvas", JSON.stringify({ nodes: [{ id: "cc-session", type: "text", x: 0, y: 0, width: 1, height: 1, text: "" }], edges: [] }));
+    write("ML/Semaine 2/3 - Ancienne fiche.md", "---\ncurator: fiche\n---\n# Ancienne fiche en français");
     const twoFiches: SynthesisPlan = {
       ...plan,
       fiches: [
@@ -277,6 +278,8 @@ describe("Session layout", () => {
     expect(io.exists("ML/Semaine 2/1 - Distances.md")).toBe(false);
     // The 0.6 session canvas is retired: one skill tree per course.
     expect(io.exists("ML/Semaine 2/Sources/Anciens tableaux de bord/Semaine 2.canvas")).toBe(true);
+    // A note an older version wrote that the new notes replace goes too.
+    expect(io.exists("ML/Semaine 2/Sources/Anciennes fiches/3 - Ancienne fiche.md")).toBe(true);
     expect(await io.read("ML/Semaine 2/Fiches/01 - Distances and norms.md")).toContain("rédaction");
     const map = JSON.parse(await io.read("ML/_curator.json")) as SpaceMap;
     expect(map.sections[0].children.map((c) => [c.id, c.dependsOn])).toEqual([["distances", []], ["knn-principe", ["distances"]]]);

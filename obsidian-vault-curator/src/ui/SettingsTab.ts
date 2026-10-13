@@ -166,7 +166,7 @@ export class CuratorSettingTab extends PluginSettingTab {
       .setDesc("Lit les photos de tableau et de cahier : c'est la lecture la plus difficile, le modèle le plus capable est conseillé.")
       .addText((t) => t.setValue(s.transcriptionModel).onChange(async (v) => ((s.transcriptionModel = v.trim() || "claude-opus-5-5"), save())));
     toggleSetting(containerEl, "Vérifier chaque transcription", "Deuxième lecture de la photo pour corriger la transcription (plus lent, nettement plus fiable).", s.verifyTranscriptions, async (v) => ((s.verifyTranscriptions = v), save()));
-    numberSetting(containerEl, "Pages lues par PDF", "Au-delà, les pages ne sont pas lues (signalé dans le plan).", s.maxPdfPages, async (v) => ((s.maxPdfPages = v), save()));
+    numberSetting(containerEl, "Pages lues par PDF", "Au-delà, le document est seulement survolé et gardé comme référence. Les livres, polys et documents d'un dossier « Ressources » sont survolés au-delà de 40 pages.", s.maxPdfPages, async (v) => ((s.maxPdfPages = v), save()));
     new Setting(containerEl)
       .setName("Gabarit de fiche")
       .setDesc("Structure d'une fiche de révision ; Claude l'adapte au contenu.")
