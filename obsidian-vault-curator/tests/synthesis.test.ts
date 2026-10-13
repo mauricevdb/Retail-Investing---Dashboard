@@ -314,9 +314,7 @@ describe("A course the student already organised", () => {
     const engine = new Engine(io, () => llm, { data, save: async () => undefined }, "Vault");
     const syn = new Synthesizer(engine);
     await engine.addSpace("LA", "", "learning");
-    const lots = await syn.courseLots(engine.space("LA")!);
-    let job = await syn.plan(lots.find((l) => l.folder === null)!, () => undefined);
-    // Lots are per folder: the root lot has the photo and the README; modules are the student's notes.
+    let job = await syn.plan(await syn.lotFromFolder(engine.space("LA")!, "LA"), () => undefined);
     expect(job.plan.fiches.map((f) => [f.action, f.path])).toEqual([["keep", "LA/modules/M01 Vector spaces.md"], ["extend", "LA/modules/M11 SVD.md"]]);
     expect(job.plan.fiches[1].moveFrom).toBeUndefined();
     expect(syn.disposition(job, ids.get("LA/README.md")!)).toBe("ignore");
@@ -326,7 +324,7 @@ describe("A course the student already organised", () => {
     expect(await io.read("LA/modules/M01 Vector spaces.md")).toBe("# M01 Vector spaces\n## Notions\nBasis, dimension.");
     expect(await io.read("LA/modules/M11 SVD.md")).toContain("Rang = nombre de valeurs singulières.");
     expect(await io.read("LA/README.md")).toContain("learn M07");
-    expect(report.untouched).toEqual(["LA/README.md"]);
+    expect(report.untouched.sort()).toEqual(["LA/README.md", "LA/modules/M01 Vector spaces.md", "LA/modules/M11 SVD.md"]);
     const map = JSON.parse(await io.read("LA/_curator.json")) as SpaceMap;
     expect(map.sections[0].children.map((c) => [c.id, c.dependsOn])).toEqual([["m01", []], ["m11", ["m01"]]]);
     expect(map.keptDashboards).toEqual(["LA/00 Skill tree.canvas"]);

@@ -96,7 +96,9 @@ avant la rédaction. Procède ainsi :
      on n'y touche pas.
    Les fiches de révision DÉJÀ STRUCTURÉES (rédigées par l'étudiant ou un autre outil : notions, exemples, exercices organisés) ne sont pas
    des sources : ce sont des fiches. Mets-les dans fiches avec leur chemin et action « keep » (gardée telle quelle, placée dans le
-   skill tree avec ses prérequis) ou « extend » si les documents bruts de la séance les complètent. Ne propose jamais une fiche
+   skill tree avec ses prérequis) ou « extend » si les documents bruts de la séance les complètent. « keep » ne concerne que les
+   documents de ce lot : les notes rangées ailleurs dans le cours seront placées quand leur dossier sera traité. Si le lot continue
+   un module existant (mode existing), tu peux en ajuster le titre et le résumé pour qu'ils décrivent tout son contenu. Ne propose jamais une fiche
    concurrente d'une fiche existante. Respecte l'organisation que l'étudiant a déjà construite (ses noms, ses dossiers, ses modules).
    Les photos insérées dans une note (marquées « ⟨photo transcrite : voir Sx⟩ ») sont des sources à part entière : leur transcription est
    le vrai contenu de la note ; elles vont avec la note dans les mêmes fiches.

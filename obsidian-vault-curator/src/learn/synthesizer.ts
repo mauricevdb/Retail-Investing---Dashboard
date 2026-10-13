@@ -512,8 +512,10 @@ export class Synthesizer {
     const fichesDir = this.fichesDir(plan.module.folder);
     const seen = new Set<string>();
     const existingIds = new Set(job.map ? allSections(job.map).map((s) => s.id) : []);
-    // Existing notes placed in the tree as they are must exist.
-    plan.fiches = plan.fiches.filter((f) => f.action !== "keep" || (f.path && this.io.exists(inSpace(f.path))));
+    // Existing notes placed in the tree as they are must exist, and be documents of this lot: notes elsewhere
+    // in the course are placed when their own folder is synthesised, in the module of that folder.
+    const lotPaths = new Set(job.sources.map((x) => x.path));
+    plan.fiches = plan.fiches.filter((f) => f.action !== "keep" || (f.path && lotPaths.has(inSpace(f.path)) && this.io.exists(inSpace(f.path))));
     for (const f of plan.fiches) {
       let id = slugify(f.id || f.title) || "fiche";
       while (seen.has(id) || (f.action === "create" && existingIds.has(id))) id = `${id}-b`;
@@ -1038,7 +1040,9 @@ export class Synthesizer {
       map.sections.push(section);
     }
     section.folder = section.folder ?? m.folder;
-    section.summary = section.summary || m.summary;
+    // A module the plan explicitly continues may be renamed by it (it now sees all of its notes).
+    if (m.mode === "existing" && m.title.trim()) section.title = m.title.trim();
+    section.summary = (m.mode === "existing" && m.summary.trim()) || section.summary || m.summary;
     const sectionIds = new Set(map.sections.map((s) => s.id));
     section.dependsOn = [...new Set([...section.dependsOn, ...m.dependsOn.filter((d) => sectionIds.has(d) && d !== section!.id)])];
     if (report.archiveDoc && !section.resources.some((r) => r.path === layout.doc)) section.resources.push({ path: layout.doc, role: "archive", label: `Transcriptions — ${job.plan.session || job.lot.name}` });
