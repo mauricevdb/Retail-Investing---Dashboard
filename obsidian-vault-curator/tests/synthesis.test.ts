@@ -350,7 +350,8 @@ describe("Synthesizer on the layout of a real master's vault", () => {
     write("Attachments/IMG_20261012_123151.jpg", board);
     write("Attachments/IMG_20261012_123205.jpg", Buffer.concat([board, Buffer.from("x")]));
     write(`${week}/99 Archive/Photos CM.md`, "![[IMG_20261012_123151.jpg]]![[IMG_20261012_123205.jpg]]");
-    write(`${week}/CM - Prise de notes.md`, "Comprendre le saut paramétrique -> non paramétrique");
+    write(`${week}/CM - Prise de notes.md`, "Comprendre le saut paramétrique -> non paramétrique\n![[Tableau LAR.jpg]]");
+    write("DDDF/Linear Algebra & Regression/Photos/Tableau LAR.jpg", board);
     write(`${week}/02 PC/Lab2_KNN.ipynb`, notebook);
     write(`${week}/02 PC/data.csv`, "a,b\n1,2\n3,4");
     write("DDDF/À faire.md", "# À faire");
@@ -399,7 +400,7 @@ describe("Synthesizer on the layout of a real master's vault", () => {
     const course = (await syn.courseFor(`${week}/CM - Prise de notes.md`))!;
     expect(course.folder).toBe("DDDF/Machine Learning I");
     expect(data.settings.spaces.find((s) => s.folder === course.folder)).toMatchObject({ mode: "learning", level: "course" });
-    expect(syn.coursesOf("DDDF")).toEqual(["DDDF/Machine Learning I"]);
+    expect(syn.coursesOf("DDDF")).toEqual(["DDDF/Linear Algebra & Regression", "DDDF/Machine Learning I"]);
 
     const lots = await syn.courseLots(course);
     expect(lots.map((l) => l.folder)).toEqual([week]);
@@ -409,6 +410,7 @@ describe("Synthesizer on the layout of a real master's vault", () => {
     // The two photos, stored in the attachments folder, are sources of their own, attached to their note.
     const note = job.sources.find((s) => s.path.endsWith("Photos CM.md"))!;
     const photos = job.sources.filter((s) => s.kind === "image");
+    // A photo of another course pasted into the note is only referenced: it stays with its course.
     expect(photos.map((p) => p.path).sort()).toEqual(["Attachments/IMG_20261012_123151.jpg", "Attachments/IMG_20261012_123205.jpg"]);
     expect(photos.every((p) => p.embeddedIn === note.id)).toBe(true);
     expect(llm.calls.filter((c) => c.label.startsWith("transcription"))).toHaveLength(2);

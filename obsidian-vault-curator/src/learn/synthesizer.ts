@@ -141,6 +141,14 @@ export class Synthesizer {
     return this.engine.space(folder) ?? null;
   }
 
+  /** True when a path lies in another course of the same programme, or in another learning folder. */
+  private otherCourse(path: string, courseFolder: string): boolean {
+    if (isInside(path, courseFolder)) return false;
+    const programme = this.programmeOf(courseFolder);
+    if (programme && this.coursesOf(programme.folder).some((c) => isInside(path, c))) return true;
+    return this.settings.spaces.some((s) => s.mode === "learning" && s.level !== "programme" && isInside(path, s.folder));
+  }
+
   /** The programme folder a course lives in, if any. */
   programmeOf(folder: string) {
     return this.settings.spaces.find((s) => s.mode === "learning" && s.level === "programme" && s.folder !== folder && isInside(folder, s.folder)) ?? null;
@@ -262,6 +270,8 @@ export class Synthesizer {
           if (VIEW_EXT.has(extname(e.link)) || extname(e.link) === "pdf") missing.push(e.link);
           continue;
         }
+        // A photo that belongs to another course is only referenced: it stays (and is synthesised) there.
+        if (this.otherCourse(target, lot.space.folder)) continue;
         const kind = sourceKind(target, stats.get(target)?.size ?? 0);
         if (kind !== "image" && kind !== "pdf") continue;
         let child = sources.find((s) => s.path === target);
@@ -446,6 +456,10 @@ export class Synthesizer {
   // 3-4. Plan and revisions
 
   async plan(lot: Lot, progress: Progress, signal?: AbortSignal): Promise<SynthesisJob> {
+    // Lots are prepared ahead (a whole course, session by session): an earlier session may have moved
+    // files since, so the course is read again and what is gone is dropped.
+    lot.space = this.engine.space(lot.space.folder) ?? lot.space;
+    lot.files = lot.files.filter((f) => this.io.exists(f.path));
     const { sources, extracts } = await this.extract(lot, progress, signal);
     const map = await this.engine.readMap(lot.space);
     const course = await this.courseContext(lot.space, map);
