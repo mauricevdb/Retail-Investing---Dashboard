@@ -36,19 +36,25 @@ describe.skipIf(!vault)("e2e: synthesis of a whole folder of courses", () => {
 
       const only = process.env.CURATOR_COURSES?.split(",").map((c) => c.trim());
       const courses = syn.coursesOf(root).filter((c) => !only || only.some((o) => c.endsWith(`/${o}`)));
-      const summary: string[] = [`# Essai sur ${root} — ${new Date().toISOString()}\n`];
+      // Resumable: lots already applied are skipped when the run is started again.
+      const doneFile = `${reports}/_done.json`;
+      const done = new Set<string>(fs.existsSync(doneFile) ? (JSON.parse(fs.readFileSync(doneFile, "utf8")) as string[]) : []);
+      const summaryFile = `${reports}/_resume.md`;
+      const summary: string[] = fs.existsSync(summaryFile) ? fs.readFileSync(summaryFile, "utf8").split("\n") : [`# Essai sur ${root}\n`];
+      summary.push(`\n_(reprise ${new Date().toISOString()})_`);
       for (const folder of courses) {
         const name = folder.split("/").pop()!;
         const file = `${reports}/${name}.md`;
         const out = (s: string) => fs.appendFileSync(file, `${s}\n`);
-        fs.writeFileSync(file, `# ${name}\n\n`);
+        if (!fs.existsSync(file)) fs.writeFileSync(file, `# ${name}\n\n`);
         const course = (await syn.courseFor(folder))!;
-        const lots = await syn.courseLots(course);
+        const lots = (await syn.courseLots(course)).filter((l) => !done.has(`${folder}::${l.folder ?? ""}`));
+        if (!lots.length) continue;
         summary.push(`## ${name} — ${lots.length} lot(s)`);
         for (const lot of lots) {
           const log = (m: string, d?: number, t?: number) => console.log(`  [${name} / ${lot.name}] ${m}${t ? ` ${d}/${t}` : ""}`);
           const t0 = Date.now();
-          try {
+          for (let attempt = 0; attempt < 3; attempt++) try {
             let job = await syn.plan(lot, log);
             out(`\n---\n# Lot : ${lot.name} (${job.sources.length} sources)\n`);
             for (const s of job.sources) {
@@ -69,11 +75,30 @@ describe.skipIf(!vault)("e2e: synthesis of a whole folder of courses", () => {
             const s = Math.round((Date.now() - t0) / 1000);
             out(`\n## Appliqué en ${s} s : ${report.fiches.length} fiche(s), ${report.archived.length + report.kept.length} source(s) rangée(s), ${report.pending.length} non intégrée(s)`);
             summary.push(`- ${lot.name} : ${report.fiches.length} fiche(s), ${report.pending.length} non intégrée(s), ${s} s`);
+            done.add(`${folder}::${lot.folder ?? ""}`);
+            fs.writeFileSync(doneFile, JSON.stringify([...done]));
+            break;
           } catch (err) {
+            const message = (err as Error).message;
+            // Usage limit of the Claude account: wait for the reset, then retry the lot (extractions are cached).
+            const limit = /(session|usage) limit.*resets (\d{1,2})(?::(\d{2}))?\s*(am|pm)/i.exec(message);
+            if (limit && attempt < 2) {
+              const reset = new Date();
+              let h = Number(limit[2]) % 12;
+              if (limit[4].toLowerCase() === "pm") h += 12;
+              reset.setUTCHours(h, Number(limit[3] ?? 0) + 3, 0, 0);
+              if (reset.getTime() < Date.now()) reset.setUTCDate(reset.getUTCDate() + 1);
+              console.log(`  limite d'usage atteinte : reprise à ${reset.toISOString()}`);
+              summary.push(`- ${lot.name} : limite d'usage, attente jusqu'à ${reset.toISOString()}`);
+              fs.writeFileSync(summaryFile, summary.join("\n"));
+              await new Promise((r) => setTimeout(r, reset.getTime() - Date.now()));
+              continue;
+            }
             out(`\n## ERREUR sur ${lot.name}\n${(err as Error).stack}`);
-            summary.push(`- ${lot.name} : ERREUR ${(err as Error).message}`);
+            summary.push(`- ${lot.name} : ERREUR ${message}`);
+            break;
           }
-          fs.writeFileSync(`${reports}/_resume.md`, summary.join("\n"));
+          fs.writeFileSync(summaryFile, summary.join("\n"));
         }
       }
     },
