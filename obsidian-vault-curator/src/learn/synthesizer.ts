@@ -740,7 +740,11 @@ export class Synthesizer {
     const extracts = new Map(job.extracts);
     extended.forEach((w, i) => extracts.set(`E${i + 1}`, { sourceId: `E${i + 1}`, path: w.plan.path, text: w.before!, uncertain: [], description: "contenu actuel de la fiche" }));
     const integrate = job.sources.filter((s) => this.disposition(job, s.id) === "integrate" && s.kind !== "other");
-    const readable = integrate.filter((s) => job.extracts.has(s.id));
+    // A note that is only photos ("Photos CM" = ![[IMG…]]![[IMG…]]) has no content of its own: it is
+    // covered when its photos are, without asking Claude about it.
+    const container = (s: Source) =>
+      s.kind === "markdown" && job.sources.some((c) => c.embeddedIn === s.id) && !(job.extracts.get(s.id)?.text ?? "").replace(/!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)|⟨[^⟩]*⟩/g, "").trim();
+    const readable = integrate.filter((s) => job.extracts.has(s.id) && !container(s));
     const all = [...readable, ...pseudo];
     const keepEntry = (s: Source): Coverage => ({ sourceId: s.id, path: s.path, covered: true, kept: true, missing: [] });
 
@@ -808,6 +812,7 @@ export class Synthesizer {
       return { sourceId: s.id, path: s.path, covered, missing: r?.missing ?? [] };
     });
     for (const s of integrate.filter((x) => !job.extracts.has(x.id))) job.coverage.push({ sourceId: s.id, path: s.path, covered: false, missing: [{ item: "document illisible : pas de transcription", fiche: "" }] });
+    for (const s of integrate.filter(container)) job.coverage.push({ sourceId: s.id, path: s.path, covered: true, missing: [] });
     // A note of photos is archived only with all its photos: otherwise the photos would be orphaned.
     for (const c of job.coverage) {
       const children = job.sources.filter((s) => s.embeddedIn === c.sourceId && this.disposition(job, s.id) === "integrate");
