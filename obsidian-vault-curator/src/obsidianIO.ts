@@ -5,9 +5,14 @@ import { VaultIO } from "./io";
 
 const MAX_IMAGE_EDGE = 1568;
 
+interface PdfPage {
+  getTextContent(): Promise<{ items: { str?: string }[] }>;
+  getViewport(o: { scale: number }): { width: number; height: number };
+  render(o: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }): { promise: Promise<void> };
+}
 interface PdfJs {
   getDocument(src: { data: Uint8Array }): {
-    promise: Promise<{ numPages: number; getPage(n: number): Promise<{ getTextContent(): Promise<{ items: { str?: string }[] }> }>; destroy(): Promise<void> }>;
+    promise: Promise<{ numPages: number; getPage(n: number): Promise<PdfPage>; destroy(): Promise<void> }>;
   };
 }
 
@@ -86,6 +91,39 @@ export class ObsidianIO implements VaultIO {
   absolutePath(path: string): string | null {
     const adapter = this.app.vault.adapter;
     return adapter instanceof FileSystemAdapter ? adapter.getFullPath(normalizePath(path)) : null;
+  }
+
+  async pdfPageImages(path: string, from: number, to: number): Promise<{ label: string; mediaType: string; base64: string; absPath: string | null }[]> {
+    try {
+      const file = this.file(path);
+      const pdfjs = (await loadPdfJs()) as PdfJs;
+      const doc = await pdfjs.getDocument({ data: new Uint8Array(await this.app.vault.readBinary(file)) }).promise;
+      const adapter = this.app.vault.adapter;
+      const dir = `${this.pluginDir}/cache/pages`;
+      if (!(await adapter.exists(dir))) await adapter.mkdir(dir);
+      const key = hash(`${path}:${file.stat.size}:${file.stat.mtime}`);
+      const out = [];
+      for (let n = from; n <= Math.min(to, doc.numPages); n++) {
+        const page = await doc.getPage(n);
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: MAX_IMAGE_EDGE / Math.max(base.width, base.height) });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+        const pagePath = `${dir}/${key}-p${n}.jpg`;
+        await adapter.writeBinary(pagePath, Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)).buffer);
+        out.push({ label: `page ${n}`, mediaType: "image/jpeg", base64, absPath: adapter instanceof FileSystemAdapter ? adapter.getFullPath(pagePath) : null });
+      }
+      await doc.destroy();
+      return out;
+    } catch {
+      return [];
+    }
   }
 
   async pdfText(path: string, pages: number): Promise<{ text: string; pageCount: number } | null> {

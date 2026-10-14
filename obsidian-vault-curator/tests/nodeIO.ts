@@ -91,6 +91,20 @@ export class NodeIO implements VaultIO {
     const pagesText = text.stdout.split("\f").filter((t, i, all) => i < all.length - 1 || t.trim());
     return { text: pagesText.map((t, i) => `[page ${i + 1}] ${t.replace(/\s+/g, " ").trim()}`).join("\n"), pageCount };
   }
+  /** Same page images as the plugin, made with pdftoppm when it is installed. */
+  async pdfPageImages(p: string, from: number, to: number) {
+    const dir = path.join(this.root, ".curator-cache", "pages", p.replace(/[^\w]+/g, "_"));
+    fs.mkdirSync(dir, { recursive: true });
+    const r = spawnSync("pdftoppm", ["-f", String(from), "-l", String(to), "-jpeg", "-scale-to", "1568", this.abs(p), path.join(dir, "p")]);
+    if (r.status !== 0) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".jpg"))
+      .map((f) => ({ f, n: Number(/(\d+)\.jpg$/.exec(f)![1]) }))
+      .filter(({ n }) => n >= from && n <= to)
+      .sort((a, b) => a.n - b.n)
+      .map(({ f, n }) => ({ label: `page ${n}`, mediaType: "image/jpeg", base64: fs.readFileSync(path.join(dir, f)).toString("base64"), absPath: path.join(dir, f) }));
+  }
   async binaryPayload(p: string) {
     const ext = p.slice(p.lastIndexOf(".") + 1).toLowerCase();
     const mediaType = MEDIA[ext];

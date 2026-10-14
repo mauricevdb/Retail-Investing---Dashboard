@@ -31,6 +31,11 @@ export interface VaultIO {
   imageViews(path: string): Promise<{ label: string; mediaType: string; base64: string; absPath: string | null }[]>;
   /** File a wikilink or Markdown link points to, resolved like Obsidian does (shortest path, attachments folder…). */
   resolveLink(link: string, from: string): string | null;
+  /**
+   * Pages of a PDF rendered as images (figures, formulas, diagrams included), so Claude sees each page as it
+   * is printed without any tool installed on the computer. Empty when the PDF cannot be rendered.
+   */
+  pdfPageImages(path: string, from: number, to: number): Promise<{ label: string; mediaType: string; base64: string; absPath: string | null }[]>;
   /** Small persistent cache outside the vault content (plugin folder). */
   cacheRead(key: string): Promise<string | null>;
   cacheWrite(key: string, value: string): Promise<void>;

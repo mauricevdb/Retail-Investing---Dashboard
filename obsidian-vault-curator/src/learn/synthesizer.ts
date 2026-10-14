@@ -425,18 +425,23 @@ export class Synthesizer {
     const last = Math.min(pageCount, limit);
     const parts: string[] = [];
     const uncertain: string[] = [];
-    const attachment: Attachment = { path: s.path, absPath: this.io.absolutePath(s.path), kind: "pdf", load: () => this.io.binaryPayload(s.path) };
+    const whole: Attachment = { path: s.path, absPath: this.io.absolutePath(s.path), kind: "pdf", load: () => this.io.binaryPayload(s.path) };
     for (let from = 1; from <= last; from += PDF_CHUNK) {
       const to = Math.min(last, from + PDF_CHUNK - 1);
       const hint = [...pages].filter(([n]) => n >= from && n <= to).map(([n, t]) => `[page ${n}] ${t}`).join("\n") || null;
+      // Each page as an image, rendered by the plug-in: figures and formulas are seen whatever is installed.
+      const images = await this.io.pdfPageImages(s.path, from, to);
+      const attachments: Attachment[] = images.length
+        ? images.map((v) => ({ path: `${s.path} (${v.label})`, absPath: v.absPath, kind: "image", load: async () => ({ mediaType: v.mediaType, base64: v.base64 }) }))
+        : [whole];
       const answer = await backend.complete<PdfAnswer>({
         label: `lecture de ${basename(s.path)} (p. ${from}-${to})`,
         system: pdfSystem(this.settings),
-        prompt: pdfPrompt(s.path, from, to, pageCount, hint, readsFiles),
+        prompt: pdfPrompt(s.path, from, to, pageCount, hint, readsFiles, images.map((v) => v.label)),
         schema: PDF_SCHEMA,
         model: this.settings.digestModel,
         effort: "medium",
-        attachments: [attachment],
+        attachments,
         maxTokens: 32000,
         signal,
       });
@@ -1144,8 +1149,8 @@ function keptRole(s: Source, role: string): DocType {
 }
 
 function cacheKey(s: Source): string {
-  // PDFs: v2 since long lecture slides are read in full (0.7 only skimmed them).
-  const version = s.kind === "pdf" ? ":v2" : "";
+  // PDFs: v3 since pages are sent as images rendered by the plug-in (before, figures could be missed).
+  const version = s.kind === "pdf" ? ":v3" : "";
   return `extracts/${hash(`${s.size}:${Math.round(s.mtime)}:${extname(s.path)}${version}`)}.json`;
 }
 

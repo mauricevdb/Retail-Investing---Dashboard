@@ -59,8 +59,12 @@ Le texte extrait automatiquement est fourni comme aide : il peut être mal form�
 uncertain : les passages illisibles ou ambigus.`;
 }
 
-export function pdfPrompt(path: string, from: number, to: number, pageCount: number, layerText: string | null, readWithTool: boolean): string {
-  const how = readWithTool ? `Lis ce PDF avec l'outil Read (paramètre pages : "${from}-${to}").` : "Le PDF est joint ci-dessus.";
+export function pdfPrompt(path: string, from: number, to: number, pageCount: number, layerText: string | null, readWithTool: boolean, pageImages: string[] = []): string {
+  const how = pageImages.length
+    ? `Chaque page est fournie en image (${pageImages.join(", ")})${readWithTool ? ", à lire avec l'outil Read" : ", jointes ci-dessus"} : regarde-les toutes, figures et graphiques compris.`
+    : readWithTool
+      ? `Lis ce PDF avec l'outil Read (paramètre pages : "${from}-${to}").`
+      : "Le PDF est joint ci-dessus.";
   const hint = layerText ? `\n\n## Texte extrait automatiquement (aide)\n\`\`\`\n${layerText}\n\`\`\`` : "";
   return `Document : ${path} (${pageCount} pages). Transcris les pages ${from} à ${to}. ${how}${hint}`;
 }
