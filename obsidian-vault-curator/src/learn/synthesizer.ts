@@ -534,7 +534,7 @@ export class Synthesizer {
         if (!this.io.exists(f.path)) f.action = "create";
         // A note an older version of the plug-in wrote at the session root joins the notes folder.
         // Notes the user organised elsewhere stay where they are.
-        else if (dirname(f.path) === plan.module.folder && /^---[\s\S]*?\ncurator:\s*fiche\b/m.test((await this.io.read(f.path)).slice(0, 600))) f.moveFrom = f.path;
+        else if (dirname(f.path) === plan.module.folder && writtenByPlugin(await this.io.read(f.path))) f.moveFrom = f.path;
       }
       f.outline = f.outline ?? [];
       f.sources = (f.sources ?? []).filter((x) => job.sources.some((s) => s.id === x.sourceId));
@@ -907,7 +907,7 @@ export class Synthesizer {
           if (report.fiches.includes(f.path) || report.moved[f.path]) continue;
           const ext = extname(f.path);
           const head = ext === "md" || ext === "canvas" ? await this.io.read(f.path) : "";
-          const oldNote = ext === "md" && /^---[\s\S]*?\ncurator:\s*fiche\b/m.test(head.slice(0, 600));
+          const oldNote = ext === "md" && writtenByPlugin(head);
           const oldCanvas = ext === "canvas" && /"id":\s*"cc-/.test(head);
           if (!oldNote && !oldCanvas) continue;
           const to = uniquePath(join(layout.dir, oldNote ? "Anciennes fiches" : "Anciens tableaux de bord", basename(f.path)), (x) => this.io.exists(x));
@@ -1101,6 +1101,11 @@ export class Synthesizer {
     map.updatedAt = new Date().toISOString();
     return map;
   }
+}
+
+/** A note an older version of the plug-in wrote: a study note (0.4+) or a note photos were merged into (0.3, "|📷]]" links). */
+function writtenByPlugin(content: string): boolean {
+  return /^---[\s\S]*?\ncurator:\s*fiche\b/m.test(content.slice(0, 600)) || content.includes("|📷]]");
 }
 
 /** The frontmatter written by the pipeline survives a completion that dropped it. */
