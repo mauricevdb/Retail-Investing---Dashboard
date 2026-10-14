@@ -1,7 +1,7 @@
 // Orchestrates the workflows on managed folders ("spaces"):
 //   scan → digest → understand + plan (Claude) → feedback ⇄ revision → apply → dashboards.
 // Talks to the vault only through VaultIO, so the whole pipeline also runs under node for tests.
-import { buildCanvas, describeCanvas, parseCanvas, readStatuses } from "./core/canvas";
+import { buildCanvas, buildSkillTree, CanvasData, describeCanvas, parseCanvas, readStatuses } from "./core/canvas";
 import { mergeIndex, renderIndexBody } from "./core/indexNote";
 import { applyPatch, attachTranscripts, carryStatuses, MapPatch, normaliseRole, upgradeMap } from "./core/mapMerge";
 import { basename, dirname, extname, isInside, join, matchPath, normalize, slugify } from "./core/paths";
@@ -890,7 +890,9 @@ export class Engine {
       .filter((p) => !listed.has(p) && !map.keptDashboards.includes(p) && fileKind(p) !== "canvas")
       .sort();
     const subspaces = fresh.subspaces.filter((s) => this.io.exists(s.canvas)).map((s) => ({ name: basename(s.folder), canvas: s.canvas }));
-    const canvas = buildCanvas(map, { index: space.generated.index, unfiled, subspaces }, previous ?? undefined, opts);
+    const links = { index: space.generated.index, unfiled, subspaces };
+    // A course gets a skill tree laid out session by session; other folders a dashboard of sections.
+    const canvas = space.config.mode === "learning" ? buildSkillTree(map, links, opts.keepLayout ? (previous ?? undefined) : stripPositions(previous)) : buildCanvas(map, links, previous ?? undefined, opts);
     await this.writeTracked(space.generated.canvas, JSON.stringify(canvas, null, "\t"), steps);
     const existingIndex = this.io.exists(space.generated.index) ? await this.io.read(space.generated.index) : null;
     await this.writeTracked(space.generated.index, mergeIndex(existingIndex, renderIndexBody(map, space.generated.canvas, unfiled, subspaces), space.name), steps);
@@ -1013,4 +1015,9 @@ export function normaliseSections(raw: RawSection[]): SectionNode[] {
     children: depth === 0 ? (m.children ?? []).map((c) => conv(c, 1)) : [],
   });
   return raw.map((m) => conv(m, 0));
+}
+
+/** The previous canvas without its tree marker: colours and the user's own nodes are kept, the layout is redone. */
+function stripPositions(previous: CanvasData | null): CanvasData | undefined {
+  return previous ? { nodes: previous.nodes.filter((n) => n.id !== "cc-tree"), edges: previous.edges } : undefined;
 }

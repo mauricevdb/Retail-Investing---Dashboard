@@ -397,3 +397,41 @@ describe("version 0.1 compatibility", () => {
     expect("coursesRoot" in s).toBe(false);
   });
 });
+
+describe("course skill tree layout", () => {
+  it("reads session by session, left to right, without overlapping cards", async () => {
+    const { buildSkillTree } = await import("../src/core/canvas");
+    const node = (id: string, dependsOn: string[] = []) => ({ id, title: id, summary: "s", keywords: [], dependsOn, folder: null, resources: [{ path: `C/${id}.md`, role: "fiche" as const, label: id }], children: [] });
+    const map = {
+      version: 2 as const, name: "C", folder: "C", kind: "cours", summary: "", purpose: "", usage: "", conventions: "", preferences: [],
+      dashboardTitle: "Skill tree", linkKind: "prerequisite" as const, transverse: [], keptDashboards: [], updatedAt: "",
+      sections: [
+        { id: "w1", title: "01 Regression", summary: "", keywords: [], dependsOn: [], folder: "C/01", resources: [], children: [node("a"), node("b", ["a"]), node("c", ["a"]), node("d", ["b", "c", "a"])] },
+        { id: "w2", title: "Nearest neighbours", summary: "", keywords: [], dependsOn: [], folder: "C/02", resources: [], children: [node("e", ["d"]), node("f", ["e"])] },
+      ],
+    };
+    const canvas = buildSkillTree(map, { index: "C/Index.md" });
+    const at = (id: string) => canvas.nodes.find((n) => n.id === `cc-m-${id}`)!;
+    // Left to right by prerequisite level; same level stacked.
+    expect(at("a").x).toBeLessThan(at("b").x);
+    expect(at("b").x).toBe(at("c").x);
+    expect(at("d").x).toBeGreaterThan(at("b").x);
+    // Second session below the first.
+    expect(at("e").y).toBeGreaterThan(Math.max(...["a", "b", "c", "d"].map((i) => at(i).y + at(i).height)));
+    // Direct prerequisites only, and no long arrow across sessions: the card says it, one arrow links the sessions.
+    expect(canvas.edges.some((e) => e.id === "cc-e-a--d")).toBe(false);
+    expect(canvas.edges.some((e) => e.fromNode === "cc-m-d")).toBe(false);
+    expect(at("e").text).toContain("*après* d (1.4)");
+    expect(canvas.edges.some((e) => e.fromNode === "cc-g-w1" && e.toNode === "cc-g-w2")).toBe(true);
+    // Labels: no doubled number.
+    expect(canvas.nodes.find((n) => n.id === "cc-g-w1")!.label).toBe("01 Regression");
+    expect(canvas.nodes.find((n) => n.id === "cc-g-w2")!.label).toBe("2 · Nearest neighbours");
+    // No two cards overlap.
+    const cards = canvas.nodes.filter((n) => n.type !== "group");
+    for (const p of cards) for (const q of cards) {
+      if (p === q) continue;
+      const overlap = p.x < q.x + q.width && q.x < p.x + p.width && p.y < q.y + q.height && q.y < p.y + p.height;
+      expect(overlap, `${p.id} / ${q.id}`).toBe(false);
+    }
+  });
+});

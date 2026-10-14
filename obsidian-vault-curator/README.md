@@ -81,10 +81,14 @@ dossier… » dans le panneau. Les nouveaux documents déposés dans un cours so
 lancement d'Obsidian (un lot par dossier). « Synthétiser tout le cours » traite chaque sous-dossier à tour
 de rôle.
 
-**Le skill tree du cours** : un groupe par module ; dans chaque module, une carte par fiche, rangée par
-niveau de prérequis (les fiches d'un même niveau côte à côte), avec des flèches vers les fiches qui en
-dépendent, y compris d'un module à l'autre. Colore une carte pour suivre ta progression : jaune = en
-cours, vert = maîtrisé.
+**Le skill tree du cours** se lit comme un livre : une bande par séance, les séances de haut en bas.
+Dans une bande, la carte de la séance à gauche (résumé, transcriptions, slides, notebooks), puis ses fiches
+en colonnes de gauche à droite, chaque colonne ne demandant que les précédentes, avec des flèches vers les
+fiches qui en dépendent. Les fiches sont numérotées (2.3 = 3ᵉ fiche de la séance 2) ; un prérequis pris dans
+une autre séance est écrit sur la carte (« ↖ après Gauss–Markov (1.6) ») plutôt que tiré en longue flèche,
+et une seule flèche relie les deux séances. Colore une carte pour suivre ta progression : jaune = en
+cours, vert = maîtrisée. Ce que tu déplaces reste en place tant qu'aucune fiche n'est ajoutée ; après un
+ajout, l'arbre est remis en ordre (les couleurs et tes propres cartes sont gardées).
 
 **Les fiches** suivent ton gabarit (réglages) : objectif et prérequis, intuition, définitions, résultats et
 formules, méthode, exemples du tableau rédigés pas à pas, pièges, à retenir, liens vers les exercices,

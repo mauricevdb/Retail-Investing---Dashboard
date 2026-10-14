@@ -242,9 +242,11 @@ describe("Session layout", () => {
     const map = JSON.parse(await io.read("ML/_curator.json")) as SpaceMap;
     expect(map.sections.map((x) => x.id)).toEqual(["knn", "regression"]);
     expect(map.sections[1].children[0]).toMatchObject({ dependsOn: ["knn-principe"], summary: "Vu avec le k-NN." });
-    // Cross-session prerequisite drawn on the course skill tree.
+    // A prerequisite in another session is written on the card, and one arrow links the two sessions.
     const tree = parseCanvas(await io.read(engine.space("ML")!.generated.canvas))!;
-    expect(tree.edges.some((e) => e.fromNode === "cc-m-knn-principe" && e.toNode === "cc-m-biais-variance")).toBe(true);
+    expect(tree.nodes.find((n) => n.id === "cc-m-biais-variance")!.text).toContain("*après* Principe du k-NN (1.1)");
+    expect(tree.edges.some((e) => e.fromNode === "cc-g-knn" && e.toNode === "cc-g-regression")).toBe(true);
+    expect(tree.edges.some((e) => e.fromNode === "cc-m-knn-principe" && e.toNode === "cc-m-biais-variance")).toBe(false);
   });
 
   it("moves a note an older version wrote at the session root into the notes folder, in learning order", async () => {

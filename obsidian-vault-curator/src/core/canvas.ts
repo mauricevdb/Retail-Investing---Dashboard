@@ -400,3 +400,180 @@ export function parseCanvas(raw: string): CanvasData | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Course skill tree: one band per session, read left to right, sessions top to bottom.
+
+const TREE = `${OWN}tree`;
+const T_CARD_W = 300;
+const T_MODULE_W = 320;
+const T_GAP_X = 80;
+const T_GAP_Y = 24;
+const T_PAD = 30;
+const T_LABEL = 36;
+const T_BAND_GAP = 120;
+
+function clip(text: string, max: number): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+}
+
+/** "01 Introduction" stays as is; "Introduction" becomes "1 · Introduction". */
+function bandTitle(m: SectionNode, i: number): string {
+  return /^\s*\d/.test(m.title) ? m.title : `${i + 1} · ${m.title}`;
+}
+
+/**
+ * The skill tree of a course. Each session (module) is a horizontal band: its card on the left (what
+ * the session is, its transcriptions and documents), then its study notes in columns by prerequisite
+ * level, with arrows between them; sessions follow one another top to bottom. Prerequisites in another
+ * session are written on the card instead of long arrows across the canvas, and a single arrow links
+ * the two sessions. Colours (progress) and anything the user added are kept; positions are kept as long
+ * as no note was added since, otherwise the tree is laid out again so nothing overlaps.
+ */
+export function buildSkillTree(map: SpaceMap, links: CanvasLinks, previous?: CanvasData): CanvasData {
+  const nodes: CanvasNode[] = [];
+  const edges: CanvasEdge[] = [];
+  const all = map.sections.flatMap((s) => s.children);
+  const titleOf = new Map(all.map((c) => [c.id, c.title]));
+  const sessionOf = new Map(map.sections.flatMap((s, i) => s.children.map((c) => [c.id, i] as const)));
+
+  // Header row: the course, references, what is left to file, the legend.
+  const refs = [...map.transverse, ...map.keptDashboards.map((p) => ({ path: p, role: "dashboard" as DocType, label: stem(p) }))];
+  const headerText = [
+    `# ${map.name} — Skill tree`,
+    map.summary ? clip(map.summary, 400) : "",
+    `🧾 [[${links.index}|Index et mode d'emploi]]`,
+    refs.length ? `**Références du cours**\n${resourceLines(refs).join("\n")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const headerW = 2 * T_CARD_W + T_GAP_X;
+  nodes.push({ id: TREE, type: "text", x: 0, y: 0, width: headerW, height: estimateHeight(headerText, headerW), text: headerText, color: "6" });
+  let sideX = headerW + T_GAP_X;
+  let headerBottom = nodes[0].height;
+  const side = (id: string, text: string, color?: string) => {
+    const h = estimateHeight(text, T_CARD_W);
+    nodes.push({ id, type: "text", x: sideX, y: 0, width: T_CARD_W, height: h, text, ...(color ? { color } : {}) });
+    headerBottom = Math.max(headerBottom, h);
+    sideX += T_CARD_W + T_GAP_X;
+  };
+  side(`${OWN}legend`, "**Lecture** : une bande par séance, de gauche à droite ; les flèches mènent aux fiches qui en dépendent.\n\n**Suivi** : colore une fiche — 🟨 en cours · 🟩 maîtrisée");
+  if (links.unfiled?.length) {
+    const shown = links.unfiled.slice(0, 15).map((p) => `- [[${p}|${stem(p)}]]`);
+    if (links.unfiled.length > 15) shown.push(`- … et ${links.unfiled.length - 15} autres`);
+    side(`${OWN}unfiled`, `### ⚠️ Pas encore intégré\n${shown.join("\n")}`, "1");
+  }
+  if (links.subspaces?.length) side(`${OWN}subspaces`, `### 🗂️ Sous-dossiers\n${links.subspaces.map((s) => `- [[${s.canvas}|${s.name}]]`).join("\n")}`);
+
+  // One band per session.
+  let y = headerBottom + T_BAND_GAP;
+  map.sections.forEach((m, si) => {
+    const title = bandTitle(m, si);
+    const sessionResources = m.resources.filter((r) => r.role !== "fiche");
+    const moduleText = [`## ${title}`, m.summary ? clip(m.summary, 260) : "", resourceLines(sessionResources).join("\n")].filter(Boolean).join("\n\n");
+    const moduleH = estimateHeight(moduleText, T_MODULE_W);
+    const top = y;
+    const inner = top + T_LABEL;
+    nodes.push({ id: `${SECTION}${m.id}`, type: "text", x: T_PAD, y: inner, width: T_MODULE_W, height: moduleH, text: moduleText, color: STATUS_COLOR[m.status ?? "todo"] });
+
+    const siblings = new Set(m.children.map((c) => c.id));
+    const lvl = levels(m.children.map((c) => ({ ...c, dependsOn: c.dependsOn.filter((d) => siblings.has(d)) })));
+    const columns = new Map<number, SectionNode[]>();
+    for (const c of m.children) {
+      const l = Math.max(0, lvl.get(c.id) ?? 0);
+      columns.set(l, [...(columns.get(l) ?? []), c]);
+    }
+    const order = new Map(m.children.map((c, i) => [c.id, i + 1]));
+    // Cards of a column are ordered by the position of their prerequisites in the previous columns
+    // (fewer crossing arrows), then laid out and centred vertically in the band.
+    const cards: { c: SectionNode; text: string; h: number }[][] = [];
+    const rank = new Map<string, number>();
+    for (const l of [...columns.keys()].sort((a, b) => a - b)) {
+      const col = columns.get(l)!.map((c) => {
+        const ps = c.dependsOn.filter((d) => rank.has(d));
+        return { c, key: ps.length ? ps.reduce((t, d) => t + rank.get(d)!, 0) / ps.length : order.get(c.id)! };
+      });
+      col.sort((a, b) => a.key - b.key || order.get(a.c.id)! - order.get(b.c.id)!);
+      col.forEach((x, i) => rank.set(x.c.id, i));
+      cards.push(
+        col.map(({ c }) => {
+          const fiche = c.resources.find((r) => r.role === "fiche");
+          const exercises = /exerc|solved|corrig/i.test(`${c.id} ${c.title}`);
+          const head = `#### ${exercises ? "✍️ " : ""}${si + 1}.${order.get(c.id)} · ${fiche ? `[[${fiche.path}|${c.title.replace(/[[\]|]/g, " ")}]]` : c.title}`;
+          const elsewhere = c.dependsOn.filter((d) => !siblings.has(d) && titleOf.has(d));
+          const ref = (d: string) => {
+            const s2 = sessionOf.get(d) ?? 0;
+            return `${titleOf.get(d)} (${s2 + 1}.${map.sections[s2].children.findIndex((x) => x.id === d) + 1})`;
+          };
+          const after = elsewhere.length ? `↖ *après* ${elsewhere.slice(0, 3).map(ref).join(", ")}${elsewhere.length > 3 ? "…" : ""}` : "";
+          const text = [head, c.summary ? clip(c.summary, 150) : "", after].filter(Boolean).join("\n\n");
+          return { c, text, h: Math.max(110, estimateHeight(text, T_CARD_W)) };
+        }),
+      );
+    }
+    const colH = cards.map((col) => col.reduce((t, x) => t + x.h, 0) + (col.length - 1) * T_GAP_Y);
+    const bandH = Math.max(moduleH, ...colH);
+    let right = T_PAD + T_MODULE_W;
+    cards.forEach((col, l) => {
+      const x = T_PAD + T_MODULE_W + T_GAP_X + l * (T_CARD_W + T_GAP_X);
+      let cy = inner + Math.round((bandH - colH[l]) / 2);
+      for (const { c, text, h } of col) {
+        nodes.push({ id: `${SECTION}${c.id}`, type: "text", x, y: cy, width: T_CARD_W, height: h, text, color: STATUS_COLOR[c.status ?? "todo"] });
+        cy += h + T_GAP_Y;
+      }
+      right = x + T_CARD_W;
+    });
+    const height = T_LABEL + bandH + T_PAD;
+    nodes.push({ id: `${OWN}g-${m.id}`, type: "group", x: 0, y: top, width: right + T_PAD, height, label: title });
+    y = top + height + T_BAND_GAP;
+
+    // Arrows inside the session, direct prerequisites only.
+    const deps = new Map(m.children.map((c) => [c.id, c.dependsOn.filter((d) => siblings.has(d) && d !== c.id)]));
+    const reaches = (from: string, to: string, seen = new Set<string>()): boolean =>
+      (deps.get(from) ?? []).some((d) => d === to || (!seen.has(d) && (seen.add(d), reaches(d, to, seen))));
+    for (const [id, ds] of deps) {
+      for (const d of ds) {
+        if (ds.some((o) => o !== d && reaches(o, d))) continue;
+        edges.push({ id: `${OWN}e-${d}--${id}`, fromNode: `${SECTION}${d}`, toNode: `${SECTION}${id}`, fromSide: "right", toSide: "left", toEnd: "arrow" });
+      }
+    }
+  });
+
+  // One arrow from a session to each later session that builds on it.
+  const pairs = new Set<string>();
+  map.sections.forEach((m, si) => {
+    const from = new Set<number>();
+    for (const c of m.children) for (const d of c.dependsOn) if (sessionOf.has(d) && sessionOf.get(d) !== si) from.add(sessionOf.get(d)!);
+    for (const d of m.dependsOn) {
+      const i = map.sections.findIndex((s) => s.id === d);
+      if (i >= 0 && i !== si) from.add(i);
+    }
+    for (const f of from) {
+      const key = `${map.sections[f].id}--${m.id}`;
+      if (pairs.has(key)) continue;
+      pairs.add(key);
+      edges.push({ id: `${OWN}s-${key}`, fromNode: `${OWN}g-${map.sections[f].id}`, toNode: `${OWN}g-${m.id}`, fromSide: "bottom", toSide: "top", toEnd: "arrow", color: "5" });
+    }
+  });
+
+  // What the user did on the previous version: colours always; positions while the tree is unchanged.
+  const prev = new Map((previous?.nodes ?? []).map((n) => [n.id, n]));
+  const sameTree = prev.has(TREE) && nodes.every((n) => prev.has(n.id));
+  for (const n of nodes) {
+    const old = prev.get(n.id);
+    if (!old) continue;
+    if (n.id.startsWith(SECTION)) n.color = old.color;
+    if (!sameTree) continue;
+    n.x = old.x;
+    n.y = old.y;
+    n.width = old.width;
+    n.height = Math.max(n.height, old.height);
+  }
+  const userNodes = (previous?.nodes ?? []).filter((n) => !n.id.startsWith(OWN));
+  const ids = new Set([...nodes.map((n) => n.id), ...userNodes.map((n) => n.id)]);
+  const userEdges = (previous?.edges ?? []).filter((e) => !e.id.startsWith(OWN) && ids.has(e.fromNode) && ids.has(e.toNode));
+  // Groups first, so they are drawn under the cards.
+  const ordered = [...nodes.filter((n) => n.type === "group"), ...nodes.filter((n) => n.type !== "group")];
+  return { nodes: [...ordered, ...userNodes], edges: [...edges, ...userEdges] };
+}
