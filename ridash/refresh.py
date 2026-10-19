@@ -13,8 +13,7 @@ from ridash.sources import eodhd
 from ridash.sources.sec import Sec
 
 
-def build_snapshot(sec: Sec) -> pl.DataFrame:
-    quotes = eodhd.quotes()
+def build_snapshot(sec: Sec, quotes: pl.DataFrame) -> pl.DataFrame:
     as_of = quotes["date"].max()
     universe = value.candidates(quotes, sec.tickers(), MIN_MARKET_CAP)
     universe = value.classify(universe, sec.companies(universe["cik"].to_list(), COMPANY_CACHE))
@@ -53,10 +52,17 @@ def build_snapshot(sec: Sec) -> pl.DataFrame:
 
 def main() -> None:
     started = time.monotonic()
-    snapshot = build_snapshot(Sec())
-    as_of = snapshot["date"][0]
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    quotes = eodhd.quotes()
+    as_of = quotes["date"].max()
     path = SNAPSHOT_DIR / f"{as_of.isoformat()}.parquet"
+    # A snapshot records what was known on that session; a later run (e.g. at the
+    # weekend) must not rewrite it with filings published since.
+    if path.exists():
+        print(f"{as_of}: snapshot already written, nothing to do")
+        return
+
+    snapshot = build_snapshot(Sec(), quotes)
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     snapshot.write_parquet(path)
 
     scored = snapshot.filter(pl.col("value_score").is_not_null())

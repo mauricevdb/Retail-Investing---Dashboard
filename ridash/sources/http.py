@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 
 
-def get_json(url: str, headers: dict[str, str] | None = None, retries: int = 3):
+def get_json(url: str, headers: dict[str, str] | None = None, retries: int = 5):
     """GET a JSON document. Returns None on 404; retries rate limits and transient errors."""
     request = urllib.request.Request(url, headers=headers or {})
     for attempt in range(retries):
