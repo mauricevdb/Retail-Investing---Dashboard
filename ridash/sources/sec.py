@@ -1,13 +1,18 @@
-"""SEC EDGAR: ticker/CIK map, XBRL frames and company SIC codes."""
+"""SEC EDGAR: ticker/CIK map, XBRL frames, company SIC codes, filings, earnings releases and
+insider transactions."""
 
+import json
 import os
+import re
 import time
+from html.parser import HTMLParser
 from itertools import batched
 from pathlib import Path
+from xml.etree import ElementTree
 
 import polars as pl
 
-from ridash.sources.http import get_json
+from ridash.sources.http import get
 
 FRAME_SCHEMA = {
     "cik": pl.Int64,
@@ -26,12 +31,16 @@ class Sec:
         self._headers = {"User-Agent": user_agent or os.environ["SEC_USER_AGENT"]}
         self._last_call = 0.0
 
-    def _get(self, url: str):
+    def _fetch(self, url: str) -> bytes | None:
         wait = self._last_call + _MIN_INTERVAL - time.monotonic()
         if wait > 0:
             time.sleep(wait)
         self._last_call = time.monotonic()
-        return get_json(url, self._headers)
+        return get(url, self._headers)
+
+    def _get(self, url: str):
+        body = self._fetch(url)
+        return None if body is None else json.loads(body)
 
     def tickers(self) -> pl.DataFrame:
         raw = self._get("https://www.sec.gov/files/company_tickers.json")
@@ -62,6 +71,25 @@ class Sec:
         raw = self._get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json") or {}
         return parse_filings(raw.get("filings", {}).get("recent", {}), cik)
 
+    def earnings_release(self, cik: int, accn: str, primary_url: str) -> tuple[str, str] | None:
+        """Text and URL of the press release attached to an 8-K (exhibit 99.1), or of the 8-K
+        itself when the results are written into it."""
+        folder = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}"
+        index = self._get(f"{folder}/index.json") or {}
+        exhibit = pick_exhibit(
+            [item["name"] for item in index.get("directory", {}).get("item", [])]
+        )
+        url = f"{folder}/{exhibit}" if exhibit else primary_url
+        body = self._fetch(url)
+        if body is None:
+            return None
+        return html_to_text(body.decode("utf-8", errors="replace")), url
+
+    def insider_transactions(self, form4_url: str) -> list[dict]:
+        """Open-market purchases and sales reported on a Form 4 (URL of its rendered page)."""
+        body = self._fetch(re.sub(r"/xslF345X\d+/", "/", form4_url))
+        return parse_form4(body) if body else []
+
     def _company(self, cik: int) -> dict:
         raw = self._get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json") or {}
         sic = raw.get("sic")
@@ -90,6 +118,93 @@ def parse_filings(recent: dict, cik: int) -> pl.DataFrame:
         )
     ]
     return pl.DataFrame(rows, schema=schema).with_columns(pl.col("filed").str.to_date())
+
+
+def pick_exhibit(names: list[str]) -> str | None:
+    """Exhibit 99.1 (the press release) among the documents of a filing, else another 99.x."""
+    exhibits = [
+        name
+        for name in names
+        if re.search(r"ex(hibit)?[-_]?99", name, re.IGNORECASE)
+        and name.lower().endswith((".htm", ".html", ".txt"))
+    ]
+    first = [name for name in exhibits if re.search(r"99[-_.d]?0?1(?!\d)", name, re.IGNORECASE)]
+    return (first or exhibits or [None])[0]
+
+
+class _TextExtractor(HTMLParser):
+    _BREAKS = {"p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "table"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+        self._hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._hidden += 1
+        elif tag in self._BREAKS:
+            self.parts.append("\n")
+        elif tag in ("td", "th"):
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style"):
+            self._hidden -= 1
+
+    def handle_data(self, data):
+        if not self._hidden:
+            self.parts.append(data)
+
+
+_ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿"))
+
+
+def html_to_text(markup: str) -> str:
+    extractor = _TextExtractor()
+    extractor.feed(markup)
+    text = "".join(extractor.parts).translate(_ZERO_WIDTH)
+    lines = (" ".join(line.split()) for line in text.splitlines())
+    return "\n".join(line for line in lines if line)
+
+
+def parse_form4(body: bytes) -> list[dict]:
+    root = ElementTree.fromstring(body)
+    relation = root.find("reportingOwner/reportingOwnerRelationship")
+
+    def flag(name: str) -> bool:
+        return (relation.findtext(name) if relation is not None else None) in ("1", "true")
+
+    title = (relation.findtext("officerTitle") if relation is not None else None) or (
+        "Director" if flag("isDirector") else "10% owner" if flag("isTenPercentOwner") else "Other"
+    )
+    insider = root.findtext("reportingOwner/reportingOwnerId/rptOwnerName")
+    planned = root.findtext("aff10b5One") in ("1", "true")
+    transactions = []
+    for transaction in root.iter("nonDerivativeTransaction"):
+        code = transaction.findtext("transactionCoding/transactionCode")
+        shares = _number(transaction.findtext("transactionAmounts/transactionShares/value"))
+        price = _number(transaction.findtext("transactionAmounts/transactionPricePerShare/value"))
+        if code in ("P", "S") and shares:
+            transactions.append(
+                {
+                    "date": transaction.findtext("transactionDate/value"),
+                    "insider": insider,
+                    "title": title,
+                    "code": code,
+                    "shares": shares,
+                    "value": shares * price if price is not None else None,
+                    "planned": planned,
+                }
+            )
+    return transactions
+
+
+def _number(text: str | None) -> float | None:
+    try:
+        return float(text) if text else None
+    except ValueError:
+        return None
 
 
 def parse_frame(raw: dict | None, tag: str) -> pl.DataFrame:

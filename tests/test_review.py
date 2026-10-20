@@ -6,157 +6,69 @@ import pytest
 from claude_agent_sdk import ClaudeSDKError, ResultMessage
 
 from ridash import review
-from ridash.sources.sec import parse_filings
+from ridash.config import EXPLAINED_RISK, KEEP_COUNT, TRAP_WEIGHTS
 
 AS_OF = date(2026, 10, 19)
 
 
-def test_market_signals_measure_returns_and_drawdown():
-    days = [AS_OF - timedelta(days=300 - i) for i in range(300)]
-    closes = [100.0 + i for i in range(299)] + [450.0]  # steady rise to a new high
-    prices = pl.DataFrame({"ticker": "X", "date": days, "adj_close": closes})
-    row = review.market_signals(prices).row(0, named=True)
-    assert row["ret_1m"] == pytest.approx(450 / closes[-22] - 1)
-    assert row["ret_12m"] == pytest.approx(450 / closes[-253] - 1)
-    assert row["drawdown"] == pytest.approx(0)
-
-
-def test_market_signals_leave_long_returns_empty_for_short_histories():
-    prices = pl.DataFrame(
-        {
-            "ticker": "NEW",
-            "date": [AS_OF - timedelta(days=i) for i in range(30)],
-            "adj_close": [10.0] * 30,
-        }
-    )
-    row = review.market_signals(prices).row(0, named=True)
-    assert row["ret_1m"] == pytest.approx(0) and row["ret_12m"] is None
-
-
-def test_sentiment_is_weighted_by_article_count_and_empty_without_articles():
-    sentiment = pl.DataFrame(
-        {
-            "ticker": ["A", "A", "A"],
-            "date": [
-                AS_OF - timedelta(days=1),
-                AS_OF - timedelta(days=2),
-                AS_OF - timedelta(days=50),
-            ],
-            "count": [3, 1, 2],
-            "sentiment": [0.8, 0.0, -0.5],
-        }
-    )
-    row = review.sentiment_signals(sentiment, AS_OF).row(0, named=True)
-    assert row["sentiment_30d"] == pytest.approx(0.6) and row["news_30d"] == 4
-    assert row["sentiment_prev"] == pytest.approx(-0.5)
-    old_only = sentiment.filter(pl.col("date") < AS_OF - timedelta(days=30))
-    assert review.sentiment_signals(old_only, AS_OF).row(0, named=True)["sentiment_30d"] is None
-
-
-def test_material_events_keep_recent_8k_and_late_filings_with_red_flags():
-    recent = {
-        "form": ["8-K", "10-Q", "8-K", "NT 10-K", "8-K"],
-        "filingDate": ["2026-09-01", "2026-08-01", "2026-05-01", "2026-03-31", "2025-01-01"],
-        "items": ["2.02,9.01", "", "4.02", "", "5.02"],
-        "accessionNumber": ["a-1", "a-2", "a-3", "a-4", "a-5"],
-        "primaryDocument": ["d1.htm", "d2.htm", "d3.htm", "d4.htm", "d5.htm"],
-    }
-    events = review.material_events(parse_filings(recent, 42), AS_OF)
-    assert [(e["accn"], e["red_flag"]) for e in events] == [
-        ("a-1", False),
-        ("a-3", True),
-        ("a-4", True),
-    ]
-    assert events[0]["description"] == "Results of operations"
-    assert events[0]["url"] == "https://www.sec.gov/Archives/edgar/data/42/a1/d1.htm"
-
-
-def article(day: str, title: str, symbols: int = 1, link: str | None = None) -> dict:
+def criteria(**scores):
     return {
-        "date": f"{day}T10:00:00+00:00",
-        "title": title,
-        "content": "text",
-        "symbols": [f"S{i}.US" for i in range(symbols)],
-        "link": link or title,
+        name: {"score": scores.get(name, 0), "rationale": "r", "sources": []}
+        for name in TRAP_WEIGHTS
     }
 
 
-def test_relevant_news_prefers_company_in_title_and_drops_future_articles():
-    articles = [
-        article("2026-10-18", "Top 10 stocks to watch", symbols=10),
-        article("2026-10-10", "Harmony Biosciences cuts guidance"),
-        article("2026-10-15", "Pharma sector update", symbols=2),
-        article("2026-10-20", "Harmony after the review date"),
-    ]
-    ranked = review.relevant_news(articles, "HRMY", "Harmony Biosciences Holdings, Inc.", AS_OF)
-    assert [a["title"] for a in ranked] == [
-        "Harmony Biosciences cuts guidance",
-        "Pharma sector update",
-        "Top 10 stocks to watch",
-    ]
+def test_criteria_and_weights_cover_the_same_grid():
+    assert set(review.CRITERIA) == set(TRAP_WEIGHTS)
+    assert sum(TRAP_WEIGHTS.values()) == pytest.approx(1)
 
 
-STOCK = {
-    "ticker": "HRMY",
-    "name": "Harmony",
-    "industry": "Pharma",
-    "sector": "Manufacturing",
-    "date": AS_OF,
-    "fiscal_end": date(2025, 12, 31),
-    "value_score": 96.0,
-    "rank": 1,
-    "ev_ebit": 8.4,
-    "fcf_yield": 0.148,
-    "roce": 0.74,
-    "net_debt_ebitda": None,
-    "market_cap": 2.4e9,
-    "ebit": 2.085e8,
-    "ebit_source": "operating income",
-}
-EVENT = {
-    "filed": date(2026, 9, 1),
-    "form": "8-K",
-    "description": "Change of auditor",
-    "red_flag": True,
-    "accn": "a-1",
-    "url": "u",
-}
+def test_trap_risk_is_the_weighted_share_of_the_maximum():
+    assert review.trap_risk(criteria()) == 0
+    assert review.trap_risk(criteria(**dict.fromkeys(TRAP_WEIGHTS, 5))) == 100
+    assert review.trap_risk(criteria(earnings=5)) == pytest.approx(100 * TRAP_WEIGHTS["earnings"])
 
 
-def test_evidence_cites_sources_and_fingerprint_tracks_new_information():
-    news = [article("2026-10-10", "Harmony cuts guidance", link="l1")]
-    evidence = review.build_evidence(STOCK, news, [EVENT], {"ret_12m": -0.25, "spy_12m": 0.08})
-    assert "[F1] 2026-09-01 8-K: Change of auditor [RED FLAG]" in evidence.text
-    assert '[N1] 2026-10-10 "Harmony cuts guidance"' in evidence.text
-    assert "net debt/EBITDA n/a" in evidence.text
-    assert [s["id"] for s in evidence.sources] == ["F1", "N1"]
-
-    same = review.build_evidence(STOCK, news, [EVENT], {"ret_12m": -0.30})
-    more = review.build_evidence(STOCK, [*news, article("2026-10-11", "x", link="l2")], [EVENT], {})
-    assert same.fingerprint == evidence.fingerprint != more.fingerprint
+def test_lowest_risks_are_kept_but_never_an_explained_or_critical_discount():
+    risks = [10.0 + i for i in range(KEEP_COUNT + 3)] + [EXPLAINED_RISK + 5, None]
+    rows = pl.DataFrame(
+        {
+            "ticker": [f"T{i}" for i in range(len(risks))],
+            "trap_risk": risks,
+            "critical": [
+                i == 0 for i in range(len(risks))
+            ],  # lowest risk, but one critical criterion
+        }
+    )
+    result = {r["ticker"]: r for r in review.suggest(rows).iter_rows(named=True)}
+    kept = [t for t, r in result.items() if r["suggestion"] == "keep"]
+    assert len(kept) == KEEP_COUNT and "T0" not in kept
+    assert result[f"T{KEEP_COUNT + 3}"]["verdict"] == "explained"
+    assert result[f"T{KEEP_COUNT + 3}"]["suggestion"] == "exclude"
+    assert result[f"T{KEEP_COUNT + 4}"]["suggestion"] is None  # failed analysis: no suggestion
 
 
 def test_verdict_is_reused_only_when_unchanged_and_recent():
-    prior = {"verdict": "explained", "fingerprint": "f", "analysed_on": AS_OF - timedelta(days=3)}
+    prior = {"trap_risk": 40.0, "fingerprint": "f", "analysed_on": AS_OF - timedelta(days=3)}
     assert review.reusable(prior, "f", AS_OF)
     assert not review.reusable(prior, "g", AS_OF)
     assert not review.reusable({**prior, "analysed_on": AS_OF - timedelta(days=30)}, "f", AS_OF)
-    assert not review.reusable({**prior, "verdict": None}, "f", AS_OF)
+    assert not review.reusable({**prior, "trap_risk": None}, "f", AS_OF)
+    assert not review.reusable({"fingerprint": "f", "analysed_on": AS_OF}, "f", AS_OF)  # old format
     assert not review.reusable(None, "f", AS_OF)
 
 
-VERDICT = {
-    "verdict": "explained",
-    "confidence": "high",
-    "news_tone": "negative",
-    "suggestion": "exclude",
-    "summary": "s",
-    "factors": [],
+ASSESSMENT = {
+    "bear_case": "b",
+    "criteria": criteria(earnings=3),
     "red_flags": [],
+    "news_tone": "mixed",
+    "confidence": "medium",
+    "summary": "s",
 }
 
 
-def result(subtype="success", structured_output=VERDICT, cost=0.05):
+def result(subtype="success", structured_output=ASSESSMENT, cost=0.05):
     return ResultMessage(
         subtype=subtype,
         duration_ms=1,
@@ -181,14 +93,14 @@ def fake_query(*messages, calls=None, fail_on=None):
     return query
 
 
-def test_ask_claude_returns_verdict_and_cost(monkeypatch):
+def test_ask_claude_returns_assessment_and_cost(monkeypatch):
     calls = []
     monkeypatch.setattr(review, "query", fake_query(object(), result(), calls=calls))
-    verdict, usd = asyncio.run(review.ask_claude("evidence"))
-    assert verdict == VERDICT and usd == 0.05
+    assessment, usd = asyncio.run(review.ask_claude("brief"))
+    assert assessment == ASSESSMENT and usd == 0.05
 
     prompt, options = calls[0]
-    assert prompt == "evidence"
+    assert prompt == "brief"
     assert options.output_format == {"type": "json_schema", "schema": review.VERDICT_SCHEMA}
     assert options.tools == [] and options.setting_sources == []
     assert options.system_prompt == {
@@ -198,18 +110,61 @@ def test_ask_claude_returns_verdict_and_cost(monkeypatch):
     }
 
 
+def test_instructions_ask_for_the_bear_case_first_and_every_criterion():
+    assert all(f"- {name}:" in review.INSTRUCTIONS for name in review.CRITERIA)
+    assert list(review.VERDICT_SCHEMA["properties"])[0] == "bear_case"
+
+
 def test_run_without_structured_output_is_an_error(monkeypatch):
     failed = result("error_max_structured_output_retries", structured_output=None)
     monkeypatch.setattr(review, "query", fake_query(failed))
     with pytest.raises(review.ReviewError):
-        asyncio.run(review.ask_claude("evidence"))
+        asyncio.run(review.ask_claude("brief"))
 
 
 def test_one_failure_does_not_stop_the_other_analyses(monkeypatch):
     monkeypatch.setattr(review, "query", fake_query(result(), fail_on="bad"))
     answers = asyncio.run(review.ask_all(["good", "bad", "good"]))
-    assert [verdict is not None for verdict, _, _ in answers] == [True, False, True]
+    assert [assessment is not None for assessment, _, _ in answers] == [True, False, True]
     assert "not logged in" in answers[1][2]
+
+
+def test_insider_cache_reads_each_form_once(monkeypatch, tmp_path):
+    monkeypatch.setattr(review, "INSIDER_CACHE", tmp_path / "insiders.parquet")
+    filings = pl.DataFrame(
+        {
+            "form": ["4", "4", "8-K"],
+            "filed": [AS_OF - timedelta(days=5), AS_OF - timedelta(days=9), AS_OF],
+            "accn": ["f-1", "f-2", "k-1"],
+            "url": ["u1", "u2", "u3"],
+        }
+    )
+    sale = {
+        "date": "2026-10-10",
+        "insider": "A",
+        "title": "CEO",
+        "code": "S",
+        "shares": 10.0,
+        "value": 100.0,
+        "planned": False,
+    }
+
+    class FakeSec:
+        def __init__(self):
+            self.read = []
+
+        def insider_transactions(self, url):
+            self.read.append(url)
+            return [sale] if url == "u1" else []
+
+    sec = FakeSec()
+    cache = review.load_insider_cache()
+    assert review.insider_transactions(sec, filings, AS_OF, cache) == [sale]
+    review.save_insider_cache(cache)
+
+    again = FakeSec()
+    assert review.insider_transactions(again, filings, AS_OF, review.load_insider_cache()) == [sale]
+    assert sec.read == ["u1", "u2"] and again.read == []
 
 
 def test_user_decision_overrides_suggestion_and_latest_wins():

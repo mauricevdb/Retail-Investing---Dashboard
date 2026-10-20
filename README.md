@@ -5,9 +5,10 @@ A personal retail-investing dashboard, in three steps:
 - **Value screen** — ranks US listed companies by how cheap they look on their latest annual
   financial statements, and shows how every number was computed, down to the SEC filing it
   comes from.
-- **Qualitative review** — for the 50 best-ranked stocks, reads recent news and SEC filings
-  with Claude to judge whether each discount is explained (a likely value trap) or not (a
-  potential opportunity); the user keeps or excludes each stock.
+- **Qualitative review** — for the 50 best-ranked stocks, Claude reads quarterly results, the
+  latest earnings release, insider transactions, short interest, SEC filings and news, scores
+  the risk that each discount is a value trap, and suggests the 20 safest; the user keeps or
+  excludes each stock.
 - **Efficient portfolio** — builds mean-variance portfolios from the stocks kept: correlations,
   efficient frontier, minimum-variance, maximum-Sharpe and target-volatility portfolios.
 
@@ -47,22 +48,41 @@ the screen flags every such case.
 ## Qualitative review
 
 A low multiple is an opportunity only if the market is not pricing in a problem the historical
-figures cannot show. Every day, for each of the 50 best-ranked stocks, `ridash.review` gathers:
+figures cannot show: the screen looks at the last fiscal year, the market at the next ones. Every
+day, for each of the 50 best-ranked stocks, `ridash.evidence` assembles a brief from free primary
+sources:
 
-- the most relevant news of the last 90 days (EODHD news API), ranked by whether the company is
-  named in the title and how focused the article is;
-- the SEC filings of the last 12 months that report material events: 8-K items (results,
-  impairments, change of auditor, restatements, delisting notices...) and late-filing notices,
-  the most serious flagged as red flags;
-- the price behaviour (1-, 3- and 12-month returns against the S&P 500, distance from the
-  52-week high) and the EODHD news-sentiment score.
+- **quarterly results**: revenue and operating income of the last quarters with their
+  year-on-year change (SEC XBRL frames);
+- **the latest earnings release** (exhibit 99.1 of the results 8-K), including its outlook or
+  guidance section;
+- **insider transactions** of the last six months (Form 4): open-market purchases and sales,
+  with sales under pre-arranged 10b5-1 plans told apart;
+- **short interest** as a share of shares outstanding, its change and days to cover (FINRA,
+  twice a month);
+- **material events** of the last 12 months (8-K items such as impairments, change of auditor
+  or restatements, and late-filing notices), the most serious flagged as red flags;
+- **news** of the last 90 days (EODHD), the most relevant first, and **price behaviour**
+  against the S&P 500.
 
-Claude (Sonnet 5.5) reads this evidence and returns, as schema-validated JSON, a verdict
-(*explained*, *partially explained*, *not explained*), its confidence, the factors behind it with
-their nature (structural, temporary, uncertain) and the ids of the sources they rest on, red
-flags, and a keep/exclude suggestion. It is told to use only the evidence provided, so every
-factor links back to an article or a filing. A verdict is reused while the news and filings it
-rests on are unchanged (up to a week), which keeps daily usage low.
+Claude (Sonnet 5.5) first writes the bear case, the strongest argument that the market is right,
+then scores six criteria from 0 (no concern) to 5 (critical), each justified in one sentence with
+the ids of the sources it rests on:
+
+| Criterion | Weight | Question |
+|---|---|---|
+| Earnings trajectory | 30% | Are revenue or operating income falling or expected to fall? |
+| One-off items | 15% | Did one-offs inflate the year the screen is based on? |
+| Balance sheet | 15% | Refinancing, liquidity, going-concern or dilution risk? |
+| Accounting | 15% | Restatement, change of auditor, late filing, aggressive accounting? |
+| Governance and country | 10% | Controlling shareholder, related parties, VIE or country risk? |
+| Market signals | 15% | Heavy insider selling, high or rising short interest, unexplained collapse? |
+
+The weighted scores give a **trap risk** from 0 to 100. The 20 lowest risks are suggested for the
+portfolio, never a stock whose discount is explained (risk of 55 or more) or that scores 5 on any
+criterion. The score is computed in code from the criteria, so it is reproducible and the weights
+can be changed in `ridash/config.py`; a stock's assessment is reused while the evidence it rests
+on is unchanged (up to a week), and Form 4 filings are cached since they never change.
 
 Claude is reached without an API key, the way
 [pi-claude-bridge](https://github.com/elidickinson/pi-claude-bridge) does it: the review drives
@@ -128,12 +148,13 @@ uv run ruff check .
 
 ```
 ridash/
-  sources/          SEC EDGAR and EODHD clients
+  sources/          SEC EDGAR, EODHD and FINRA clients
   fundamentals.py   latest annual fundamentals from XBRL frames
   value.py          universe, metrics, value score
   portfolio.py      weekly returns, Ledoit-Wolf covariance, efficient portfolios
   refresh.py        daily pipeline, writes data/snapshots/<date>.parquet
-  review.py         news and filings review with Claude, writes data/reviews/<date>.parquet
+  evidence.py       brief on each shortlisted stock (results, insiders, short interest, news)
+  review.py         trap-risk scoring with Claude, writes data/reviews/<date>.parquet
 app/
   screen.py         value screen and per-company breakdown
   review.py         verdicts, sources and keep/exclude decisions

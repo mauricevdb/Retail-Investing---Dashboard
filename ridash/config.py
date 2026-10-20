@@ -19,3 +19,18 @@ REVIEW_MODEL = "claude-sonnet-5-5"
 REVIEW_EFFORT = "medium"
 # A verdict is reused while its news and filings are unchanged, at most this many days.
 REVIEW_MAX_AGE_DAYS = 7
+INSIDER_CACHE = DATA_DIR / "insiders.parquet"
+
+# Trap risk (0-100): weighted sum of the criteria Claude scores from 0 (no concern) to 5
+# (critical). A 5 on any criterion excludes the stock on its own.
+TRAP_WEIGHTS = {
+    "earnings": 0.30,
+    "one_offs": 0.15,
+    "balance_sheet": 0.15,
+    "accounting": 0.15,
+    "governance": 0.10,
+    "market": 0.15,
+}
+PARTIAL_RISK = 30  # from this trap risk the discount counts as partially explained
+EXPLAINED_RISK = 55  # from this one as explained: the stock is excluded
+KEEP_COUNT = 20  # stocks suggested for the portfolio: the lowest trap risks of the shortlist

@@ -4,15 +4,21 @@ import urllib.error
 import urllib.request
 
 
-def get_json(url: str, headers: dict[str, str] | None = None, retries: int = 5):
-    """GET a JSON document. Returns None on 404; retries rate limits and transient errors."""
+def get(
+    url: str,
+    headers: dict[str, str] | None = None,
+    retries: int = 5,
+    missing: tuple[int, ...] = (404,),
+) -> bytes | None:
+    """GET a document. Returns None for the `missing` status codes; retries rate limits and
+    transient errors."""
     request = urllib.request.Request(url, headers=headers or {})
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
-                return json.load(response)
+                return response.read()
         except urllib.error.HTTPError as error:
-            if error.code == 404:
+            if error.code in missing:
                 return None
             retryable = error.code == 429 or error.code >= 500
             if not retryable or attempt == retries - 1:
@@ -21,3 +27,8 @@ def get_json(url: str, headers: dict[str, str] | None = None, retries: int = 5):
             if attempt == retries - 1:
                 raise
         time.sleep(2**attempt)
+
+
+def get_json(url: str, headers: dict[str, str] | None = None, retries: int = 5):
+    body = get(url, headers, retries)
+    return None if body is None else json.loads(body)
