@@ -1,13 +1,15 @@
 # RI Dashboard
 
-A personal retail-investing dashboard, in two tabs:
+A personal retail-investing dashboard, in three steps:
 
 - **Value screen** — ranks US listed companies by how cheap they look on their latest annual
   financial statements, and shows how every number was computed, down to the SEC filing it
   comes from.
-- **Efficient portfolio** — builds mean-variance portfolios from stocks of that same universe:
-  correlations, efficient frontier, minimum-variance, maximum-Sharpe and target-volatility
-  portfolios.
+- **Qualitative review** — for the 50 best-ranked stocks, reads recent news and SEC filings
+  with Claude to judge whether each discount is explained (a likely value trap) or not (a
+  potential opportunity); the user keeps or excludes each stock.
+- **Efficient portfolio** — builds mean-variance portfolios from the stocks kept: correlations,
+  efficient frontier, minimum-variance, maximum-Sharpe and target-volatility portfolios.
 
 ## Value screen
 
@@ -42,9 +44,32 @@ scored, rather than filled with a default. The one deliberate inference is for d
 reports no debt at all is presumed debt-free only if its interest expense is below 2% of EBIT, and
 the screen flags every such case.
 
+## Qualitative review
+
+A low multiple is an opportunity only if the market is not pricing in a problem the historical
+figures cannot show. Every day, for each of the 50 best-ranked stocks, `ridash.review` gathers:
+
+- the most relevant news of the last 90 days (EODHD news API), ranked by whether the company is
+  named in the title and how focused the article is;
+- the SEC filings of the last 12 months that report material events: 8-K items (results,
+  impairments, change of auditor, restatements, delisting notices...) and late-filing notices,
+  the most serious flagged as red flags;
+- the price behaviour (1-, 3- and 12-month returns against the S&P 500, distance from the
+  52-week high) and the EODHD news-sentiment score.
+
+Claude (Sonnet 5.5) reads this evidence and returns, as schema-validated JSON, a verdict
+(*explained*, *partially explained*, *not explained*), its confidence, the factors behind it with
+their nature (structural, temporary, uncertain) and the ids of the sources they rest on, red
+flags, and a keep/exclude suggestion. It is told to use only the evidence provided, so every
+factor links back to an article or a filing. A verdict is reused while the news and filings it
+rests on are unchanged (up to a week), which keeps the daily cost low; each run prints its cost.
+
+In the app, the review tab lists verdicts and lets the user overrule each suggestion; decisions
+are saved in `data/decisions.parquet` and the portfolio tab starts from the stocks kept.
+
 ## Efficient portfolio
 
-Pick up to 50 stocks among the scored universe (by default the top 20 of the screen); the tab
+Pick up to 50 stocks among the scored universe (by default those kept by the review); the tab
 downloads their adjusted daily closes (splits and dividends) and works on weekly returns over one
 to five years.
 
@@ -70,8 +95,9 @@ Requires [uv](https://docs.astral.sh/uv/) and an [EODHD](https://eodhd.com) API 
 
 ```bash
 uv sync
-cp .env.example .env          # then fill in SEC_USER_AGENT and EODHD_API_KEY
+cp .env.example .env          # then fill in SEC_USER_AGENT, EODHD_API_KEY, ANTHROPIC_API_KEY
 uv run --env-file .env python -m ridash.refresh
+uv run --env-file .env python -m ridash.review
 uv run --env-file .env streamlit run streamlit_app.py
 ```
 
@@ -96,8 +122,10 @@ ridash/
   value.py          universe, metrics, value score
   portfolio.py      weekly returns, Ledoit-Wolf covariance, efficient portfolios
   refresh.py        daily pipeline, writes data/snapshots/<date>.parquet
+  review.py         news and filings review with Claude, writes data/reviews/<date>.parquet
 app/
   screen.py         value screen and per-company breakdown
+  review.py         verdicts, sources and keep/exclude decisions
   portfolio.py      efficient portfolio construction
 streamlit_app.py    navigation between the tabs
 tests/
@@ -112,6 +140,8 @@ tests/
 - Foreign private issuers filing under IFRS (20-F) have no us-gaap data and are not scored.
 - Percentiles are computed across the whole universe, not within sectors.
 - Mean-variance weights are sensitive to expected returns estimated from a few years of history.
+- Review verdicts are only as good as the news coverage; foreign issuers file no 8-K, so their
+  review rests on news and price behaviour alone.
 
 ## Roadmap
 

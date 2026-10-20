@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Local cache and logs; daily snapshots are versioned for the hosted app.
+# Local cache and logs; snapshots, reviews and decisions are versioned for the hosted app.
 data/*
 !data/snapshots/
+!data/reviews/
+!data/decisions.parquet

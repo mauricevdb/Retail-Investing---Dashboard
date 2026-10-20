@@ -9,6 +9,7 @@ import streamlit as st
 
 from app.common import latest_snapshot, pct
 from ridash import portfolio
+from ridash.review import latest_review, read_decisions, with_decisions
 from ridash.sources import eodhd
 
 MAX_ASSETS = 50
@@ -58,15 +59,25 @@ if not os.environ.get("EODHD_API_KEY"):
     st.stop()
 
 names = dict(zip(pool["ticker"], pool["name"], strict=True))
+reviewed = latest_review()
+if reviewed is not None:
+    kept = set(
+        with_decisions(reviewed, read_decisions()).filter(pl.col("decision") == "keep")["ticker"]
+    )
+    default = [t for t in pool["ticker"] if t in kept][:MAX_ASSETS]
+    origin = "Par défaut, les actions gardées à l'issue de la revue qualitative."
+else:
+    default = pool["ticker"].head(20).to_list()
+    origin = "Par défaut, les 20 premières du screen value (aucune revue qualitative disponible)."
 with st.sidebar:
     st.header("Paramètres")
     chosen = st.multiselect(
         "Actions",
         pool["ticker"].to_list(),
-        default=pool["ticker"].head(20).to_list(),
+        default=default,
         format_func=lambda ticker: f"{ticker} · {names[ticker]}",
         max_selections=MAX_ASSETS,
-        help="Par défaut, les 20 premières du screen value.",
+        help=origin,
     )
     years = st.slider("Historique (années)", 1, 5, 3)
     max_weight = st.slider("Poids maximum par action (%)", 5, 100, 20, 5) / 100

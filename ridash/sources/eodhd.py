@@ -58,6 +58,34 @@ def price_history(
         return pl.concat(pool.map(fetch, tickers))
 
 
+def news(ticker: str, start: date, end: date, api_key: str | None = None) -> list[dict]:
+    """Articles tagged with the ticker: date, title, link, symbols, full text."""
+    key = api_key or os.environ["EODHD_API_KEY"]
+    url = f"{_BASE}/news?s={ticker}.US&from={start}&to={end}&limit=50&fmt=json&api_token={key}"
+    return get_json(url) or []
+
+
+def sentiments(
+    tickers: list[str], start: date, end: date, api_key: str | None = None
+) -> pl.DataFrame:
+    """Daily news sentiment scored by EODHD (normalised, -1 to 1) and article count."""
+    key = api_key or os.environ["EODHD_API_KEY"]
+    symbols = ",".join(f"{t}.US" for t in tickers)
+    raw = get_json(f"{_BASE}/sentiments?s={symbols}&from={start}&to={end}&fmt=json&api_token={key}")
+    rows = [
+        {
+            "ticker": symbol.removesuffix(".US"),
+            "date": day["date"],
+            "count": day["count"],
+            "sentiment": day["normalized"],
+        }
+        for symbol, days in (raw or {}).items()
+        for day in days
+    ]
+    schema = {"ticker": pl.Utf8, "date": pl.Utf8, "count": pl.Int64, "sentiment": pl.Float64}
+    return pl.DataFrame(rows, schema=schema).with_columns(pl.col("date").str.to_date())
+
+
 def parse_history(raw: list[dict] | None, ticker: str) -> pl.DataFrame:
     if not raw:
         return pl.DataFrame(schema=HISTORY_SCHEMA)

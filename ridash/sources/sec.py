@@ -57,10 +57,39 @@ class Sec:
             known.write_parquet(cache)
         return known
 
+    def filings(self, cik: int) -> pl.DataFrame:
+        """Most recent filings of a company: form, date, 8-K items, document URL."""
+        raw = self._get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json") or {}
+        return parse_filings(raw.get("filings", {}).get("recent", {}), cik)
+
     def _company(self, cik: int) -> dict:
         raw = self._get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json") or {}
         sic = raw.get("sic")
         return {"cik": cik, "sic": int(sic) if sic else None, "industry": raw.get("sicDescription")}
+
+
+def parse_filings(recent: dict, cik: int) -> pl.DataFrame:
+    schema = {"form": pl.Utf8, "filed": pl.Utf8, "items": pl.Utf8, "accn": pl.Utf8, "url": pl.Utf8}
+    if not recent.get("form"):
+        return pl.DataFrame(schema=schema).with_columns(pl.col("filed").str.to_date())
+    rows = [
+        {
+            "form": form,
+            "filed": filed,
+            "items": items,
+            "accn": accn,
+            "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/{doc}",
+        }
+        for form, filed, items, accn, doc in zip(
+            recent["form"],
+            recent["filingDate"],
+            recent["items"],
+            recent["accessionNumber"],
+            recent["primaryDocument"],
+            strict=True,
+        )
+    ]
+    return pl.DataFrame(rows, schema=schema).with_columns(pl.col("filed").str.to_date())
 
 
 def parse_frame(raw: dict | None, tag: str) -> pl.DataFrame:
