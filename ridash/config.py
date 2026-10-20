@@ -19,5 +19,3 @@ REVIEW_MODEL = "claude-sonnet-5-5"
 REVIEW_EFFORT = "medium"
 # A verdict is reused while its news and filings are unchanged, at most this many days.
 REVIEW_MAX_AGE_DAYS = 7
-# Claude Sonnet 5.5 list prices, USD per million tokens (input, cache write, cache read, output).
-REVIEW_PRICES = (2.00, 2.50, 0.20, 10.00)

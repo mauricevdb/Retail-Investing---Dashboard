@@ -7,21 +7,25 @@ material events filed with the SEC (8-K, late-filing notices) and the stock's pr
 behaviour, then asks Claude for a verdict with its reasons and sources. The verdict is a
 suggestion: the decision to keep or exclude a stock stays with the user.
 
+Claude is reached through Claude Code (Claude Agent SDK) and the Claude subscription it is
+logged into on this machine, the way pi-claude-bridge does it: no API key is needed, and the
+review counts against the plan's usage limits. Log in once with `claude` beforehand.
+
     uv run --env-file .env python -m ridash.review
 """
 
+import asyncio
 import hashlib
 import html
 import json
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-import anthropic
 import polars as pl
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKError, ResultMessage, query
 
 from ridash.config import (
     DECISIONS_FILE,
@@ -29,7 +33,6 @@ from ridash.config import (
     REVIEW_EFFORT,
     REVIEW_MAX_AGE_DAYS,
     REVIEW_MODEL,
-    REVIEW_PRICES,
     SHORTLIST_SIZE,
     SNAPSHOT_DIR,
 )
@@ -302,34 +305,49 @@ def build_evidence(
     return Evidence("\n".join(lines), sources, fingerprint)
 
 
-def ask_claude(client: anthropic.Anthropic, evidence: str) -> tuple[dict, float]:
-    """Verdict from Claude as a schema-validated dict, and the cost of the request in USD."""
-    response = client.beta.messages.create(
+def claude_options() -> ClaudeAgentOptions:
+    """Claude Code, run through the Agent SDK with the Claude subscription it is logged into."""
+    return ClaudeAgentOptions(
         model=REVIEW_MODEL,
-        max_tokens=16000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        system=[{"type": "text", "text": INSTRUCTIONS, "cache_control": {"type": "ephemeral"}}],
-        output_config={
-            "effort": REVIEW_EFFORT,
-            "format": {"type": "json_schema", "schema": VERDICT_SCHEMA},
-        },
-        messages=[{"role": "user", "content": evidence}],
+        effort=REVIEW_EFFORT,
+        # Appended to Claude Code's own system prompt rather than replacing it: requests with a
+        # replaced prompt may be billed as Extra Usage instead of counting against the plan.
+        system_prompt={"type": "preset", "preset": "claude_code", "append": INSTRUCTIONS},
+        tools=[],  # everything Claude needs is in the prompt: no file, shell or web access
+        setting_sources=[],  # no CLAUDE.md, skills, hooks or settings from this machine
+        max_turns=5,
+        output_format={"type": "json_schema", "schema": VERDICT_SCHEMA},
     )
-    if response.stop_reason in ("refusal", "max_tokens"):
-        raise ReviewError(f"réponse incomplète ({response.stop_reason})")
-    text = next(block.text for block in response.content if block.type == "text")
-    return json.loads(text), cost(response.usage)
 
 
-def cost(usage) -> float:
-    input_price, write_price, read_price, output_price = REVIEW_PRICES
-    return (
-        usage.input_tokens * input_price
-        + (usage.cache_creation_input_tokens or 0) * write_price
-        + (usage.cache_read_input_tokens or 0) * read_price
-        + usage.output_tokens * output_price
-    ) / 1e6
+async def ask_claude(evidence: str) -> tuple[dict, float]:
+    """Schema-validated verdict, and its cost at API prices as reported by Claude Code (with a
+    subscription it counts against the plan's usage limits rather than being billed)."""
+    result = None
+    async for message in query(prompt=evidence, options=claude_options()):
+        if isinstance(message, ResultMessage):
+            result = message
+    if result is None or result.subtype != "success" or result.structured_output is None:
+        detail = (result.errors or result.subtype) if result is not None else "no result"
+        raise ReviewError(f"pas de verdict ({detail})")
+    return result.structured_output, result.total_cost_usd or 0.0
+
+
+async def ask_all(
+    evidences: list[str], concurrency: int = 3
+) -> list[tuple[dict | None, float, str | None]]:
+    """(verdict, cost, error) for each evidence, a few Claude Code processes at a time."""
+    gate = asyncio.Semaphore(concurrency)
+
+    async def ask(evidence: str) -> tuple[dict | None, float, str | None]:
+        async with gate:
+            try:
+                verdict, usd = await ask_claude(evidence)
+            except (ClaudeSDKError, ReviewError) as error:
+                return None, 0.0, str(error)
+            return verdict, usd, None
+
+    return await asyncio.gather(*(ask(evidence) for evidence in evidences))
 
 
 def reusable(previous: dict | None, fingerprint: str, as_of: date) -> bool:
@@ -370,8 +388,10 @@ def main() -> None:
     if path.exists():
         print(f"{as_of}: review already written, nothing to do")
         return
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise SystemExit("ANTHROPIC_API_KEY manquante : l'ajouter dans .env")
+    # As in pi-claude-bridge: any of these would point Claude Code at an API key or a gateway
+    # instead of the Claude subscription it is logged into.
+    for variable in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
+        os.environ.pop(variable, None)
 
     stocks = shortlist(snapshot)
     tickers = stocks["ticker"].to_list()
@@ -442,27 +462,14 @@ def main() -> None:
             to_analyse.append((len(rows), evidence.text))
         rows.append(row)
 
-    client = anthropic.Anthropic(max_retries=4)
-
-    def analyse(item: tuple[int, str]) -> tuple[int, dict]:
-        index, text = item
-        try:
-            verdict, usd = ask_claude(client, text)
-        except (anthropic.APIError, ReviewError) as error:
-            return index, {"verdict": None, "cost_usd": 0.0, "error": str(error)}
+    answers = asyncio.run(ask_all([text for _, text in to_analyse]))
+    for (index, _), (verdict, usd, error) in zip(to_analyse, answers, strict=True):
+        if verdict is None:
+            rows[index].update(verdict=None, cost_usd=0.0, error=error)
+            continue
         verdict["factors"] = json.dumps(verdict["factors"], ensure_ascii=False)
         verdict["red_flags"] = json.dumps(verdict["red_flags"], ensure_ascii=False)
-        return index, {
-            **verdict,
-            "analysed_on": as_of,
-            "model": REVIEW_MODEL,
-            "cost_usd": usd,
-            "error": None,
-        }
-
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        for index, result in pool.map(analyse, to_analyse):
-            rows[index].update(result)
+        rows[index].update(verdict, analysed_on=as_of, model=REVIEW_MODEL, cost_usd=usd, error=None)
 
     review = pl.DataFrame(rows, infer_schema_length=None)
     REVIEW_DIR.mkdir(parents=True, exist_ok=True)

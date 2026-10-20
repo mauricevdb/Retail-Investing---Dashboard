@@ -17,7 +17,7 @@ reviewed = latest_review()
 st.title("Revue qualitative de la shortlist")
 if reviewed is None:
     st.info(
-        "Aucune revue disponible. Ajouter `ANTHROPIC_API_KEY` dans `.env`, puis lancer "
+        "Aucune revue disponible. Se connecter une fois à Claude Code (`claude`), puis lancer "
         "`uv run --env-file .env python -m ridash.review`."
     )
     st.stop()
@@ -28,7 +28,8 @@ st.caption(
     f"Les {reviewed.height} premières actions du screen au {as_of:%d/%m/%Y}. {REVIEW_MODEL} lit "
     "leurs news récentes (EODHD), leurs dépôts SEC des 12 derniers mois et l'évolution du cours, "
     "puis juge si la décote est expliquée. Ses verdicts sont des suggestions : la décision te "
-    f"revient. Coût de cette revue : {reviewed['cost_usd'].sum():.2f} $."
+    "revient. Analyse faite via Claude Code et l'abonnement Claude, sans clé API : équivalent "
+    f"de {reviewed['cost_usd'].sum():.2f} $ au tarif de l'API, décompté du quota de l'abonnement."
 )
 if screen_date != as_of:
     st.warning(f"Le screen date du {screen_date:%d/%m/%Y} : la revue n'est pas à jour.")

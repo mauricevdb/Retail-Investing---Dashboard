@@ -62,7 +62,17 @@ Claude (Sonnet 5.5) reads this evidence and returns, as schema-validated JSON, a
 their nature (structural, temporary, uncertain) and the ids of the sources they rest on, red
 flags, and a keep/exclude suggestion. It is told to use only the evidence provided, so every
 factor links back to an article or a filing. A verdict is reused while the news and filings it
-rests on are unchanged (up to a week), which keeps the daily cost low; each run prints its cost.
+rests on are unchanged (up to a week), which keeps daily usage low.
+
+Claude is reached without an API key, the way
+[pi-claude-bridge](https://github.com/elidickinson/pi-claude-bridge) does it: the review drives
+Claude Code through the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview),
+using the Claude subscription Claude Code is logged into on the machine, so it counts against
+the plan's usage limits. The instructions are appended to Claude Code's own system prompt
+rather than replacing it, no tool is granted, no local setting is loaded, and any
+`ANTHROPIC_*` variable that would redirect Claude Code to an API key is ignored. This is meant
+for running the review on your own machine with your own subscription; the hosted app only
+reads its results.
 
 In the app, the review tab lists verdicts and lets the user overrule each suggestion; decisions
 are saved in `data/decisions.parquet` and the portfolio tab starts from the stocks kept.
@@ -91,11 +101,12 @@ Results are in-sample: they describe how these portfolios behaved, not how they 
 
 ## Running it
 
-Requires [uv](https://docs.astral.sh/uv/) and an [EODHD](https://eodhd.com) API key (EOD plan).
+Requires [uv](https://docs.astral.sh/uv/), an [EODHD](https://eodhd.com) API key (EOD plan) and,
+for the qualitative review, a Claude subscription with Claude Code logged in (run `claude` once).
 
 ```bash
 uv sync
-cp .env.example .env          # then fill in SEC_USER_AGENT, EODHD_API_KEY, ANTHROPIC_API_KEY
+cp .env.example .env          # then fill in SEC_USER_AGENT and EODHD_API_KEY
 uv run --env-file .env python -m ridash.refresh
 uv run --env-file .env python -m ridash.review
 uv run --env-file .env streamlit run streamlit_app.py

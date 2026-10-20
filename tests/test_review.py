@@ -1,9 +1,9 @@
-import json
+import asyncio
 from datetime import date, timedelta
-from types import SimpleNamespace
 
 import polars as pl
 import pytest
+from claude_agent_sdk import ClaudeSDKError, ResultMessage
 
 from ridash import review
 from ridash.sources.sec import parse_filings
@@ -145,55 +145,71 @@ def test_verdict_is_reused_only_when_unchanged_and_recent():
     assert not review.reusable(None, "f", AS_OF)
 
 
-class FakeClient:
-    def __init__(self, stop_reason: str = "end_turn"):
-        verdict = {
-            "verdict": "explained",
-            "confidence": "high",
-            "news_tone": "negative",
-            "suggestion": "exclude",
-            "summary": "s",
-            "factors": [],
-            "red_flags": [],
-        }
-        usage = SimpleNamespace(
-            input_tokens=5000,
-            cache_creation_input_tokens=0,
-            cache_read_input_tokens=1000,
-            output_tokens=2000,
-        )
-        response = SimpleNamespace(
-            stop_reason=stop_reason,
-            usage=usage,
-            content=[
-                SimpleNamespace(type="thinking"),
-                SimpleNamespace(type="text", text=json.dumps(verdict)),
-            ],
-        )
-        self.requests = []
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create(response)))
-
-    def _create(self, response):
-        def create(**request):
-            self.requests.append(request)
-            return response
-
-        return create
+VERDICT = {
+    "verdict": "explained",
+    "confidence": "high",
+    "news_tone": "negative",
+    "suggestion": "exclude",
+    "summary": "s",
+    "factors": [],
+    "red_flags": [],
+}
 
 
-def test_ask_claude_returns_verdict_and_cost():
-    client = FakeClient()
-    verdict, usd = review.ask_claude(client, "evidence")
-    assert verdict["verdict"] == "explained"
-    assert usd == pytest.approx((5000 * 2 + 1000 * 0.2 + 2000 * 10) / 1e6)
-    request = client.requests[0]
-    assert request["output_config"]["format"]["schema"] is review.VERDICT_SCHEMA
-    assert request["messages"] == [{"role": "user", "content": "evidence"}]
+def result(subtype="success", structured_output=VERDICT, cost=0.05):
+    return ResultMessage(
+        subtype=subtype,
+        duration_ms=1,
+        duration_api_ms=1,
+        is_error=subtype != "success",
+        num_turns=1,
+        session_id="s",
+        structured_output=structured_output,
+        total_cost_usd=cost,
+    )
 
 
-def test_incomplete_answer_is_an_error_not_a_verdict():
+def fake_query(*messages, calls=None, fail_on=None):
+    async def query(prompt, options):
+        if calls is not None:
+            calls.append((prompt, options))
+        if prompt == fail_on:
+            raise ClaudeSDKError("Claude Code is not logged in")
+        for message in messages:
+            yield message
+
+    return query
+
+
+def test_ask_claude_returns_verdict_and_cost(monkeypatch):
+    calls = []
+    monkeypatch.setattr(review, "query", fake_query(object(), result(), calls=calls))
+    verdict, usd = asyncio.run(review.ask_claude("evidence"))
+    assert verdict == VERDICT and usd == 0.05
+
+    prompt, options = calls[0]
+    assert prompt == "evidence"
+    assert options.output_format == {"type": "json_schema", "schema": review.VERDICT_SCHEMA}
+    assert options.tools == [] and options.setting_sources == []
+    assert options.system_prompt == {
+        "type": "preset",
+        "preset": "claude_code",
+        "append": review.INSTRUCTIONS,
+    }
+
+
+def test_run_without_structured_output_is_an_error(monkeypatch):
+    failed = result("error_max_structured_output_retries", structured_output=None)
+    monkeypatch.setattr(review, "query", fake_query(failed))
     with pytest.raises(review.ReviewError):
-        review.ask_claude(FakeClient(stop_reason="refusal"), "evidence")
+        asyncio.run(review.ask_claude("evidence"))
+
+
+def test_one_failure_does_not_stop_the_other_analyses(monkeypatch):
+    monkeypatch.setattr(review, "query", fake_query(result(), fail_on="bad"))
+    answers = asyncio.run(review.ask_all(["good", "bad", "good"]))
+    assert [verdict is not None for verdict, _, _ in answers] == [True, False, True]
+    assert "not logged in" in answers[1][2]
 
 
 def test_user_decision_overrides_suggestion_and_latest_wins():
