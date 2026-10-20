@@ -1,12 +1,15 @@
-"""EODHD end-of-day market data, using the bulk endpoints of the EOD plan."""
+"""EODHD end-of-day market data (EOD plan): bulk last session and per-ticker history."""
 
 import os
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 
 import polars as pl
 
 from ridash.sources.http import get_json
 
 _BASE = "https://eodhd.com/api"
+HISTORY_SCHEMA = {"ticker": pl.Utf8, "date": pl.Date, "adj_close": pl.Float64}
 
 
 def quotes(api_key: str | None = None) -> pl.DataFrame:
@@ -38,4 +41,28 @@ def parse_quotes(bulk: list[dict], listings: list[dict]) -> pl.DataFrame:
             pl.col("avgvol_50d").cast(pl.Float64).alias("avg_volume"),
         )
         .join(exchanges, on="ticker", how="left")
+    )
+
+
+def price_history(
+    tickers: list[str], start: date, end: date, api_key: str | None = None
+) -> pl.DataFrame:
+    """Daily closes adjusted for splits and dividends, one request per ticker."""
+    key = api_key or os.environ["EODHD_API_KEY"]
+
+    def fetch(ticker: str) -> pl.DataFrame:
+        url = f"{_BASE}/eod/{ticker}.US?from={start}&to={end}&fmt=json&api_token={key}"
+        return parse_history(get_json(url), ticker)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return pl.concat(pool.map(fetch, tickers))
+
+
+def parse_history(raw: list[dict] | None, ticker: str) -> pl.DataFrame:
+    if not raw:
+        return pl.DataFrame(schema=HISTORY_SCHEMA)
+    return pl.DataFrame(raw, infer_schema_length=None).select(
+        pl.lit(ticker).alias("ticker"),
+        pl.col("date").str.to_date(),
+        pl.col("adjusted_close").cast(pl.Float64).alias("adj_close"),
     )

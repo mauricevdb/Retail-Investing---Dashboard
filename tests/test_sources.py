@@ -1,6 +1,6 @@
 from datetime import date
 
-from ridash.sources.eodhd import parse_quotes
+from ridash.sources.eodhd import parse_history, parse_quotes
 from ridash.sources.sec import parse_frame
 
 
@@ -14,6 +14,12 @@ def test_parse_frame_normalises_values_and_dates():
     frame = parse_frame(raw, "OperatingIncomeLoss")
     assert frame.row(0) == (1800, "OperatingIncomeLoss", date(2025, 12, 31), 8.053e9, "0001-26-1")
     assert frame["value"].to_list()[1] == 1.5
+
+
+def test_parse_history_keeps_adjusted_close():
+    raw = [{"date": "2026-10-16", "close": 230.0, "adjusted_close": 229.5, "volume": 1}]
+    assert parse_history(raw, "AAPL").row(0) == ("AAPL", date(2026, 10, 16), 229.5)
+    assert parse_history(None, "GONE").is_empty()
 
 
 def test_missing_frame_is_empty():
