@@ -1,9 +1,9 @@
 """Mean-variance portfolio construction: returns, covariance and efficient portfolios.
 
-Portfolios are long-only, fully invested and capped per asset. Every efficient portfolio
-minimises  ½·w'Σw − λ·μ'w  for some risk tolerance λ ≥ 0: λ = 0 gives the minimum-variance
-portfolio and a growing λ moves along the frontier towards the highest expected return.
-Each problem is a small convex quadratic program, solved by accelerated projected gradient.
+Portfolios are long-only, fully invested, capped per asset and, optionally, per group of
+assets (sector, country). Every efficient portfolio minimises  ½·w'Σw − λ·μ'w  for some risk
+tolerance λ ≥ 0: λ = 0 gives the minimum-variance portfolio and a growing λ moves along the
+frontier towards the highest expected return. Each problem is a small convex quadratic program.
 """
 
 from dataclasses import dataclass
@@ -80,53 +80,110 @@ def ledoit_wolf(returns: np.ndarray) -> tuple[np.ndarray, float]:
     return intensity * target + (1 - intensity) * sample, float(intensity)
 
 
-def project_capped_simplex(v: np.ndarray, cap: float) -> np.ndarray:
-    """Closest point to v with weights in [0, cap] summing to 1.
+@dataclass(frozen=True)
+class GroupCap:
+    """At most `cap` of the portfolio in the assets flagged by `members` (a sector, a country)."""
 
-    The solution is clip(v − τ, 0, cap) for the τ that makes the weights sum to 1. That sum
-    is piecewise linear in τ with breakpoints at v and v − cap, so τ is found exactly by
-    evaluating it at every breakpoint and interpolating in the right segment."""
-    taus = np.sort(np.concatenate([v - cap, v]))
-    sums = np.clip(v[None, :] - taus[:, None], 0, cap).sum(axis=1)
-    k = np.nonzero(sums >= 1)[0][-1]
-    tau = taus[k] + (sums[k] - 1) * (taus[k + 1] - taus[k]) / (sums[k] - sums[k + 1])
-    return np.clip(v - tau, 0, cap)
+    name: str
+    members: np.ndarray  # boolean, one entry per asset
+    cap: float
+
+
+class QuadraticProgram:
+    """min ½·x'Px + q'x  subject to  lo ≤ Ax ≤ hi, for a fixed P, A, lo, hi and any q.
+
+    Solved by ADMM as in OSQP (Stellato et al., 2020): each iteration solves one linear system,
+    whose matrix is inverted once, then clips Ax to its bounds. Equality rows (lo = hi) get a
+    stiffer penalty, and the penalty is rebalanced while the primal and dual residuals drift
+    apart. Warm starts make a sequence of nearby problems cheap."""
+
+    SIGMA = 1e-6
+    ALPHA = 1.6  # over-relaxation
+
+    def __init__(self, P: np.ndarray, A: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> None:
+        self.P, self.A, self.lo, self.hi = P, A, lo, hi
+        self._equality = lo == hi
+        self._factor(0.1)
+        n, m = A.shape[1], A.shape[0]
+        self._x, self._z, self._y = np.full(n, 1 / n), np.zeros(m), np.zeros(m)
+
+    def _factor(self, rho: float) -> None:
+        self._rho_scalar = rho
+        self._rho = np.where(self._equality, 1e3 * rho, rho)
+        n = self.P.shape[0]
+        matrix = self.P + self.SIGMA * np.eye(n) + self.A.T @ (self._rho[:, None] * self.A)
+        self._inverse = np.linalg.inv(matrix)
+
+    def solve(self, q: np.ndarray, tolerance: float = 1e-9, max_iter: int = 100_000) -> np.ndarray:
+        P, A, lo, hi = self.P, self.A, self.lo, self.hi
+        x, z, y = self._x, self._z, self._y
+        for iteration in range(1, max_iter + 1):
+            x_tilde = self._inverse @ (self.SIGMA * x - q + A.T @ (self._rho * z - y))
+            z_tilde = A @ x_tilde
+            x = self.ALPHA * x_tilde + (1 - self.ALPHA) * x
+            z_relaxed = self.ALPHA * z_tilde + (1 - self.ALPHA) * z
+            z_next = np.clip(z_relaxed + y / self._rho, lo, hi)
+            y = y + self._rho * (z_relaxed - z_next)
+            z = z_next
+            if iteration % 10:
+                continue
+            Ax, Px, Aty = A @ x, P @ x, A.T @ y
+            primal = np.abs(Ax - z).max()
+            dual = np.abs(Px + q + Aty).max()
+            primal_scale = max(np.abs(Ax).max(), np.abs(z).max(), 1e-12)
+            dual_scale = max(np.abs(Px).max(), np.abs(Aty).max(), np.abs(q).max(), 1e-12)
+            if primal <= tolerance * (1 + primal_scale) and dual <= tolerance * (1 + dual_scale):
+                self._x, self._z, self._y = x, z, y
+                return x
+            ratio = np.sqrt((primal / primal_scale) / max(dual / dual_scale, 1e-30))
+            if iteration % 50 == 0 and not 0.2 < ratio < 5:
+                self._factor(float(np.clip(self._rho_scalar * ratio, 1e-6, 1e6)))
+        raise ValueError("constraints cannot all be met")
 
 
 class EfficientSet:
-    """Efficient long-only portfolios for given estimates and maximum weight per asset."""
+    """Efficient long-only portfolios for given estimates, maximum weight per asset and caps
+    on groups of assets."""
 
-    def __init__(self, estimates: Estimates, max_weight: float) -> None:
+    def __init__(
+        self, estimates: Estimates, max_weight: float, groups: tuple[GroupCap, ...] = ()
+    ) -> None:
         n = len(estimates.mean)
         if max_weight * n < 1:
             raise ValueError(f"a {max_weight:.0%} cap cannot fully invest {n} assets")
         self.estimates = estimates
         self.max_weight = max_weight
-        self._step = 1 / np.linalg.eigvalsh(estimates.cov)[-1]
+        self.groups = groups
+        # Asset bounds, full investment, then one row per group.
+        A = np.vstack([np.eye(n), np.ones(n), *(g.members.astype(float) for g in groups)])
+        lo = np.concatenate([np.zeros(n), [1.0], np.full(len(groups), -np.inf)])
+        hi = np.concatenate([np.full(n, max_weight), [1.0], [g.cap for g in groups]])
+        self._program = QuadraticProgram(estimates.cov, A, lo, hi)
+        self._projection = QuadraticProgram(np.eye(n), A, lo, hi)
         # Beyond this risk tolerance the expected-return term dominates: the solution is the
         # highest-return corner of the feasible set.
         spread = max(float(np.ptp(estimates.mean)), 1e-9)
-        self.max_tolerance = 1e3 / (self._step * spread)
-        self._last = np.full(n, 1 / n)
+        top_eigenvalue = np.linalg.eigvalsh(estimates.cov)[-1]
+        self.max_tolerance = 1e3 * top_eigenvalue / spread
 
     def portfolio(self, weights: np.ndarray) -> Portfolio:
         mean, cov = self.estimates.mean, self.estimates.cov
         return Portfolio(weights, float(mean @ weights), float(np.sqrt(weights @ cov @ weights)))
 
+    def _clean(self, weights: np.ndarray) -> np.ndarray:
+        # Remove the solver's residual noise (around 1e-9) so that weights read exactly.
+        weights = np.clip(weights, 0, self.max_weight)
+        return weights / weights.sum()
+
     def solve(self, risk_tolerance: float) -> Portfolio:
-        mean, cov = self.estimates.mean, self.estimates.cov
-        w = y = self._last
-        t = 1.0
-        for _ in range(20_000):
-            gradient = cov @ y - risk_tolerance * mean
-            w_next = project_capped_simplex(y - self._step * gradient, self.max_weight)
-            if np.abs(w_next - w).max() < 1e-10:
-                break
-            t_next = (1 + np.sqrt(1 + 4 * t * t)) / 2
-            y = w_next + (t - 1) / t_next * (w_next - w)
-            w, t = w_next, t_next
-        self._last = w_next
-        return self.portfolio(w_next)
+        weights = self._program.solve(-risk_tolerance * self.estimates.mean)
+        return self.portfolio(self._clean(weights))
+
+    def equal_weight(self) -> Portfolio:
+        """The same weight in every asset or, when a cap binds, the closest portfolio to it
+        that respects the caps."""
+        n = len(self.estimates.mean)
+        return self.portfolio(self._clean(self._projection.solve(-np.full(n, 1 / n))))
 
     def tolerances(self, points: int = 60) -> np.ndarray:
         return np.concatenate(

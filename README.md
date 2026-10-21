@@ -2,32 +2,39 @@
 
 A personal retail-investing dashboard, in three steps:
 
-- **Value screen** — ranks US listed companies by how cheap they look on their latest annual
-  financial statements, and shows how every number was computed, down to the SEC filing it
-  comes from.
+- **Value screen** — ranks US listed companies by how cheap they are on their last twelve
+  months of reported results, among those that clear a quality gate, and shows how every number
+  was computed, down to the SEC filing it comes from.
 - **Qualitative review** — for the 50 best-ranked stocks, Claude reads quarterly results, the
   latest earnings release, insider transactions, short interest, SEC filings and news, scores
   the risk that each discount is a value trap, and suggests the 20 safest; the user keeps or
   excludes each stock.
-- **Efficient portfolio** — builds mean-variance portfolios from the stocks kept: correlations,
-  efficient frontier, minimum-variance, maximum-Sharpe and target-volatility portfolios.
+- **Efficient portfolio** — builds portfolios from the stocks kept, capped per stock, sector
+  and country: equal weight by default, plus correlations, efficient frontier, minimum-variance,
+  maximum-Sharpe and target-volatility portfolios.
 
 ## Value screen
 
 ```
 EODHD bulk quotes ──┐   (1 request: price, market cap, security type for every US ticker)
-                    ├──► universe ──► metrics ──► value score ──► data/snapshots/<date>.parquet ──► Streamlit
-SEC XBRL frames ────┘   (~200 requests: one accounting concept for every filer per period)
+                    ├──► universe ──► metrics ──► quality gate ──► value score ──► data/snapshots/<date>.parquet
+SEC company facts ──┘   (one download per company, again only after it files a new report)
 ```
 
 - **Universe** — US common stocks listed on NYSE, NASDAQ or NYSE American, in USD, market cap
   of at least $2bn. Financials, insurance and real estate (SIC 6000-6799) are excluded: EBIT and
-  debt do not mean the same thing there.
-- **Fundamentals** — the latest fiscal year reported in a 10-K, read from the SEC
-  [XBRL frames API](https://www.sec.gov/edgar/sec-api-documentation). Income and cash-flow items
-  cover the fiscal year; balance-sheet items are taken at its closing date. Each concept falls
-  back through a short list of us-gaap tags; EBIT is operating income or, for companies that do
-  not present that subtotal, pre-tax income plus interest expense.
+  debt do not mean the same thing there. Sectors are close to the GICS ones, derived from the
+  SIC code each company declares; the country is that of the head office.
+- **Fundamentals** — the twelve months to the end of the latest period each company reported
+  (quarter or fiscal year), from the SEC
+  [XBRL company facts](https://www.sec.gov/edgar/sec-api-documentation). Quarterly reports give
+  income and cash flows from the start of the fiscal year, so the twelve months are rebuilt as
+  *last fiscal year + year to date − same period a year earlier*; balance-sheet items are taken
+  at the end of the period. Only filings published by the snapshot date are used, so a snapshot
+  never sees later information or later restatements. Each concept falls back through a short
+  list of us-gaap tags; EBIT is operating income or, for companies that do not present that
+  subtotal, pre-tax income plus interest expense. Facts are cached locally and a company is
+  downloaded again only when the frames API shows a new report from it (or after a month).
 - **Metrics**
 
   | Metric | Formula | Better when |
@@ -37,8 +44,15 @@ SEC XBRL frames ────┘   (~200 requests: one accounting concept for eve
   | ROCE | EBIT / (equity + net debt) | higher |
   | Net debt / EBITDA | (debt − cash) / (EBIT + D&A) | lower |
 
-- **Value score** — the average of the four metric percentiles across scored companies (0-100).
-  Only companies with positive EBIT and EV are scored.
+- **Quality gate** — only companies with a ROCE above 10% and net debt below 3 times EBITDA
+  are ranked. Return on capital and leverage are a gate rather than part of the score, so that a
+  high return on capital cannot make up for a higher price. A ratio that cannot be computed
+  (negative capital employed, no depreciation reported) does not fail the gate, but the company
+  is flagged.
+- **Value score** — the average of the EV/EBIT and FCF-yield percentiles (0-100), across the
+  companies with positive EBIT and EV. A company where one of the two cannot be computed gets
+  no score, rather than a score on the other alone. The ranking keeps those that clear the
+  quality gate.
 
 Missing data stays missing: a ratio that cannot be computed is left empty and the company is not
 scored, rather than filled with a default. The one deliberate inference is for debt: a company that
@@ -50,7 +64,7 @@ reported, since only some companies have them: minority interest and stock-based
 ## Qualitative review
 
 A low multiple is an opportunity only if the market is not pricing in a problem the historical
-figures cannot show: the screen looks at the last fiscal year, the market at the next ones. Every
+figures cannot show: the screen looks at the last twelve months, the market at the next years. Every
 day, for each of the 50 best-ranked stocks, `ridash.evidence` assembles a brief from free primary
 sources:
 
@@ -110,11 +124,25 @@ reads its results.
 In the app, the review tab lists verdicts and lets the user overrule each suggestion; decisions
 are saved in `data/decisions.parquet` and the portfolio tab starts from the stocks kept.
 
+**Reproducibility.** Claude does not answer twice in exactly the same way, so a trap risk is
+only meaningful if its variation is small compared with the gap between the last stock kept and
+the first one excluded. `python -m ridash.stability` asks Claude again on exactly the briefs of
+the latest review (saved locally in `data/briefs/`), for a sample of stocks spread over the
+range of risks, and reports how far the trap risks move, the share of criteria scored
+identically, and how many stocks would cross the keep/exclude cut-off.
+
 ## Efficient portfolio
 
-Pick up to 50 stocks among the scored universe (by default those kept by the review); the tab
+Pick up to 50 stocks among the ranked universe (by default those kept by the review); the tab
 downloads their adjusted daily closes (splits and dividends) and works on weekly returns over one
 to five years.
+
+- **Equal weight by default** — the same weight in every stock or, when a cap forbids it, the
+  closest portfolio that respects the caps. It depends on no estimate, whereas the maximum-Sharpe
+  portfolio leans towards the stocks that rose most, the least cheap ones today: the opposite
+  of a value strategy.
+- **Caps** — per stock, per sector and per country other than the United States, applied to
+  every portfolio.
 
 - **Risk** — annualised covariance, by default shrunk towards a scaled identity
   ([Ledoit & Wolf, 2004](https://doi.org/10.1016/S0047-259X(03)00096-4)) with an intensity
@@ -122,13 +150,14 @@ to five years.
   stock.
 - **Expected returns** — annualised historical means. They are the weakest input: the
   minimum-variance portfolio does not depend on them.
-- **Optimisation** — long-only, fully invested, with a cap per stock. Every efficient portfolio
-  minimises ½·w'Σw − λ·μ'w for a risk tolerance λ; each of these small quadratic programs is
-  solved by accelerated projected gradient (FISTA) with an exact projection onto the capped
-  simplex, in plain NumPy. The maximum-Sharpe portfolio is found by golden-section search
-  along the frontier, a target volatility by bisection.
-- **Views** — frontier with the capital market line and each stock on its own, weights and
-  sector exposure of the chosen portfolio, correlation heatmap and most correlated pairs.
+- **Optimisation** — long-only and fully invested. Every efficient portfolio minimises
+  ½·w'Σw − λ·μ'w for a risk tolerance λ under the caps; each of these small quadratic programs
+  is solved by ADMM as in [OSQP](https://osqp.org) (one linear system inverted once, then
+  clipping to the bounds, with warm starts along the frontier), in plain NumPy. The
+  maximum-Sharpe portfolio is found by golden-section search along the frontier, a target
+  volatility by bisection.
+- **Views** — frontier with the capital market line and each stock on its own, weights, sector
+  and country exposure of the chosen portfolio, correlation heatmap and most correlated pairs.
 
 Results are in-sample: they describe how these portfolios behaved, not how they will.
 
@@ -142,15 +171,16 @@ uv sync
 cp .env.example .env          # then fill in SEC_USER_AGENT and EODHD_API_KEY
 uv run --env-file .env python -m ridash.refresh
 uv run --env-file .env python -m ridash.review
+uv run --env-file .env python -m ridash.stability   # optional: --stocks 10 --runs 2
 uv run --env-file .env streamlit run streamlit_app.py
 ```
 
 The screen only reads the snapshots; the portfolio tab also needs `EODHD_API_KEY` to download
 price histories (on Streamlit Community Cloud, set it as a secret).
 
-The refresh takes about a minute once the SIC classification cache is built (first run: a few
-minutes). Running it once a day, after the US close, is enough: fundamentals only change with new
-filings, prices once per session.
+The refresh takes a minute or two once the company caches are built (first run: about a
+quarter of an hour, to download the facts of every company). Running it once a day, after the US
+close, is enough: fundamentals only change with new filings, prices once per session.
 
 ```bash
 uv run pytest
@@ -162,12 +192,13 @@ uv run ruff check .
 ```
 ridash/
   sources/          SEC EDGAR, EODHD and FINRA clients
-  fundamentals.py   latest annual fundamentals from XBRL frames
-  value.py          universe, metrics, value score
+  fundamentals.py   trailing-twelve-month fundamentals from XBRL company facts
+  value.py          universe, sectors, metrics, quality gate, value score
   portfolio.py      weekly returns, Ledoit-Wolf covariance, efficient portfolios
   refresh.py        daily pipeline, writes data/snapshots/<date>.parquet
   evidence.py       brief on each shortlisted stock (results, insiders, short interest, news)
   review.py         trap-risk scoring with Claude, writes data/reviews/<date>.parquet
+  stability.py      reproducibility of the review on the same evidence
 app/
   screen.py         value screen and per-company breakdown
   review.py         verdicts, sources and keep/exclude decisions
@@ -178,7 +209,11 @@ tests/
 
 ## Limitations
 
-- Annual figures lag by up to a year; a trailing-twelve-month view would be more reactive.
+- A company that reports a cash-flow item only once a year (no year-to-date figure in its 10-Q)
+  has no twelve-month value for it, and the ratio built on it stays empty.
+- Sectors come from SIC codes, which describe products rather than business models: a few
+  companies land in an unexpected sector (PayPal in Industrials). The country is that of the
+  head office declared to the SEC: PDD Holdings, run from China, declares Dublin.
 - XBRL tagging varies across filers: some companies are left unscored because a concept is
   reported under a tag outside the fallback lists, and a few of those presumed debt-free actually
   report their debt under company-specific tags.

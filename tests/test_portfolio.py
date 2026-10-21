@@ -7,29 +7,15 @@ import pytest
 from ridash.portfolio import (
     EfficientSet,
     Estimates,
+    GroupCap,
     estimate,
     ledoit_wolf,
-    project_capped_simplex,
     weekly_returns,
 )
 
 
 def uncorrelated(mean, vol):
     return Estimates(np.array(mean), np.diag(np.array(vol) ** 2), None)
-
-
-@pytest.mark.parametrize("cap", [1.0, 0.4, 0.25])
-def test_projection_respects_budget_and_cap(cap):
-    rng = np.random.default_rng(0)
-    for _ in range(50):
-        w = project_capped_simplex(rng.normal(size=6), cap)
-        assert w.sum() == pytest.approx(1)
-        assert w.min() >= 0 and w.max() <= cap + 1e-12
-
-
-def test_projection_of_feasible_point_is_itself():
-    w = np.array([0.1, 0.2, 0.3, 0.4])
-    np.testing.assert_allclose(project_capped_simplex(w, 0.5), w)
 
 
 def test_min_variance_weights_are_inverse_variances():
@@ -42,6 +28,30 @@ def test_min_variance_weights_are_inverse_variances():
 def test_cap_binds_on_the_dominant_asset():
     weights = EfficientSet(uncorrelated([0.05] * 3, [0.05, 0.3, 0.3]), 0.4).min_variance().weights
     np.testing.assert_allclose(weights, [0.4, 0.3, 0.3], atol=1e-6)
+
+
+def test_group_cap_limits_the_weight_of_a_sector():
+    est = uncorrelated([0.05] * 4, [0.1, 0.1, 0.3, 0.3])
+    sector = GroupCap("Energy", np.array([True, True, False, False]), 0.5)
+    weights = EfficientSet(est, 1.0, (sector,)).min_variance().weights
+    assert weights[:2].sum() == pytest.approx(0.5, abs=1e-6)
+    np.testing.assert_allclose(weights, [0.25, 0.25, 0.25, 0.25], atol=1e-6)
+
+
+def test_equal_weight_moves_only_as_far_as_the_caps_require():
+    est = uncorrelated([0.05] * 5, [0.2] * 5)
+    china = GroupCap("China", np.array([True, True, True, False, False]), 0.3)
+    efficient = EfficientSet(est, 1.0, (china,))
+    np.testing.assert_allclose(efficient.equal_weight().weights, [0.1] * 3 + [0.35] * 2, atol=1e-6)
+    uncapped = EfficientSet(est, 1.0).equal_weight().weights
+    np.testing.assert_allclose(uncapped, [0.2] * 5, atol=1e-9)
+
+
+def test_caps_that_cannot_be_met_are_reported():
+    est = uncorrelated([0.05] * 2, [0.2] * 2)
+    both = GroupCap("Energy", np.array([True, True]), 0.6)
+    with pytest.raises(ValueError):
+        EfficientSet(est, 1.0, (both,)).min_variance()
 
 
 def test_max_sharpe_matches_tangency_formula():
@@ -63,7 +73,8 @@ def test_frontier_return_and_risk_increase_together():
     frontier = EfficientSet(est, 0.3).frontier()
     returns = [p.expected_return for p in frontier]
     vols = [p.volatility for p in frontier]
-    assert np.all(np.diff(returns) >= -1e-9) and np.all(np.diff(vols) >= -1e-9)
+    # Up to the solver precision: the end of the frontier is one corner portfolio.
+    assert np.all(np.diff(returns) >= -1e-8) and np.all(np.diff(vols) >= -1e-8)
 
 
 def test_target_volatility_is_respected():

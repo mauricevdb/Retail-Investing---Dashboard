@@ -20,13 +20,32 @@ def weekly(tickers: tuple[str, ...], start: date, end: date) -> tuple[pl.DataFra
     return portfolio.weekly_returns(eodhd.price_history(list(tickers), start, end))
 
 
+def group_caps(
+    tickers: list[str], labels: dict[str, tuple[str | None, str | None]], caps: tuple[float, float]
+) -> tuple[portfolio.GroupCap, ...]:
+    """A cap on every sector and on every country but the United States (a cap of 100% is
+    no cap)."""
+    sector_cap, country_cap = caps
+    groups = []
+    for position, cap in ((0, sector_cap), (1, country_cap)):
+        values = np.array([labels[t][position] for t in tickers], dtype=object)
+        names = {v for v in values if v is not None and v != "United States"}
+        if cap < 1:
+            groups += [portfolio.GroupCap(name, values == name, cap) for name in sorted(names)]
+    return tuple(groups)
+
+
 @st.cache_data(show_spinner="Optimisation…")
-def analyse(tickers, start, end, shrink: bool, max_weight: float, risk_free: float) -> dict:
+def analyse(
+    tickers, start, end, shrink: bool, max_weight: float, risk_free: float, labels, caps
+) -> dict:
     returns, _ = weekly(tickers, start, end)
     matrix = returns.drop("week").to_numpy()
-    efficient = portfolio.EfficientSet(portfolio.estimate(matrix, shrink), max_weight)
+    groups = group_caps(returns.columns[1:], dict(labels), caps)
+    efficient = portfolio.EfficientSet(portfolio.estimate(matrix, shrink), max_weight, groups)
     return {
         "efficient": efficient,
+        "equal_weight": efficient.equal_weight(),
         "frontier": efficient.frontier(),
         "min_variance": efficient.min_variance(),
         "max_sharpe": efficient.max_sharpe(risk_free),
@@ -35,19 +54,19 @@ def analyse(tickers, start, end, shrink: bool, max_weight: float, risk_free: flo
 
 
 @st.cache_data(show_spinner=False)
-def at_volatility(tickers, start, end, shrink, max_weight, risk_free, volatility: float):
-    efficient = analyse(tickers, start, end, shrink, max_weight, risk_free)["efficient"]
-    return efficient.target_volatility(volatility)
+def at_volatility(tickers, start, end, shrink, max_weight, risk_free, labels, caps, volatility):
+    efficient = analyse(tickers, start, end, shrink, max_weight, risk_free, labels, caps)
+    return efficient["efficient"].target_volatility(volatility)
 
 
 snapshot = latest_snapshot()
 as_of = snapshot["date"][0]
-pool = snapshot.filter(pl.col("value_score").is_not_null()).sort("rank")
+pool = snapshot.filter(pl.col("rank").is_not_null()).sort("rank")
 
 st.title("Construction d'un portefeuille efficient")
 st.caption(
-    f"Univers : les {pool.height} sociétés notées par le screen au {as_of:%d/%m/%Y} · "
-    "Optimisation moyenne-variance (Markowitz), sans vente à découvert, investi à 100 %"
+    f"Univers : les {pool.height} sociétés classées par le screen au {as_of:%d/%m/%Y} · "
+    "Sans vente à découvert, investi à 100 %, plafonds par action, par secteur et par pays"
 )
 
 if not os.environ.get("EODHD_API_KEY"):
@@ -81,6 +100,18 @@ with st.sidebar:
     )
     years = st.slider("Historique (années)", 1, 5, 3)
     max_weight = st.slider("Poids maximum par action (%)", 5, 100, 20, 5) / 100
+    sector_cap = st.slider("Poids maximum par secteur (%)", 10, 100, 30, 5) / 100
+    country_cap = (
+        st.slider(
+            "Poids maximum par pays hors États-Unis (%)",
+            5,
+            100,
+            20,
+            5,
+            help="Pays de l'adresse du siège déclarée à la SEC, là où la société est dirigée.",
+        )
+        / 100
+    )
     risk_free = st.number_input("Taux sans risque (%/an)", 0.0, 10.0, 4.0, 0.25) / 100
     shrink = st.toggle(
         "Covariance de Ledoit-Wolf",
@@ -106,8 +137,20 @@ if max_weight * len(kept) < 1:
     st.error(f"Avec {len(kept)} actions, le poids maximum doit être d'au moins {minimum} %.")
     st.stop()
 
-params = (tickers, start, as_of, shrink, max_weight, risk_free)
-result = analyse(*params)
+labels = tuple(
+    (row["ticker"], (row["sector"], row["country"]))
+    for row in pool.filter(pl.col("ticker").is_in(kept)).iter_rows(named=True)
+)
+caps = (sector_cap, country_cap)
+params = (tickers, start, as_of, shrink, max_weight, risk_free, labels, caps)
+try:
+    result = analyse(*params)
+except ValueError:
+    st.error(
+        "Les plafonds par secteur et par pays ne permettent pas d'investir 100 % dans ces "
+        "actions : relever un plafond ou ajouter des actions d'autres secteurs ou pays."
+    )
+    st.stop()
 efficient: portfolio.EfficientSet = result["efficient"]
 estimates = efficient.estimates
 n = len(kept)
@@ -125,13 +168,15 @@ cols[3].metric(
 
 # ---------------------------------------------------------------- portfolio choice
 st.subheader("Portefeuille")
-references = {"Variance minimale": result["min_variance"]}
+references = {
+    "Équipondéré": result["equal_weight"],
+    "Variance minimale": result["min_variance"],
+}
 if result["max_sharpe"] is not None:
     references["Sharpe maximal"] = result["max_sharpe"]
-references["Équipondéré"] = efficient.portfolio(np.full(n, 1 / n))
 
 options = [*references, "Volatilité cible"]
-default = "Sharpe maximal" if "Sharpe maximal" in references else "Variance minimale"
+default = "Équipondéré"
 choice = st.segmented_control(
     "Portefeuille", options, default=default, label_visibility="collapsed"
 )
@@ -155,7 +200,9 @@ if result["max_sharpe"] is None:
 weights = (
     pl.DataFrame({"ticker": kept, "weight": selected.weights})
     .filter(pl.col("weight") > 5e-4)
-    .join(pool.select("ticker", "name", "sector", "value_score"), on="ticker", how="left")
+    .join(
+        pool.select("ticker", "name", "sector", "country", "value_score"), on="ticker", how="left"
+    )
     .sort("weight", descending=True)
 )
 cols = st.columns(5)
@@ -197,18 +244,21 @@ with right:
             "value_score": st.column_config.NumberColumn("Score value", format="%.0f"),
         },
     )
-    sectors = (
-        weights.group_by("sector").agg(pl.col("weight").sum() * 100).sort("weight", descending=True)
-    )
-    st.dataframe(
-        sectors,
-        hide_index=True,
-        width="stretch",
-        column_config={
-            "sector": "Exposition sectorielle",
-            "weight": st.column_config.NumberColumn("Poids", format="%.1f %%"),
-        },
-    )
+    for column, title in (("sector", "Exposition sectorielle"), ("country", "Exposition par pays")):
+        exposure = (
+            weights.group_by(column)
+            .agg(pl.col("weight").sum() * 100)
+            .sort("weight", descending=True)
+        )
+        st.dataframe(
+            exposure,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                column: title,
+                "weight": st.column_config.NumberColumn("Poids", format="%.1f %%"),
+            },
+        )
 
 # ---------------------------------------------------------------- efficient frontier
 st.subheader("Frontière efficiente")
@@ -323,8 +373,14 @@ with st.expander("Méthodologie et limites"):
   rendements futurs. Le portefeuille de **variance minimale** n'en dépend pas.
 - **Risque** : matrice de covariance annualisée, par défaut réduite selon Ledoit et Wolf (2004)
   vers une matrice où toutes les actions ont la même variance et aucune corrélation.
-- **Optimisation** : sans vente à découvert, investie à 100 %, avec un poids maximum par action.
-  Chaque portefeuille efficient minimise ½·w'Σw − λ·μ'w pour une tolérance au risque λ ;
+- **Portefeuille par défaut : équipondéré**, le même poids sur chaque action ou, si un plafond
+  l'interdit, le portefeuille le plus proche qui le respecte. Il ne dépend d'aucune estimation :
+  le Sharpe maximal, lui, surpondère les actions qui ont le plus monté, donc les moins décotées
+  aujourd'hui, à rebours de la stratégie value.
+- **Plafonds** : par action, par secteur et par pays hors États-Unis (pays du siège déclaré à
+  la SEC), appliqués à tous les portefeuilles.
+- **Optimisation** : sans vente à découvert, investie à 100 %. Chaque portefeuille efficient
+  minimise ½·w'Σw − λ·μ'w pour une tolérance au risque λ, par la méthode ADMM ;
   Sharpe = (rendement − taux sans risque) / volatilité.
 - Les résultats décrivent le passé (*in-sample*) ; ce sont des mesures, pas des recommandations.
 """
