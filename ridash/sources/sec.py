@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+from datetime import date
 from html.parser import HTMLParser
 from itertools import batched
 from pathlib import Path
@@ -21,14 +22,27 @@ FRAME_SCHEMA = {
     "value": pl.Float64,
     "accn": pl.Utf8,
 }
-COMPANY_SCHEMA = {"cik": pl.Int64, "sic": pl.Int64, "industry": pl.Utf8}
+FACT_SCHEMA = {
+    "cik": pl.Int64,
+    "tag": pl.Utf8,
+    "start": pl.Date,  # empty for balance-sheet items, which are measured at a date
+    "end": pl.Date,
+    "value": pl.Float64,
+    "accn": pl.Utf8,
+    "form": pl.Utf8,
+    "filed": pl.Date,
+}
+COMPANY_SCHEMA = {"cik": pl.Int64, "sic": pl.Int64, "industry": pl.Utf8, "country": pl.Utf8}
 
 _MIN_INTERVAL = 0.11  # SEC fair-access policy: at most 10 requests per second
 
 
 class Sec:
     def __init__(self, user_agent: str | None = None) -> None:
-        self._headers = {"User-Agent": user_agent or os.environ["SEC_USER_AGENT"]}
+        self._headers = {
+            "User-Agent": user_agent or os.environ["SEC_USER_AGENT"],
+            "Accept-Encoding": "gzip",
+        }
         self._last_call = 0.0
 
     def _fetch(self, url: str) -> bytes | None:
@@ -55,9 +69,19 @@ class Sec:
         raw = self._get(f"https://data.sec.gov/api/xbrl/frames/us-gaap/{tag}/USD/{period}.json")
         return parse_frame(raw, tag)
 
+    def company_facts(self, cik: int, tags: set[str], since: date) -> pl.DataFrame:
+        """Every value of the given us-gaap concepts in USD reported by a company for periods
+        ending on or after `since`: annual, year-to-date and quarterly amounts and balance
+        sheets, each with the filing it comes from."""
+        raw = self._get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json")
+        return parse_company_facts(raw, cik, tags, since)
+
     def companies(self, ciks: list[int], cache: Path) -> pl.DataFrame:
-        """SIC classification per company, fetched once then served from a local cache."""
+        """SIC classification and country per company, fetched once then served from a local
+        cache."""
         known = pl.read_parquet(cache) if cache.exists() else pl.DataFrame(schema=COMPANY_SCHEMA)
+        if "country" not in known.columns:  # cache written before countries were recorded
+            known = pl.DataFrame(schema=COMPANY_SCHEMA)
         missing = sorted(set(ciks) - set(known["cik"].to_list()))
         cache.parent.mkdir(parents=True, exist_ok=True)
         for chunk in batched(missing, 200):
@@ -93,7 +117,46 @@ class Sec:
     def _company(self, cik: int) -> dict:
         raw = self._get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json") or {}
         sic = raw.get("sic")
-        return {"cik": cik, "sic": int(sic) if sic else None, "industry": raw.get("sicDescription")}
+        return {
+            "cik": cik,
+            "sic": int(sic) if sic else None,
+            "industry": raw.get("sicDescription"),
+            "country": business_country(raw),
+        }
+
+
+def business_country(submissions: dict) -> str | None:
+    """Country of the company's business address, the place it is run from (the state of
+    incorporation is often a tax haven)."""
+    address = (submissions.get("addresses") or {}).get("business") or {}
+    if address.get("isForeignLocation"):
+        country = address.get("country")
+        # Canadian addresses read "British Columbia, Canada": keep the country only.
+        return country.split(", ")[-1] if country else None
+    return "United States" if address.get("stateOrCountry") else None
+
+
+def parse_company_facts(raw: dict | None, cik: int, tags: set[str], since: date) -> pl.DataFrame:
+    concepts = ((raw or {}).get("facts") or {}).get("us-gaap") or {}
+    rows = [
+        {
+            "cik": cik,
+            "tag": tag,
+            "start": fact.get("start"),
+            "end": fact["end"],
+            "value": fact["val"],
+            "accn": fact["accn"],
+            "form": fact["form"],
+            "filed": fact["filed"],
+        }
+        for tag in tags & concepts.keys()
+        for fact in concepts[tag]["units"].get("USD", [])
+        if fact["end"] >= since.isoformat()
+    ]
+    schema = {**FACT_SCHEMA, "start": pl.Utf8, "end": pl.Utf8, "filed": pl.Utf8}
+    return pl.DataFrame(rows, schema=schema).with_columns(
+        pl.col("start", "end", "filed").str.to_date()
+    )
 
 
 def parse_filings(recent: dict, cik: int) -> pl.DataFrame:

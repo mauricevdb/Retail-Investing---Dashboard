@@ -1,3 +1,5 @@
+import gzip
+import http.client
 import json
 import time
 import urllib.error
@@ -16,14 +18,17 @@ def get(
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
-                return response.read()
+                body = response.read()
+                if response.headers.get("Content-Encoding") == "gzip":
+                    body = gzip.decompress(body)
+                return body
         except urllib.error.HTTPError as error:
             if error.code in missing:
                 return None
             retryable = error.code == 429 or error.code >= 500
             if not retryable or attempt == retries - 1:
                 raise
-        except urllib.error.URLError:
+        except (OSError, http.client.HTTPException):  # network errors, dropped connections
             if attempt == retries - 1:
                 raise
         time.sleep(2**attempt)

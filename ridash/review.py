@@ -27,10 +27,13 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKError, ResultMessage, 
 
 from ridash import evidence
 from ridash.config import (
+    BRIEF_DIR,
     DECISIONS_FILE,
     EXPLAINED_RISK,
     INSIDER_CACHE,
     KEEP_COUNT,
+    MAX_NET_DEBT_EBITDA,
+    MIN_ROCE,
     PARTIAL_RISK,
     REVIEW_DIR,
     REVIEW_EFFORT,
@@ -53,7 +56,8 @@ CRITERIA = {
     "cyclicality": (
         "Point du cycle",
         "Is the business cyclical, and are its margins or volumes near a cyclical peak judging "
-        "by the annual history, so that the last year's EBIT overstates mid-cycle earnings?",
+        "by the annual history, so that the last twelve months' EBIT overstates mid-cycle "
+        "earnings?",
     ),
     "structural": (
         "Déclin structurel",
@@ -63,7 +67,7 @@ CRITERIA = {
     ),
     "one_offs": (
         "Éléments exceptionnels",
-        "Did one-off or unsustainable items inflate the last fiscal year's EBIT or cash flow, "
+        "Did one-off or unsustainable items inflate the last twelve months' EBIT or cash flow, "
         "so that the screen overstates normal earnings?",
     ),
     "balance_sheet": (
@@ -126,10 +130,12 @@ VERDICT_SCHEMA = {
 _CRITERIA_TEXT = "\n".join(f"   - {name}: {question}" for name, (_, question) in CRITERIA.items())
 INSTRUCTIONS = f"""\
 You review stocks that a quantitative value screen ranks as cheap. The screen only sees the \
-latest annual financial statements: EV/EBIT, free-cash-flow yield, return on capital employed \
-and leverage. Estimate the risk that the stock is a value trap, cheap because of problems the \
-market knows and these figures do not show: a deteriorating business, earnings at a cyclical \
-peak, a structural decline, or a discount that persists for good reasons.
+financial statements of the last twelve months reported: it ranks companies on EV/EBIT and \
+free-cash-flow yield, among those with a return on capital employed above {MIN_ROCE:.0%} and \
+net debt below {MAX_NET_DEBT_EBITDA:g} times EBITDA. Estimate the risk that the stock is a \
+value trap, cheap because of problems the market knows and these figures do not show: a \
+deteriorating business, earnings at a cyclical peak, a structural decline, or a discount that \
+persists for good reasons.
 
 Work in this order:
 1. bear_case: the strongest argument that the market is right to price the stock low, as a \
@@ -320,6 +326,13 @@ def insider_transactions(
 # ---------------------------------------------------------------- daily run
 
 
+def use_subscription() -> None:
+    # As in pi-claude-bridge: any of these would point Claude Code at an API key or a gateway
+    # instead of the Claude subscription it is logged into.
+    for variable in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
+        os.environ.pop(variable, None)
+
+
 def main() -> None:
     started = time.monotonic()
     snapshot = pl.read_parquet(sorted(SNAPSHOT_DIR.glob("*.parquet"))[-1])
@@ -328,10 +341,7 @@ def main() -> None:
     if path.exists() and "--force" not in sys.argv[1:]:
         print(f"{as_of}: review already written, nothing to do (--force to redo it)")
         return
-    # As in pi-claude-bridge: any of these would point Claude Code at an API key or a gateway
-    # instead of the Claude subscription it is logged into.
-    for variable in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
-        os.environ.pop(variable, None)
+    use_subscription()
 
     stocks = shortlist(snapshot)
     tickers = stocks["ticker"].to_list()
@@ -362,7 +372,7 @@ def main() -> None:
         {row["ticker"]: row for row in previous.to_dicts()} if previous is not None else {}
     )
     insider_cache = load_insider_cache()
-    rows, to_analyse = [], []
+    rows, to_analyse, briefs = [], [], []
     for stock in stocks.to_dicts():
         ticker, cik = stock["ticker"], stock["cik"]
         filings = sec.filings(cik)
@@ -435,6 +445,7 @@ def main() -> None:
             row.update({k: prior[k] for k in keep}, cost_usd=0.0, error=None)
         else:
             to_analyse.append((len(rows), brief.text))
+        briefs.append({"ticker": ticker, "brief": brief.text})
         rows.append(row)
     save_insider_cache(insider_cache)
 
@@ -462,6 +473,9 @@ def main() -> None:
     review = suggest(pl.DataFrame(rows, infer_schema_length=None))
     REVIEW_DIR.mkdir(parents=True, exist_ok=True)
     review.write_parquet(path)
+    # Kept locally so that the same evidence can be analysed again (ridash.stability).
+    BRIEF_DIR.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(briefs).write_parquet(BRIEF_DIR / path.name)
 
     counts = review.group_by("verdict").len().sort("verdict").rows()
     kept = review.filter(pl.col("suggestion") == "keep").height

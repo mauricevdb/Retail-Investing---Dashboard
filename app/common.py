@@ -5,6 +5,8 @@ import streamlit as st
 
 from ridash.config import SNAPSHOT_DIR
 
+CURRENT_COLUMNS = {"period_end", "country", "quality_pass", "stock_compensation"}
+
 
 @st.cache_data
 def _read(path: Path) -> pl.DataFrame:
@@ -12,11 +14,17 @@ def _read(path: Path) -> pl.DataFrame:
 
 
 def latest_snapshot() -> pl.DataFrame:
-    snapshots = sorted(SNAPSHOT_DIR.glob("*.parquet"))
-    if not snapshots:
-        st.error("Aucun snapshot disponible. Lancer `python -m ridash.refresh`.")
+    """The latest snapshot in the current format: older ones stay in the folder as a record of
+    what was known at the time, but lack columns the pages use."""
+    current = [
+        path
+        for path in sorted(SNAPSHOT_DIR.glob("*.parquet"))
+        if set(pl.read_parquet_schema(path)) >= CURRENT_COLUMNS
+    ]
+    if not current:
+        st.error("Aucun snapshot au format actuel. Lancer `python -m ridash.refresh`.")
         st.stop()
-    return _read(snapshots[-1])
+    return _read(current[-1])
 
 
 def usd(value: float | None) -> str:

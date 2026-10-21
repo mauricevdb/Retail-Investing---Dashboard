@@ -336,7 +336,8 @@ def build_evidence(
         f"sector {stock['sector'] or 'unknown'})",
         f"Review date: {stock['date']}",
         "",
-        f"Valuation from the latest annual report (fiscal year ended {stock['fiscal_end']}):",
+        f"Valuation over the twelve months to {stock['period_end']} (latest report: "
+        f"{stock['form']}):",
         f"- Value score {_num(stock['value_score'], '{:.0f}')}/100, rank {stock['rank']} "
         "of the screened universe",
         f"- EV/EBIT {_num(stock['ev_ebit'], '{:.1f}')} | FCF yield "
@@ -504,7 +505,7 @@ def build_evidence(
     identity = [
         *(a["link"] for a in articles),
         *(e["accn"] for e in events),
-        str(stock["fiscal_end"]),
+        str(stock["period_end"]),
         str(quarters[0]["end"]) if quarters else "",
         release["accn"] if release else "",
         str(signals.get("short_date")),

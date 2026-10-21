@@ -52,7 +52,27 @@ def test_classify_drops_financials_and_keeps_unclassified():
     )
     result = classify(df, companies)
     assert result["cik"].to_list() == [1, 3]
-    assert result["sector"].to_list() == ["Manufacturing", None]
+    assert result["sector"].to_list() == ["Information Technology", None]
+
+
+@pytest.mark.parametrize(
+    ("sic", "sector"),
+    [
+        (2834, "Health Care"),  # specific range inside chemicals
+        (2870, "Materials"),
+        (1311, "Energy"),  # specific range inside mining
+        (1040, "Materials"),
+        (3021, "Consumer Discretionary"),  # footwear inside rubber and plastics
+        (5331, "Consumer Staples"),  # discount stores inside retail
+        (5961, "Consumer Discretionary"),
+        (7372, "Information Technology"),  # software inside business services
+        (7389, "Industrials"),
+        (4911, "Utilities"),
+    ],
+)
+def test_specific_sic_ranges_take_precedence(sic, sector):
+    companies = pl.DataFrame({"cik": [1], "sic": [sic], "industry": ["x"]})
+    assert classify(pl.DataFrame({"cik": [1]}), companies)["sector"].item() == sector
 
 
 def company(**overrides):
@@ -103,3 +123,36 @@ def test_cheaper_company_ranks_first_and_unvaluable_company_is_not_scored():
     result = score(df)
     assert result["ticker"].to_list() == ["CHEAP", "DEAR", "LOSS"]
     assert result["rank"].to_list() == [1, 2, None]
+
+
+def test_quality_gate_removes_weak_companies_from_the_ranking_but_not_from_the_scores():
+    df = metrics(
+        pl.DataFrame(
+            [
+                {"ticker": "SOUND", **company()},
+                {"ticker": "LOW_RETURN", **company(market_cap=400.0, equity=2000.0)},
+                {"ticker": "INDEBTED", **company(market_cap=400.0, debt=1000.0)},
+                {"ticker": "NO_EQUITY", **company(market_cap=800.0, equity=-600.0)},
+            ]
+        )
+    )
+    result = {r["ticker"]: r for r in score(df).iter_rows(named=True)}
+    assert result["LOW_RETURN"]["roce"] < 0.10 and result["LOW_RETURN"]["rank"] is None
+    assert result["INDEBTED"]["net_debt_ebitda"] > 3 and result["INDEBTED"]["rank"] is None
+    assert result["INDEBTED"]["value_score"] is not None
+    # A ratio that cannot be computed does not fail the gate, but is flagged.
+    assert result["NO_EQUITY"]["roce"] is None and result["NO_EQUITY"]["quality_unchecked"]
+    assert (result["NO_EQUITY"]["rank"], result["SOUND"]["rank"]) == (1, 2)
+
+
+def test_return_on_capital_does_not_raise_the_value_score():
+    df = metrics(pl.DataFrame([company(), company(equity=100.0)]))
+    first, second = score(df)["value_score"].to_list()
+    assert first == second
+
+
+def test_company_missing_a_price_metric_is_not_scored_on_the_other_alone():
+    df = metrics(pl.DataFrame([company(), company(market_cap=500.0, capex=None)]))
+    result = score(df)
+    assert result["value_score"].null_count() == 1
+    assert result.filter(pl.col("fcf_yield").is_null())["rank"].item() is None

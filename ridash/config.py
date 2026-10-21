@@ -3,7 +3,9 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
 COMPANY_CACHE = DATA_DIR / "companies.parquet"
+FACTS_CACHE = DATA_DIR / "facts.parquet"
 REVIEW_DIR = DATA_DIR / "reviews"
+BRIEF_DIR = DATA_DIR / "briefs"  # local only: the evidence each review was based on
 DECISIONS_FILE = DATA_DIR / "decisions.parquet"
 
 MIN_MARKET_CAP = 2e9
@@ -12,6 +14,11 @@ MAJOR_EXCHANGES = ("NYSE", "NASDAQ", "NYSE MKT", "NYSE ARCA", "BATS", "AMEX")
 # A company that reports no debt at all is treated as debt-free only if its interest
 # expense stays below this share of EBIT; otherwise its debt is unknown.
 DEBT_FREE_MAX_INTEREST_TO_EBIT = 0.02
+
+# Quality gate: only companies above this return on capital employed and below this
+# leverage are ranked by the value screen.
+MIN_ROCE = 0.10
+MAX_NET_DEBT_EBITDA = 3.0
 
 # Qualitative review of the best-ranked stocks.
 SHORTLIST_SIZE = 50

@@ -2,7 +2,14 @@ from datetime import date
 
 from ridash.sources.eodhd import parse_history, parse_quotes
 from ridash.sources.finra import parse_short_interest
-from ridash.sources.sec import html_to_text, parse_form4, parse_frame, pick_exhibit
+from ridash.sources.sec import (
+    business_country,
+    html_to_text,
+    parse_company_facts,
+    parse_form4,
+    parse_frame,
+    pick_exhibit,
+)
 
 
 def test_parse_frame_normalises_values_and_dates():
@@ -116,3 +123,41 @@ def test_parse_short_interest_reads_finra_file():
         "short_shares_prev": 4628716.0,
         "days_to_cover": 4.99,
     }
+
+
+def test_parse_company_facts_keeps_requested_tags_in_usd_since_a_date():
+    fact = {"end": "2026-06-30", "val": 5, "accn": "a", "form": "10-Q", "filed": "2026-07-30"}
+    raw = {
+        "facts": {
+            "us-gaap": {
+                "OperatingIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            {**fact, "start": "2026-01-01"},
+                            {**fact, "start": "2019-01-01", "end": "2019-12-31"},
+                        ]
+                    }
+                },
+                "StockholdersEquity": {"units": {"USD": [fact]}},
+                "Revenues": {"units": {"EUR": [{**fact, "start": "2026-01-01"}]}},
+                "Goodwill": {"units": {"USD": [fact]}},
+            }
+        }
+    }
+    tags = {"OperatingIncomeLoss", "StockholdersEquity", "Revenues"}
+    df = parse_company_facts(raw, 7, tags, date(2024, 1, 1)).sort("tag")
+    assert df["tag"].to_list() == ["OperatingIncomeLoss", "StockholdersEquity"]
+    assert df["start"].to_list() == [date(2026, 1, 1), None]  # balance sheet: no start
+    assert df["filed"][0] == date(2026, 7, 30) and df["cik"][0] == 7
+    assert parse_company_facts(None, 7, tags, date(2024, 1, 1)).is_empty()
+
+
+def test_business_country_is_the_head_office_not_the_incorporation():
+    foreign = {"isForeignLocation": 1, "country": "China", "stateOrCountry": None}
+    domestic = {"isForeignLocation": None, "country": None, "stateOrCountry": "CA"}
+    cayman_company = {"stateOfIncorporation": "E9", "addresses": {"business": foreign}}
+    assert business_country(cayman_company) == "China"
+    assert business_country({"addresses": {"business": domestic}}) == "United States"
+    assert business_country({}) is None
+    canada = {"isForeignLocation": 1, "country": "British Columbia, Canada"}
+    assert business_country({"addresses": {"business": canada}}) == "Canada"

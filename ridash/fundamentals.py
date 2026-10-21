@@ -1,18 +1,36 @@
-"""Latest annual fundamentals per company, assembled from SEC XBRL frames.
+"""Trailing-twelve-month fundamentals per company, from the facts it reports to the SEC.
 
-A frame holds one concept for every filer over one calendar period, so the whole
-market costs a couple of hundred requests instead of one download per company.
-Every figure of a company is aligned on its latest fiscal year end: income and
-cash-flow items cover that fiscal year, balance-sheet items are taken at that date.
+Every figure of a company is aligned on the end of its latest reported period, a quarter or
+a fiscal year: income and cash-flow items cover the twelve months to that date, balance-sheet
+items are taken at that date. Quarterly reports (10-Q) give income and cash flows from the
+start of the fiscal year, so the twelve months are rebuilt as
+
+    last fiscal year + year to date − same period of the year before
+
+Only facts filed on or before the snapshot date are used, so a snapshot never sees a filing
+published after it, and a figure restated later is read as it was known at the time.
 """
+
+from datetime import date, timedelta
+from itertools import batched
+from pathlib import Path
 
 import polars as pl
 
 from ridash.config import DEBT_FREE_MAX_INTEREST_TO_EBIT
-from ridash.sources.sec import Sec
+from ridash.sources.sec import FACT_SCHEMA, Sec
 
-# Output column -> us-gaap tags, most specific first.
-ANNUAL_TAGS = {
+# A company whose latest report ended longer ago than this is left out: it files late or
+# no longer files (a year plus the four months foreign issuers have to file a 20-F).
+MAX_PERIOD_AGE = timedelta(days=500)
+# Facts kept per company: enough to rebuild twelve months ending up to MAX_PERIOD_AGE ago.
+FACT_HISTORY = timedelta(days=3 * 365)
+# Without a new report, a company's facts are downloaded again after this delay anyway.
+FACT_MAX_AGE = timedelta(days=30)
+
+# Output column -> us-gaap tags, most specific first. The facts cache only holds these tags:
+# after adding one, delete data/facts.parquet so that every company is downloaded again.
+FLOW_TAGS = {
     "operating_income": ["OperatingIncomeLoss"],
     "pretax_income": [
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
@@ -26,7 +44,12 @@ ANNUAL_TAGS = {
         "InterestPaid",
     ],
     "operating_cash_flow": ["NetCashProvidedByUsedInOperatingActivities"],
-    "capex": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+    "capex": [
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+        "PaymentsToAcquireProductiveAssets",
+        "PaymentsToAcquireOilAndGasPropertyAndEquipment",
+        "PaymentsToAcquireOilAndGasProperty",
+    ],
     "stock_compensation": ["ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"],
     "depreciation": [
         "DepreciationDepletionAndAmortization",
@@ -73,51 +96,103 @@ DEBT_DEFINITIONS = [
 ]
 NO_DEBT_REPORTED = "none reported, no material interest"
 
-_EBIT_TAGS = ANNUAL_TAGS["operating_income"] + ANNUAL_TAGS["pretax_income"]
-ANNUAL_TAG_LIST = sorted({t for tags in ANNUAL_TAGS.values() for t in tags})
+_EBIT_TAGS = FLOW_TAGS["operating_income"] + FLOW_TAGS["pretax_income"]
+FLOW_TAG_LIST = sorted({t for tags in FLOW_TAGS.values() for t in tags})
 BALANCE_SHEET_TAG_LIST = sorted(
     {t for tags in BALANCE_TAGS.values() for t in tags}
     | {t for tag, complements in DEBT_DEFINITIONS for t in (tag, *complements)}
 )
 
 
-def fetch(sec: Sec, year: int) -> pl.DataFrame:
-    """All frames needed for fiscal years ending in `year - 1` or `year`."""
-    years = (year - 1, year)
-    annual = [f"CY{y}" for y in years]
-    instants = [f"CY{y}Q{q}I" for y in years for q in range(1, 5)]
-    frames = [sec.frame(tag, period) for tag in ANNUAL_TAG_LIST for period in annual]
-    frames += [sec.frame(tag, period) for tag in BALANCE_SHEET_TAG_LIST for period in instants]
-    return pl.concat(frames)
+# ---------------------------------------------------------------- download and cache
 
 
-def latest_annual(facts: pl.DataFrame) -> pl.DataFrame:
-    """One row per company reporting an operating or pre-tax income, at its latest fiscal
-    year end."""
-    fiscal_years = (
-        facts.filter(pl.col("tag").is_in(_EBIT_TAGS))
-        .sort("end")
+def latest_reports(sec: Sec, as_of: date) -> pl.DataFrame:
+    """Accession number of the latest report of every filer: the one that last reported its
+    total assets, over the current and the last four quarter ends (5 requests for the whole
+    market)."""
+    year, quarter = as_of.year, (as_of.month - 1) // 3 + 1
+    frames = []
+    for _ in range(5):
+        frames.append(sec.frame("Assets", f"CY{year}Q{quarter}I"))
+        year, quarter = (year, quarter - 1) if quarter > 1 else (year - 1, 4)
+    recent = pl.concat(frames).filter(pl.col("end") <= as_of).sort("end")
+    return recent.group_by("cik").last().select("cik", "accn")
+
+
+def load(sec: Sec, ciks: list[int], as_of: date, cache: Path) -> pl.DataFrame:
+    """Facts of the given companies, downloaded again only for those that have published a
+    report since they were cached, or whose copy is older than FACT_MAX_AGE."""
+    schema = {**FACT_SCHEMA, "fetched": pl.Date}
+    cached = pl.read_parquet(cache) if cache.exists() else pl.DataFrame(schema=schema)
+    fetched = cached.group_by("cik").agg(pl.col("fetched").max(), accns=pl.col("accn").unique())
+    current = fetched.join(latest_reports(sec, as_of), on="cik", how="left").filter(
+        (pl.col("fetched") >= as_of - FACT_MAX_AGE)
+        & (pl.col("accn").is_null() | pl.col("accns").list.contains(pl.col("accn")))
+    )
+    stale = sorted(set(ciks) - set(current["cik"].to_list()))
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    for chunk in batched(stale, 100):
+        downloaded = [
+            sec.company_facts(
+                cik, set(FLOW_TAG_LIST + BALANCE_SHEET_TAG_LIST), as_of - FACT_HISTORY
+            )
+            # A company without any of these facts (an IFRS filer) keeps an empty row, so that
+            # it is not downloaded again every day.
+            .vstack(pl.DataFrame([{"cik": cik}], schema=FACT_SCHEMA))
+            for cik in chunk
+        ]
+        cached = pl.concat(
+            [
+                cached.filter(~pl.col("cik").is_in(chunk)),
+                pl.concat(downloaded).with_columns(fetched=pl.lit(as_of)),
+            ]
+        )
+        cached.write_parquet(cache)
+    return cached.filter(pl.col("cik").is_in(ciks) & pl.col("tag").is_not_null()).drop("fetched")
+
+
+# ---------------------------------------------------------------- trailing twelve months
+
+
+def trailing(facts: pl.DataFrame, as_of: date) -> pl.DataFrame:
+    """One row per company reporting an operating or pre-tax income, over the twelve months
+    to the end of its latest reported period, as known on `as_of`."""
+    known = (
+        facts.filter(pl.col("filed") <= as_of)
+        .sort("filed")
+        .group_by("cik", "tag", "start", "end")
+        .last()
+    )
+    flows = known.filter(pl.col("start").is_not_null()).with_columns(
+        days=(pl.col("end") - pl.col("start")).dt.total_days()
+    )
+    periods = (
+        flows.filter(pl.col("tag").is_in(_EBIT_TAGS))
+        .sort("end", "filed")
         .group_by("cik")
         .last()
-        .select("cik", pl.col("end").alias("fiscal_end"), "accn")
+        .filter(pl.col("end") >= as_of - MAX_PERIOD_AGE)
+        .select("cik", period_end="end", form="form", accn="accn")
     )
-    wide = (
-        facts.join(fiscal_years.select("cik", "fiscal_end"), on="cik")
-        .filter(pl.col("end") == pl.col("fiscal_end"))
-        .pivot(on="tag", index="cik", values="value", aggregate_function="first")
+    balances = known.filter(pl.col("start").is_null()).join(
+        periods, left_on=["cik", "end"], right_on=["cik", "period_end"]
     )
-    absent = [tag for tag in ANNUAL_TAG_LIST + BALANCE_SHEET_TAG_LIST if tag not in wide.columns]
+    long = pl.concat([twelve_months(flows, periods), balances.select("cik", "tag", "value")])
+    wide = long.pivot(on="tag", index="cik", values="value", aggregate_function="first")
+    absent = [tag for tag in FLOW_TAG_LIST + BALANCE_SHEET_TAG_LIST if tag not in wide.columns]
     wide = wide.with_columns(pl.lit(None, pl.Float64).alias(tag) for tag in absent)
 
-    columns = {name: pl.coalesce(tags) for name, tags in {**ANNUAL_TAGS, **BALANCE_TAGS}.items()}
+    columns = {name: pl.coalesce(tags) for name, tags in {**FLOW_TAGS, **BALANCE_TAGS}.items()}
     return (
-        fiscal_years.join(wide, on="cik")
+        periods.join(wide, on="cik")
         .with_columns(**columns)
         .with_columns(ebit=_ebit(), ebit_source=_ebit_source())
         .with_columns(debt=_debt(), debt_source=_debt_source())
         .select(
             "cik",
-            "fiscal_end",
+            "period_end",
+            "form",
             "accn",
             "ebit",
             "ebit_source",
@@ -126,6 +201,39 @@ def latest_annual(facts: pl.DataFrame) -> pl.DataFrame:
             "debt_source",
         )
     )
+
+
+def twelve_months(flows: pl.DataFrame, periods: pl.DataFrame) -> pl.DataFrame:
+    """Income and cash-flow items over the twelve months to each company's period end:
+    the fiscal year itself when the period closes one, else rebuilt from the year to date."""
+    annual = pl.col("days").is_between(350, 380)
+    at_end = flows.join(
+        periods.select("cik", "period_end"), left_on=["cik", "end"], right_on=["cik", "period_end"]
+    )
+    full_year = at_end.filter(annual).select("cik", "tag", "value")
+    year_to_date = (
+        at_end.filter(~annual & (pl.col("days") < 350))
+        .join(full_year, on=["cik", "tag"], how="anti")
+        .sort("days")
+        .group_by("cik", "tag")
+        .last()  # the longest period ending at the date: from the start of the fiscal year
+        .select("cik", "tag", "start", "days", ytd="value")
+    )
+    fiscal_years = flows.filter(annual).select(
+        "cik", "tag", fy_start="start", fy_end="end", fy="value"
+    )
+    year_before = flows.filter(~annual).select(
+        "cik", "tag", fy_start="start", prior_days="days", prior="value"
+    )
+    rebuilt = (
+        year_to_date.with_columns(fy_end=pl.col("start") - timedelta(days=1))
+        .join(fiscal_years, on=["cik", "tag", "fy_end"])
+        .join(year_before, on=["cik", "tag", "fy_start"])
+        .filter((pl.col("prior_days") - pl.col("days")).abs() <= 10)
+        .unique(["cik", "tag"])
+        .select("cik", "tag", value=pl.col("fy") + pl.col("ytd") - pl.col("prior"))
+    )
+    return pl.concat([full_year, rebuilt])
 
 
 def _ebit() -> pl.Expr:

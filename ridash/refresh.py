@@ -1,4 +1,4 @@
-"""Daily refresh: market data + SEC fundamentals -> scored snapshot.
+"""Daily refresh: market data + SEC fundamentals over twelve months -> scored snapshot.
 
 uv run --env-file .env python -m ridash.refresh
 """
@@ -8,7 +8,7 @@ import time
 import polars as pl
 
 from ridash import fundamentals, value
-from ridash.config import COMPANY_CACHE, MIN_MARKET_CAP, SNAPSHOT_DIR
+from ridash.config import COMPANY_CACHE, FACTS_CACHE, MIN_MARKET_CAP, SNAPSHOT_DIR
 from ridash.sources import eodhd
 from ridash.sources.sec import Sec
 
@@ -17,8 +17,9 @@ def build_snapshot(sec: Sec, quotes: pl.DataFrame) -> pl.DataFrame:
     as_of = quotes["date"].max()
     universe = value.candidates(quotes, sec.tickers(), MIN_MARKET_CAP)
     universe = value.classify(universe, sec.companies(universe["cik"].to_list(), COMPANY_CACHE))
-    annual = fundamentals.latest_annual(fundamentals.fetch(sec, as_of.year))
-    screen = value.score(value.metrics(universe.join(annual, on="cik", how="left")))
+    facts = fundamentals.load(sec, universe["cik"].to_list(), as_of, FACTS_CACHE)
+    trailing = fundamentals.trailing(facts, as_of)
+    screen = value.score(value.metrics(universe.join(trailing, on="cik", how="left")))
     return screen.select(
         pl.lit(as_of).alias("date"),
         "rank",
@@ -27,10 +28,12 @@ def build_snapshot(sec: Sec, quotes: pl.DataFrame) -> pl.DataFrame:
         "cik",
         "sector",
         "industry",
+        "country",
         "exchange",
         "close",
         "market_cap",
-        "fiscal_end",
+        "period_end",
+        "form",
         "accn",
         "ebit",
         "ebit_source",
@@ -46,8 +49,12 @@ def build_snapshot(sec: Sec, quotes: pl.DataFrame) -> pl.DataFrame:
         "minority_interest",
         "ev",
         *value.SCORED_METRICS,
+        "roce",
+        "net_debt_ebitda",
         *(f"pct_{name}" for name in value.SCORED_METRICS),
         "value_score",
+        "quality_pass",
+        "quality_unchecked",
     )
 
 
@@ -67,11 +74,15 @@ def main() -> None:
     snapshot.write_parquet(path)
 
     scored = snapshot.filter(pl.col("value_score").is_not_null())
-    print(f"{as_of}: {scored.height}/{snapshot.height} companies scored -> {path.name}")
+    ranked = snapshot.filter(pl.col("rank").is_not_null())
+    print(
+        f"{as_of}: {scored.height}/{snapshot.height} companies valued, {ranked.height} pass the "
+        f"quality gate -> {path.name}"
+    )
     print(f"done in {time.monotonic() - started:.0f}s")
     with pl.Config(tbl_rows=15, fmt_str_lengths=30, tbl_formatting="ASCII_MARKDOWN"):
         print(
-            scored.select("rank", "ticker", "name", "ev_ebit", "fcf_yield", "value_score").head(15)
+            ranked.select("rank", "ticker", "name", "ev_ebit", "fcf_yield", "value_score").head(15)
         )
 
 
