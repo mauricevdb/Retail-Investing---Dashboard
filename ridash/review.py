@@ -2,9 +2,10 @@
 
 A low multiple is an opportunity only if the market is not pricing in a problem that the
 historical figures cannot show. For each of the best-ranked stocks, `ridash.evidence` gathers
-quarterly results, the latest earnings release, insider transactions, short interest, material
-SEC filings, news and price behaviour. Claude first makes the bear case, then scores six
-criteria from 0 to 5; their weighted sum is the trap risk (0-100). The lowest risks of the
+ten years of annual results, recent quarters, the latest earnings release, insider
+transactions, short interest, material SEC filings, news and price behaviour. Claude first
+makes the bear case, then scores eight criteria from 0 to 5; their weighted sum is the trap
+risk (0-100). The lowest risks of the
 shortlist are suggested for the portfolio; the decision stays with the user.
 
 Claude is reached through Claude Code (Claude Agent SDK) and the Claude subscription it is
@@ -46,8 +47,19 @@ from ridash.sources.sec import Sec
 CRITERIA = {
     "earnings": (
         "Trajectoire des bénéfices",
-        "Are revenue or operating income falling, or expected to fall: recent quarters, "
-        "guidance, lost customer or product, patent expiry, end of a cyclical peak?",
+        "Are revenue or operating income falling, or expected to fall over the next few "
+        "quarters: recent quarters, guidance, lost customer or product, patent expiry?",
+    ),
+    "cyclicality": (
+        "Point du cycle",
+        "Is the business cyclical, and are its margins or volumes near a cyclical peak judging "
+        "by the annual history, so that the last year's EBIT overstates mid-cycle earnings?",
+    ),
+    "structural": (
+        "Déclin structurel",
+        "Is the business in secular decline or exposed to disruption (technology such as AI, "
+        "substitution, regulation, loss of competitive position) that threatens its earnings "
+        "beyond the next few years?",
     ),
     "one_offs": (
         "Éléments exceptionnels",
@@ -65,8 +77,9 @@ CRITERIA = {
     ),
     "governance": (
         "Gouvernance et pays",
-        "Is there a controlling shareholder, related-party dealings, a VIE structure or a "
-        "country risk?",
+        "Is there a controlling or dual-class shareholder, related-party dealings, a VIE "
+        "structure, capital controls, delisting or sanctions exposure, or another country risk "
+        "that keeps the stock persistently cheap?",
     ),
     "market": (
         "Signaux de marché",
@@ -115,7 +128,8 @@ INSTRUCTIONS = f"""\
 You review stocks that a quantitative value screen ranks as cheap. The screen only sees the \
 latest annual financial statements: EV/EBIT, free-cash-flow yield, return on capital employed \
 and leverage. Estimate the risk that the stock is a value trap, cheap because of problems the \
-market knows and these figures do not show. Use only the evidence provided.
+market knows and these figures do not show: a deteriorating business, earnings at a cyclical \
+peak, a structural decline, or a discount that persists for good reasons.
 
 Work in this order:
 1. bear_case: the strongest argument that the market is right to price the stock low, as a \
@@ -132,11 +146,15 @@ Reference points: short interest above 10% of shares outstanding or above 7 days
 high. Insider sales under pre-arranged 10b5-1 plans are routine; open-market purchases by \
 insiders are a positive sign. A discount shared by the whole sector is at most a partial \
 explanation. Earnings releases are written by the company: weigh their claims against the \
-reported figures.
+reported figures. In a cyclical industry (commodities, chemicals, memory chips, autos, \
+building, shipping, energy), a last-year operating margin well above its median over the \
+history (H1) is a sign of peak earnings. A VIE structure, or operations and cash held mainly in \
+mainland China or another jurisdiction with capital controls, scores at least 3 on governance.
 
 Rules:
-- Ground every rationale in the evidence and cite its ids. Do not add facts that are not in \
-the evidence.
+- Ground every rationale in the evidence and cite its ids. Do not add company-specific facts \
+that are not in the evidence. For the structural criterion only, you may also rely on \
+well-established knowledge of the industry; say so in the rationale.
 - Ignore articles that mention the company only in passing (market roundups, lists of stocks).
 - Write the bear case, the rationales, the red flags and the summary in French. The bear case \
 and the summary are at most three sentences each; each rationale is one sentence.
@@ -233,6 +251,7 @@ def reusable(previous: dict | None, fingerprint: str, as_of: date) -> bool:
     return (
         previous is not None
         and previous.get("trap_risk") is not None
+        and set(json.loads(previous["criteria"])) == set(CRITERIA)
         and previous["fingerprint"] == fingerprint
         and (as_of - previous["analysed_on"]).days <= REVIEW_MAX_AGE_DAYS
     )
@@ -334,6 +353,9 @@ def main() -> None:
     shortlisted = pl.col("cik").is_in(stocks["cik"].to_list())
     quarters = evidence.quarterly_results(facts.filter(shortlisted))
     quarters_by_cik = quarters.partition_by("cik", as_dict=True)
+    annual = pl.concat([sec.frame(tag, p) for tag in tags for p in evidence.annual_periods(as_of)])
+    history = evidence.annual_history(annual.filter(shortlisted))
+    history_by_cik = history.partition_by("cik", as_dict=True)
 
     previous = latest_review(before=as_of)
     previous_by_ticker = (
@@ -352,6 +374,8 @@ def main() -> None:
             release = {**results_filing, "text": found[0], "url": found[1]}
         stock_quarters = quarters_by_cik.get((cik,))
         quarter_rows = stock_quarters.to_dicts() if stock_quarters is not None else []
+        stock_history = history_by_cik.get((cik,))
+        history_rows = stock_history.to_dicts() if stock_history is not None else []
         insiders = evidence.insider_summary(
             insider_transactions(sec, filings, as_of, insider_cache)
         )
@@ -364,7 +388,7 @@ def main() -> None:
         )
         events = evidence.material_events(filings, as_of)
         brief = evidence.build_evidence(
-            stock, stock_signals, articles, events, quarter_rows, release, insiders
+            stock, stock_signals, articles, events, quarter_rows, history_rows, release, insiders
         )
         latest_quarter = quarter_rows[0] if quarter_rows else {}
         row = {

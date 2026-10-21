@@ -139,6 +139,36 @@ def test_quarterly_results_compare_each_quarter_with_the_year_before():
     assert latest["operating_income_yoy"] == pytest.approx(-0.25)
 
 
+def test_annual_periods_include_the_current_year():
+    assert evidence.annual_periods(date(2026, 10, 19), count=3) == ["CY2026", "CY2025", "CY2024"]
+
+
+def test_annual_history_places_the_last_margin_in_its_range():
+    ends = [date(2021, 12, 31), date(2023, 12, 31), date(2025, 12, 31)]
+    facts = frame_rows(
+        ("SalesRevenueNet", ends[0], 100.0),
+        ("Revenues", ends[1], 120.0),
+        ("Revenues", ends[2], 144.0),
+        ("OperatingIncomeLoss", ends[0], 5.0),
+        ("OperatingIncomeLoss", ends[1], 12.0),
+        ("OperatingIncomeLoss", ends[2], 36.0),
+    )
+    years = evidence.annual_history(facts).to_dicts()
+    assert [y["end"] for y in years] == ends[::-1]
+    summary = evidence.history_summary(years)
+    assert summary["margin"] == pytest.approx(0.25)
+    assert summary["median_margin"] == pytest.approx(0.10)
+    assert (summary["low_margin"], summary["margin_years"]) == (pytest.approx(0.05), 3)
+    assert summary["revenue_cagr"] == pytest.approx(1.44**0.25 - 1, abs=1e-3)
+    assert summary["revenue_years"] == 4
+
+
+def test_history_summary_without_enough_years_has_no_growth():
+    year = {"end": date(2025, 12, 31), "revenue": 100.0, "margin": None}
+    summary = evidence.history_summary([year])
+    assert summary["margin"] is None and summary["revenue_cagr"] is None
+
+
 def transaction(code, value, planned=False, insider="A"):
     return {
         "date": "2026-09-01",
@@ -223,6 +253,10 @@ QUARTER = {
     "revenue_yoy": 0.12,
     "operating_income_yoy": -0.081,
 }
+HISTORY = [
+    {"end": date(2025, 12, 31), "revenue": 9e8, "operating_income": 2.25e8, "margin": 0.25},
+    {"end": date(2024, 12, 31), "revenue": 8e8, "operating_income": 8e7, "margin": 0.10},
+]
 RELEASE = {"filed": date(2026, 8, 4), "accn": "r-1", "url": "https://sec/ex99", "text": "Q2 up"}
 SIGNALS = {
     "ret_12m": -0.25,
@@ -239,6 +273,7 @@ def brief(news, **overrides):
         "signals": SIGNALS,
         "events": [EVENT],
         "quarters": [QUARTER],
+        "history": HISTORY,
         "release": RELEASE,
         "insiders": evidence.insider_summary([transaction("S", 2.5e5, planned=True)]),
     }
@@ -249,6 +284,7 @@ def brief(news, **overrides):
         news,
         parts["events"],
         parts["quarters"],
+        parts["history"],
         parts["release"],
         parts["insiders"],
     )
@@ -264,7 +300,9 @@ def test_brief_cites_every_source_and_reports_new_evidence():
     assert "9.8% of shares outstanding (+19.5% since the previous report)" in text
     assert "[F1] 2026-09-01 8-K: Change of auditor [RED FLAG]" in text
     assert "net debt/EBITDA n/a" in text
-    assert [s["id"] for s in brief(news).sources] == ["Q1", "E1", "I1", "S1", "F1", "N1"]
+    assert "fiscal year ended 2025-12-31: revenue $900.0m, operating income $225.0m" in text
+    assert "Latest operating margin 25.0% against a median of 17.5% over 2 years" in text
+    assert [s["id"] for s in brief(news).sources] == ["H1", "Q1", "E1", "I1", "S1", "F1", "N1"]
 
 
 def test_fingerprint_changes_with_new_information_only():

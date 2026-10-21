@@ -1,13 +1,14 @@
 """Evidence on a shortlisted stock: what the market knows that the annual figures do not show.
 
 Everything comes from free primary sources (SEC filings, FINRA, EODHD news and prices) and is
-written up as a plain-text brief in which every item carries an id (Q1, E1, I1, S1, F3, N2...)
+written up as a plain-text brief in which every item carries an id (H1, Q1, E1, S1, F3, N2...)
 that Claude cites and the app links back to.
 """
 
 import hashlib
 import html
 import re
+import statistics
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -22,6 +23,7 @@ MAX_FORM4 = 40
 EXCERPT_CHARS = 1200
 RELEASE_CHARS = 6000
 OUTLOOK_CHARS = 3000
+HISTORY_YEARS = 11  # ten full fiscal years plus the current one
 
 REVENUE_TAGS = [
     "RevenueFromContractWithCustomerExcludingAssessedTax",
@@ -171,8 +173,15 @@ def quarter_periods(as_of: date, count: int = 9) -> list[str]:
     return periods
 
 
-def quarterly_results(facts: pl.DataFrame) -> pl.DataFrame:
-    """Revenue and operating income per company and quarter, with year-on-year changes."""
+def annual_periods(as_of: date, count: int = HISTORY_YEARS) -> list[str]:
+    """XBRL frame names of the last `count` calendar years, the current one included (fiscal
+    years ending in it are already reported)."""
+    return [f"CY{year}" for year in range(as_of.year, as_of.year - count, -1)]
+
+
+def _results(facts: pl.DataFrame) -> pl.DataFrame:
+    """Revenue and operating income per company and period end, revenue taken from the most
+    specific tag reported."""
     priority = {tag: rank for rank, tag in enumerate(REVENUE_TAGS)}
     revenue = (
         facts.filter(pl.col("tag").is_in(REVENUE_TAGS))
@@ -187,7 +196,45 @@ def quarterly_results(facts: pl.DataFrame) -> pl.DataFrame:
         .unique(["cik", "end"])
         .select("cik", "end", operating_income="value")
     )
-    quarters = revenue.join(income, on=["cik", "end"], how="full", coalesce=True)
+    return revenue.join(income, on=["cik", "end"], how="full", coalesce=True)
+
+
+def annual_history(facts: pl.DataFrame) -> pl.DataFrame:
+    """Revenue, operating income and operating margin per company and fiscal year, newest
+    first: the material to judge where the last year stands in the cycle."""
+    return (
+        _results(facts)
+        .with_columns(
+            margin=pl.when(pl.col("revenue") > 0).then(
+                pl.col("operating_income") / pl.col("revenue")
+            )
+        )
+        .sort("cik", "end", descending=[False, True])
+    )
+
+
+def history_summary(years: list[dict]) -> dict:
+    """Latest operating margin against its range over the history, and revenue growth per
+    year between the oldest and the latest fiscal year (years newest first)."""
+    margins = [y["margin"] for y in years if y["margin"] is not None]
+    revenues = [(y["end"], y["revenue"]) for y in years if y["revenue"]]
+    span = (revenues[0][0] - revenues[-1][0]).days / 365.25 if len(revenues) > 1 else 0
+    return {
+        "margin": margins[0] if margins else None,
+        "median_margin": statistics.median(margins) if margins else None,
+        "low_margin": min(margins, default=None),
+        "high_margin": max(margins, default=None),
+        "margin_years": len(margins),
+        "revenue_cagr": (revenues[0][1] / revenues[-1][1]) ** (1 / span) - 1
+        if span >= 1 and revenues[-1][1] > 0
+        else None,
+        "revenue_years": round(span),
+    }
+
+
+def quarterly_results(facts: pl.DataFrame) -> pl.DataFrame:
+    """Revenue and operating income per company and quarter, with year-on-year changes."""
+    quarters = _results(facts)
     year_before = quarters.select(
         "cik",
         prior_end="end",
@@ -279,6 +326,7 @@ def build_evidence(
     articles: list[dict],
     events: list[dict],
     quarters: list[dict],
+    history: list[dict],
     release: dict | None,
     insiders: dict,
 ) -> Evidence:
@@ -297,16 +345,42 @@ def build_evidence(
         f"- Market cap {_usd(stock['market_cap'])} | EBIT {_usd(stock['ebit'])} "
         f"({stock['ebit_source']})",
         "",
-        "Quarterly results (SEC XBRL, calendar quarters, newest first) [Q1]:",
+        "Annual results over the last fiscal years (SEC XBRL, newest first) [H1]:",
     ]
+    for year in history:
+        lines.append(
+            f"- fiscal year ended {year['end']}: revenue {_usd(year['revenue'])}, operating "
+            f"income {_usd(year['operating_income'])}, operating margin "
+            f"{_num(year['margin'], '{:.1%}')}"
+        )
+    if history:
+        summary = history_summary(history)
+        lines.append(
+            f"- Latest operating margin {_num(summary['margin'], '{:.1%}')} against a median of "
+            f"{_num(summary['median_margin'], '{:.1%}')} over {summary['margin_years']} years "
+            f"(range {_num(summary['low_margin'], '{:.1%}')} to "
+            f"{_num(summary['high_margin'], '{:.1%}')}); revenue growth "
+            f"{_num(summary['revenue_cagr'], '{:+.1%}')} a year over {summary['revenue_years']} "
+            "years"
+        )
+    else:
+        lines.append("(no annual history)")
+    lines += ["", "Quarterly results (SEC XBRL, calendar quarters, newest first) [Q1]:"]
     sources = [
+        {
+            "id": "H1",
+            "kind": "SEC",
+            "date": str(history[0]["end"]) if history else "",
+            "title": "Historique annuel (XBRL)",
+            "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-K",
+        },
         {
             "id": "Q1",
             "kind": "SEC",
             "date": str(quarters[0]["end"]) if quarters else "",
             "title": "Résultats trimestriels (XBRL)",
             "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-Q",
-        }
+        },
     ]
     for quarter in quarters[:5]:
         lines.append(

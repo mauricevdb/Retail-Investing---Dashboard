@@ -32,9 +32,10 @@ as_of = reviewed["date"][0]
 screen_date = latest_snapshot()["date"][0]
 st.caption(
     f"Les {reviewed.height} premières actions du screen au {as_of:%d/%m/%Y}. {REVIEW_MODEL} lit "
-    "pour chacune ses résultats trimestriels, son dernier communiqué de résultats, les "
-    "transactions de ses dirigeants, les positions vendeuses à découvert, ses dépôts SEC et ses "
-    "news, puis note six critères de 0 à 5. Leur somme pondérée donne le **risque de piège** "
+    "pour chacune dix ans de résultats annuels, ses derniers trimestres, son dernier communiqué "
+    "de résultats, les transactions de ses dirigeants, les positions vendeuses à découvert, ses "
+    "dépôts SEC et ses news, puis note huit critères de 0 à 5, dont le point du cycle et le "
+    "déclin structurel. Leur somme pondérée donne le **risque de piège** "
     f"(0 à 100) : les {KEEP_COUNT} risques les plus faibles sont suggérés, hors décote "
     f"expliquée (risque ≥ {EXPLAINED_RISK}) ou critère critique. Analyse via Claude Code et "
     f"l'abonnement Claude : équivalent de {reviewed['cost_usd'].sum():.2f} $ au tarif de l'API, "
@@ -152,16 +153,23 @@ else:
     st.markdown(f"**Le meilleur argument du marché** : {r['bear_case']}")
 
     criteria = json.loads(r["criteria"])
+    current_grid = set(criteria) == set(CRITERIA)
+    if not current_grid:
+        st.warning(
+            "Analyse faite sur une grille de critères antérieure : son risque de piège suit les "
+            "poids d'alors. Relancer la revue avec `--force` pour appliquer la grille actuelle."
+        )
     grid = pl.DataFrame(
         [
             {
                 "critère": CRITERIA[name][0],
-                "poids": TRAP_WEIGHTS[name] * 100,
+                "poids": TRAP_WEIGHTS[name] * 100 if current_grid else None,
                 "note": criteria[name]["score"],
                 "justification": criteria[name]["rationale"],
                 "sources": ", ".join(criteria[name]["sources"]),
             }
             for name in CRITERIA
+            if name in criteria
         ]
     )
     st.dataframe(
@@ -178,7 +186,7 @@ else:
             "sources": "Sources",
         },
     )
-    links = sorted({i for name in CRITERIA for i in criteria[name]["sources"]})
+    links = sorted({i for c in criteria.values() for i in c["sources"]})
     st.caption(f"Sources citées : {cite(links) or 'aucune'}")
 
     left, right = st.columns(2)

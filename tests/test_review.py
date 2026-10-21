@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import date, timedelta
 
 import polars as pl
@@ -48,13 +49,20 @@ def test_lowest_risks_are_kept_but_never_an_explained_or_critical_discount():
     assert result[f"T{KEEP_COUNT + 4}"]["suggestion"] is None  # failed analysis: no suggestion
 
 
-def test_verdict_is_reused_only_when_unchanged_and_recent():
-    prior = {"trap_risk": 40.0, "fingerprint": "f", "analysed_on": AS_OF - timedelta(days=3)}
+def test_verdict_is_reused_only_when_unchanged_recent_and_on_the_current_grid():
+    prior = {
+        "trap_risk": 40.0,
+        "criteria": json.dumps(criteria()),
+        "fingerprint": "f",
+        "analysed_on": AS_OF - timedelta(days=3),
+    }
     assert review.reusable(prior, "f", AS_OF)
     assert not review.reusable(prior, "g", AS_OF)
     assert not review.reusable({**prior, "analysed_on": AS_OF - timedelta(days=30)}, "f", AS_OF)
     assert not review.reusable({**prior, "trap_risk": None}, "f", AS_OF)
     assert not review.reusable({"fingerprint": "f", "analysed_on": AS_OF}, "f", AS_OF)  # old format
+    older_grid = json.dumps({"earnings": criteria()["earnings"]})
+    assert not review.reusable({**prior, "criteria": older_grid}, "f", AS_OF)
     assert not review.reusable(None, "f", AS_OF)
 
 

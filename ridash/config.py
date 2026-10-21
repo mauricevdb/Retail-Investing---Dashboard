@@ -24,12 +24,14 @@ INSIDER_CACHE = DATA_DIR / "insiders.parquet"
 # Trap risk (0-100): weighted sum of the criteria Claude scores from 0 (no concern) to 5
 # (critical). A 5 on any criterion excludes the stock on its own.
 TRAP_WEIGHTS = {
-    "earnings": 0.30,
-    "one_offs": 0.15,
-    "balance_sheet": 0.15,
-    "accounting": 0.15,
-    "governance": 0.10,
-    "market": 0.15,
+    "earnings": 0.20,
+    "cyclicality": 0.15,
+    "structural": 0.15,
+    "one_offs": 0.10,
+    "balance_sheet": 0.10,
+    "accounting": 0.05,  # a restatement or a change of auditor scores 5 and excludes on its own
+    "governance": 0.15,
+    "market": 0.10,
 }
 PARTIAL_RISK = 30  # from this trap risk the discount counts as partially explained
 EXPLAINED_RISK = 55  # from this one as explained: the stock is excluded

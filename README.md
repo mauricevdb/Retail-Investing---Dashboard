@@ -54,8 +54,11 @@ figures cannot show: the screen looks at the last fiscal year, the market at the
 day, for each of the 50 best-ranked stocks, `ridash.evidence` assembles a brief from free primary
 sources:
 
+- **annual history**: revenue, operating income and operating margin over the last ten fiscal
+  years, with the latest margin against its median and range (SEC XBRL frames), to tell a
+  cyclical peak from a durable level of earnings;
 - **quarterly results**: revenue and operating income of the last quarters with their
-  year-on-year change (SEC XBRL frames);
+  year-on-year change;
 - **the latest earnings release** (exhibit 99.1 of the results 8-K), including its outlook or
   guidance section;
 - **insider transactions** of the last six months (Form 4): open-market purchases and sales,
@@ -68,17 +71,25 @@ sources:
   against the S&P 500.
 
 Claude (Sonnet 5.5) first writes the bear case, the strongest argument that the market is right,
-then scores six criteria from 0 (no concern) to 5 (critical), each justified in one sentence with
+then scores eight criteria from 0 (no concern) to 5 (critical), each justified in one sentence with
 the ids of the sources it rests on:
 
 | Criterion | Weight | Question |
 |---|---|---|
-| Earnings trajectory | 30% | Are revenue or operating income falling or expected to fall? |
-| One-off items | 15% | Did one-offs inflate the year the screen is based on? |
-| Balance sheet | 15% | Refinancing, liquidity, going-concern or dilution risk? |
-| Accounting | 15% | Restatement, change of auditor, late filing, aggressive accounting? |
-| Governance and country | 10% | Controlling shareholder, related parties, VIE or country risk? |
-| Market signals | 15% | Heavy insider selling, high or rising short interest, unexplained collapse? |
+| Earnings trajectory | 20% | Are revenue or operating income falling or expected to fall? |
+| Point in the cycle | 15% | Are margins near a cyclical peak compared with the last ten years? |
+| Structural decline | 15% | Secular decline or disruption threatening earnings beyond a few years? |
+| One-off items | 10% | Did one-offs inflate the year the screen is based on? |
+| Balance sheet | 10% | Refinancing, liquidity, going-concern or dilution risk? |
+| Accounting | 5% | Restatement, change of auditor, late filing, aggressive accounting? |
+| Governance and country | 15% | Controlling shareholder, related parties, VIE, capital controls, country risk? |
+| Market signals | 10% | Heavy insider selling, high or rising short interest, unexplained collapse? |
+
+Accounting weighs little because its serious cases (restatement, change of auditor) score 5,
+which excludes the stock on its own. A VIE structure or a business run mainly from a
+jurisdiction with capital controls scores at least 3 on governance. For the structural criterion
+only, Claude may draw on established knowledge of the industry, and says so; every other
+rationale rests on the evidence.
 
 The weighted scores give a **trap risk** from 0 to 100. The 20 lowest risks are suggested for the
 portfolio, never a stock whose discount is explained (risk of 55 or more) or that scores 5 on any
