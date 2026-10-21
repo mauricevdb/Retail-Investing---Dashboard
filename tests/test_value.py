@@ -65,6 +65,7 @@ def company(**overrides):
         "depreciation": 30.0,
         "operating_cash_flow": 150.0,
         "capex": 50.0,
+        "stock_compensation": 20.0,
         "equity": 600.0,
     }
     return {**base, **overrides}
@@ -74,9 +75,14 @@ def test_metrics_formulas():
     result = metrics(pl.DataFrame([company(minority_interest=40.0)])).row(0, named=True)
     assert result["ev"] == pytest.approx(1240.0)  # 1000 + 300 - 100 + 40
     assert result["ev_ebit"] == pytest.approx(1240.0 / 120.0)
-    assert result["fcf_yield"] == pytest.approx(0.10)  # (150 - 50) / 1000
+    assert result["fcf_yield"] == pytest.approx(0.08)  # (150 - 50 - 20) / 1000
     assert result["roce"] == pytest.approx(120.0 / 800.0)  # EBIT / (equity + net debt)
     assert result["net_debt_ebitda"] == pytest.approx(200.0 / 150.0)
+
+
+def test_unreported_stock_compensation_counts_as_zero_but_missing_capex_does_not():
+    result = metrics(pl.DataFrame([company(stock_compensation=None), company(capex=None)]))
+    assert result["fcf_yield"].to_list() == [pytest.approx(0.10), None]
 
 
 def test_negative_ebit_has_no_ev_ebit_and_missing_debt_propagates():

@@ -71,10 +71,10 @@ def test_debt_adds_current_portion_and_short_term_borrowings():
 
 @pytest.mark.parametrize(
     ("interest", "expected_debt"),
-    [(None, 0.0), (1.0, 0.0), (10.0, None)],
-    ids=["no-interest", "immaterial-interest", "material-interest"],
+    [(None, None), (1.0, 0.0), (10.0, None)],
+    ids=["no-interest-reported", "immaterial-interest", "material-interest"],
 )
-def test_unreported_debt_is_zero_only_without_material_interest(interest, expected_debt):
+def test_unreported_debt_is_zero_only_with_immaterial_reported_interest(interest, expected_debt):
     rows = [(1, "OperatingIncomeLoss", FY25, 100.0)]
     if interest is not None:
         rows.append((1, "InterestExpense", FY25, interest))

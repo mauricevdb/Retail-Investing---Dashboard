@@ -29,7 +29,8 @@ with st.sidebar:
     with_inferred_debt = st.checkbox(
         "Inclure les dettes présumées nulles",
         value=True,
-        help="Sociétés qui ne déclarent aucune dette et quasiment pas d'intérêts. "
+        help="Sociétés qui ne déclarent aucune dette et des charges d'intérêts inférieures "
+        "à 2 % de leur EBIT. "
         "Quelques-unes déclarent leur dette sous des tags propres "
         "et paraissent alors moins chères.",
     )
@@ -106,15 +107,18 @@ if event.selection.rows:
             f"→ **EV/EBIT {ratio(c['ev_ebit'])}**"
         )
     with cash_flow:
+        sbc = c["stock_compensation"]
         fcf = (
             None
             if c["operating_cash_flow"] is None or c["capex"] is None
-            else c["operating_cash_flow"] - c["capex"]
+            else c["operating_cash_flow"] - c["capex"] - (sbc or 0)
         )
         st.markdown("**Free cash flow**")
         st.markdown(
             f"Flux opérationnel {usd(c['operating_cash_flow'])}  \n"
             f"− Investissements {usd(c['capex'])}  \n"
+            f"− Rémunération en actions "
+            f"{usd(sbc) if sbc is not None else '*non déclarée, comptée 0*'}  \n"
             f"= **FCF {usd(fcf)}**  \n"
             f"FCF / capitalisation → **{pct(c['fcf_yield'])}**"
         )
@@ -144,8 +148,10 @@ with st.expander("Méthodologie"):
   opérationnel, ou à défaut le résultat avant impôt augmenté des charges d'intérêts.
 - **Dette** : dette financière à long terme (partie courante incluse), emprunts à court terme
   et billets de trésorerie. Une société qui ne déclare aucune dette est présumée sans dette si
-  ses charges d'intérêts sont inférieures à 2 % de son EBIT (colonne dédiée) ; sinon elle
-  n'est pas notée.
+  elle déclare des charges d'intérêts inférieures à 2 % de son EBIT (colonne dédiée) ; sinon
+  elle n'est pas notée.
+- **Free cash flow** : flux opérationnel − investissements − rémunération en actions (un coût
+  réel que le flux opérationnel réintègre ; comptée 0 quand elle n'est pas déclarée).
 - **Score** : moyenne des percentiles de quatre ratios (EV/EBIT bas, rendement FCF élevé,
   ROCE élevé, levier faible). Seules les sociétés à EBIT et EV positifs sont notées.
 - Les chiffres sont des mesures, pas des recommandations d'investissement.

@@ -33,7 +33,7 @@ SEC XBRL frames ────┘   (~200 requests: one accounting concept for eve
   | Metric | Formula | Better when |
   |---|---|---|
   | EV / EBIT | (market cap + debt − cash + minority interest) / operating income | lower |
-  | FCF yield | (operating cash flow − capex) / market cap | higher |
+  | FCF yield | (operating cash flow − capex − stock-based compensation) / market cap | higher |
   | ROCE | EBIT / (equity + net debt) | higher |
   | Net debt / EBITDA | (debt − cash) / (EBIT + D&A) | lower |
 
@@ -42,8 +42,10 @@ SEC XBRL frames ────┘   (~200 requests: one accounting concept for eve
 
 Missing data stays missing: a ratio that cannot be computed is left empty and the company is not
 scored, rather than filled with a default. The one deliberate inference is for debt: a company that
-reports no debt at all is presumed debt-free only if its interest expense is below 2% of EBIT, and
-the screen flags every such case.
+reports no debt at all is presumed debt-free only if it reports an interest expense below 2% of
+EBIT, and the screen flags every such case. Two components count as zero when they are not
+reported, since only some companies have them: minority interest and stock-based compensation
+(deducted from free cash flow because operating cash flow adds it back, though it is a real cost).
 
 ## Qualitative review
 

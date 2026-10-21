@@ -27,6 +27,7 @@ ANNUAL_TAGS = {
     ],
     "operating_cash_flow": ["NetCashProvidedByUsedInOperatingActivities"],
     "capex": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+    "stock_compensation": ["ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"],
     "depreciation": [
         "DepreciationDepletionAndAmortization",
         "DepreciationAndAmortization",
@@ -151,8 +152,9 @@ def _reported_debt() -> pl.Expr:
 
 
 def _no_material_interest() -> pl.Expr:
+    # Only a reported interest expense is evidence: without one, the debt stays unknown.
     interest = pl.col("interest_expense").abs()
-    return interest.is_null() | (interest < DEBT_FREE_MAX_INTEREST_TO_EBIT * pl.col("ebit").abs())
+    return interest < DEBT_FREE_MAX_INTEREST_TO_EBIT * pl.col("ebit").abs()
 
 
 def _debt() -> pl.Expr:

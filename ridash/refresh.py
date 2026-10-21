@@ -36,6 +36,7 @@ def build_snapshot(sec: Sec, quotes: pl.DataFrame) -> pl.DataFrame:
         "ebit_source",
         "operating_cash_flow",
         "capex",
+        "stock_compensation",
         "depreciation",
         "interest_expense",
         "cash",

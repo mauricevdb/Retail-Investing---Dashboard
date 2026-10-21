@@ -62,11 +62,16 @@ def metrics(df: pl.DataFrame) -> pl.DataFrame:
     ev = pl.col("market_cap") + net_debt + pl.col("minority_interest").fill_null(0)
     capital_employed = pl.col("equity") + net_debt
     ebitda = pl.col("ebit") + pl.col("depreciation")
+    # Stock-based compensation is a real cost that operating cash flow adds back. Companies
+    # that do not report it (mostly utilities and partnerships) count it as zero.
+    fcf = (
+        pl.col("operating_cash_flow") - pl.col("capex") - pl.col("stock_compensation").fill_null(0)
+    )
     return df.with_columns(ev=ev).with_columns(
         ev_ebit=pl.when((pl.col("ebit") > 0) & (pl.col("ev") > 0)).then(
             pl.col("ev") / pl.col("ebit")
         ),
-        fcf_yield=(pl.col("operating_cash_flow") - pl.col("capex")) / pl.col("market_cap"),
+        fcf_yield=fcf / pl.col("market_cap"),
         roce=pl.when(capital_employed > 0).then(pl.col("ebit") / capital_employed),
         net_debt_ebitda=pl.when(ebitda > 0).then(net_debt / ebitda),
     )
