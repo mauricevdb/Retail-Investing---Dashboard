@@ -88,6 +88,9 @@ def main() -> None:
     # Only stocks analysed on that day: a reused verdict was based on an earlier brief.
     analysed = review.filter((pl.col("analysed_on") == as_of) & pl.col("criteria").is_not_null())
     sample = spread_sample(analysed, args.stocks)
+    if sample.is_empty():
+        print(f"{as_of}: every verdict was reused from an earlier review, nothing to test")
+        return
     requests = [t for t in sample["ticker"] for _ in range(args.runs)]
     use_subscription()
     answers = asyncio.run(ask_all([briefs[t] for t in requests]))

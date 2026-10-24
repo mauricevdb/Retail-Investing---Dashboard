@@ -181,8 +181,13 @@ cp .env.example .env          # then fill in SEC_USER_AGENT and EODHD_API_KEY
 uv run --env-file .env python -m ridash.refresh
 uv run --env-file .env python -m ridash.review
 uv run --env-file .env python -m ridash.stability   # optional: --stocks 10 --runs 2
+uv run --env-file .env python -m ridash.update      # the three above, each only when needed
 uv run --env-file .env streamlit run streamlit_app.py
 ```
+
+Where the `.env` file exists, the app has a fourth tab, **Mise à jour**, that runs these
+commands in the background and follows their log. The hosted app has no `.env` and no such tab:
+it shows the data but cannot start a download or spend the Claude plan's quota.
 
 The screen only reads the snapshots; the portfolio tab also needs `EODHD_API_KEY` to download
 price histories (on Streamlit Community Cloud, set it as a secret).
@@ -208,10 +213,12 @@ ridash/
   evidence.py       brief on each shortlisted stock (results, insiders, short interest, news)
   review.py         trap-risk scoring with Claude, writes data/reviews/<date>.parquet
   stability.py      reproducibility of the review on the same evidence
+  update.py         refresh, review and stability test in a row
 app/
   screen.py         value screen and per-company breakdown
   review.py         verdicts, sources and keep/exclude decisions
   portfolio.py      efficient portfolio construction
+  commands.py       runs the commands from the app (local only)
 streamlit_app.py    navigation between the tabs
 tests/
 ```
