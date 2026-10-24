@@ -1,4 +1,5 @@
-"""Daily refresh: market data + SEC fundamentals over twelve months -> scored snapshot.
+"""Daily refresh: market data + SEC fundamentals (twelve months and ten fiscal years) ->
+scored snapshot.
 
 uv run --env-file .env python -m ridash.refresh
 """
@@ -37,6 +38,10 @@ def build_snapshot(sec: Sec, quotes: pl.DataFrame) -> pl.DataFrame:
         "accn",
         "ebit",
         "ebit_source",
+        "revenue",
+        "normal_margin",
+        "margin_years",
+        "normal_ebit",
         "operating_cash_flow",
         "capex",
         "stock_compensation",
@@ -82,7 +87,7 @@ def main() -> None:
     print(f"done in {time.monotonic() - started:.0f}s")
     with pl.Config(tbl_rows=15, fmt_str_lengths=30, tbl_formatting="ASCII_MARKDOWN"):
         print(
-            ranked.select("rank", "ticker", "name", "ev_ebit", "fcf_yield", "value_score").head(15)
+            ranked.select("rank", "ticker", "sector", *value.SCORED_METRICS, "value_score").head(15)
         )
 
 

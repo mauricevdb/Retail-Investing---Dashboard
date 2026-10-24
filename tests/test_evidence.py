@@ -232,6 +232,8 @@ STOCK = {
     "value_score": 96.0,
     "rank": 1,
     "ev_ebit": 8.4,
+    "ev_normal_ebit": 9.1,
+    "margin_years": 10,
     "fcf_yield": 0.148,
     "roce": 0.74,
     "net_debt_ebitda": None,

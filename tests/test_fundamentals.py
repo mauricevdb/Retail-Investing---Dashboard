@@ -239,3 +239,49 @@ def test_facts_are_downloaded_again_only_after_a_new_report(tmp_path):
     sec.downloaded.clear()
     load(sec, [1, 2, 3], AS_OF + timedelta(days=45), cache)
     assert sec.downloaded == [1, 2, 3]  # copies older than a month are renewed anyway
+
+
+def history(cik, margins):
+    """Revenue of 100 and the given operating margins over consecutive fiscal years, the
+    latest (2025) first."""
+    return [
+        (cik, tag, date(2025 - age, 12, 31), value)
+        for age, margin in enumerate(margins)
+        for tag, value in (("Revenues", 100.0), ("OperatingIncomeLoss", 100.0 * margin))
+    ]
+
+
+def test_normal_margin_is_the_median_of_the_last_ten_fiscal_years():
+    ten_years = [0.30, 0.10, 0.12, 0.08, 0.11, 0.09, 0.10, 0.13, 0.07, 0.10]
+    company = row(annual(facts(*history(1, [*ten_years, 0.50, 0.50]))))
+    assert company["revenue"] == 100.0
+    assert company["margin_years"] == 10
+    assert company["normal_margin"] == pytest.approx(0.10)  # the two older years are left out
+
+
+def test_normal_margin_needs_five_years_of_history():
+    company = row(annual(facts(*history(1, [0.10, 0.12, 0.08, 0.11]))))
+    assert (company["margin_years"], company["normal_margin"]) == (4, None)
+
+
+def test_normal_margin_uses_pretax_income_when_operating_income_is_not_reported():
+    pretax = FLOW_TAGS["pretax_income"][0]
+    rows = [(1, "Revenues", date(2025 - age, 12, 31), 100.0) for age in range(5)]
+    rows += [(1, pretax, date(2025 - age, 12, 31), 15.0) for age in range(5)]
+    rows += [(1, "InterestExpense", date(2025 - age, 12, 31), 5.0) for age in range(5)]
+    assert row(annual(facts(*rows)))["normal_margin"] == pytest.approx(0.20)
+
+
+def test_revenue_is_the_larger_total_so_that_lease_income_is_not_left_out():
+    contract = "RevenueFromContractWithCustomerExcludingAssessedTax"
+    result = annual(
+        facts(
+            (1, "OperatingIncomeLoss", FY25, 30.0),
+            (1, "Revenues", FY25, 400.0),  # an equipment renter: rentals + sales
+            (1, contract, FY25, 100.0),  # sales only
+            (2, "OperatingIncomeLoss", FY25, 30.0),
+            (2, "Revenues", FY25, 0.0),
+            (2, contract, FY25, 300.0),
+        )
+    )
+    assert (row(result, 1)["revenue"], row(result, 2)["revenue"]) == (400.0, 300.0)

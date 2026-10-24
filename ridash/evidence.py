@@ -25,6 +25,8 @@ RELEASE_CHARS = 6000
 OUTLOOK_CHARS = 3000
 HISTORY_YEARS = 11  # ten full fiscal years plus the current one
 
+# One tag per period, the same one each year where possible, so that growth rates compare
+# like with like.
 REVENUE_TAGS = [
     "RevenueFromContractWithCustomerExcludingAssessedTax",
     "Revenues",
@@ -338,9 +340,11 @@ def build_evidence(
         "",
         f"Valuation over the twelve months to {stock['period_end']} (latest report: "
         f"{stock['form']}):",
-        f"- Value score {_num(stock['value_score'], '{:.0f}')}/100, rank {stock['rank']} "
-        "of the screened universe",
-        f"- EV/EBIT {_num(stock['ev_ebit'], '{:.1f}')} | FCF yield "
+        f"- Value score {_num(stock['value_score'], '{:.0f}')}/100 against its sector, rank "
+        f"{stock['rank']} of the screened universe",
+        f"- EV/EBIT {_num(stock['ev_ebit'], '{:.1f}')} | EV/normal EBIT "
+        f"{_num(stock['ev_normal_ebit'], '{:.1f}')} (revenue at the median margin of "
+        f"{stock['margin_years']} fiscal years) | FCF yield "
         f"{_num(stock['fcf_yield'], '{:.1%}')} | ROCE {_num(stock['roce'], '{:.1%}')} | "
         f"net debt/EBITDA {_num(stock['net_debt_ebitda'], '{:.1f}')}",
         f"- Market cap {_usd(stock['market_cap'])} | EBIT {_usd(stock['ebit'])} "

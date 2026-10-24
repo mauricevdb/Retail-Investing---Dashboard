@@ -2,9 +2,10 @@
 
 A personal retail-investing dashboard, in three steps:
 
-- **Value screen** — ranks US listed companies by how cheap they are on their last twelve
-  months of reported results, among those that clear a quality gate, and shows how every number
-  was computed, down to the SEC filing it comes from.
+- **Value screen** — ranks US listed companies by how cheap they are against their sector, on
+  their last twelve months of results and on their normal earnings over ten fiscal years, among
+  those that clear a quality gate, and shows how every number was computed, down to the SEC
+  filing it comes from.
 - **Qualitative review** — for the 50 best-ranked stocks, Claude reads quarterly results, the
   latest earnings release, insider transactions, short interest, SEC filings and news, scores
   the risk that each discount is a value trap, and suggests the 20 safest; the user keeps or
@@ -35,11 +36,17 @@ SEC company facts ──┘   (one download per company, again only after it fil
   list of us-gaap tags; EBIT is operating income or, for companies that do not present that
   subtotal, pre-tax income plus interest expense. Facts are cached locally and a company is
   downloaded again only when the frames API shows a new report from it (or after a month).
+- **Normal earnings** — the twelve months' revenue at the median operating margin (EBIT /
+  revenue) of the last ten fiscal years, computed from five years of history at least, with the
+  same point-in-time rule. A margin at a cyclical peak (memory chips, commodities) or trough does
+  not set the price on its own; a business whose margin has genuinely improved looks dearer on
+  this measure than on the last twelve months, which is why it is one of three.
 - **Metrics**
 
   | Metric | Formula | Better when |
   |---|---|---|
   | EV / EBIT | (market cap + debt − cash + minority interest) / operating income | lower |
+  | EV / normal EBIT | EV / (revenue × median operating margin over ten years) | lower |
   | FCF yield | (operating cash flow − capex − stock-based compensation) / market cap | higher |
   | ROCE | EBIT / (equity + net debt) | higher |
   | Net debt / EBITDA | (debt − cash) / (EBIT + D&A) | lower |
@@ -49,10 +56,12 @@ SEC company facts ──┘   (one download per company, again only after it fil
   high return on capital cannot make up for a higher price. A ratio that cannot be computed
   (negative capital employed, no depreciation reported) does not fail the gate, but the company
   is flagged.
-- **Value score** — the average of the EV/EBIT and FCF-yield percentiles (0-100), across the
-  companies with positive EBIT and EV. A company where one of the two cannot be computed gets
-  no score, rather than a score on the other alone. The ranking keeps those that clear the
-  quality gate.
+- **Value score** — the average of the EV/EBIT, EV/normal EBIT and FCF-yield percentiles
+  (0-100), each computed **within the company's sector**: a software company is compared with
+  software and hardware companies, not with retailers that the market always values lower, so the
+  ranking measures a discount rather than the sector mix. A company where one of the three
+  cannot be computed (a loss, less than five years of history, no sector) gets no score, rather
+  than a score on the others alone. The ranking keeps those that clear the quality gate.
 
 Missing data stays missing: a ratio that cannot be computed is left empty and the company is not
 scored, rather than filled with a default. The one deliberate inference is for debt: a company that
@@ -218,7 +227,12 @@ tests/
   reported under a tag outside the fallback lists, and a few of those presumed debt-free actually
   report their debt under company-specific tags.
 - Foreign private issuers filing under IFRS (20-F) have no us-gaap data and are not scored.
-- Percentiles are computed across the whole universe, not within sectors.
+- Percentiles are computed within nine broad sectors: a sector that is expensive as a whole
+  still supplies its cheapest companies, and industries inside a sector (pipelines and drillers,
+  retailers and carmakers) are still mixed.
+- A company is not compared with its own past valuation multiples: that needs years of share
+  counts and prices, and the daily snapshots will provide them, point in time, as they build up.
+  Normal earnings compare today's price with the company's own past profitability instead.
 - Mean-variance weights are sensitive to expected returns estimated from a few years of history.
 - Review verdicts are only as good as the news coverage; foreign issuers file no 8-K, so their
   review rests on news and price behaviour alone.

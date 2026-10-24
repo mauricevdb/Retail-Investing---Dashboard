@@ -15,6 +15,11 @@ MAJOR_EXCHANGES = ("NYSE", "NASDAQ", "NYSE MKT", "NYSE ARCA", "BATS", "AMEX")
 # expense stays below this share of EBIT; otherwise its debt is unknown.
 DEBT_FREE_MAX_INTEREST_TO_EBIT = 0.02
 
+# Normal earnings: last twelve months' revenue at the median operating margin of the last
+# NORMAL_YEARS fiscal years, computed only from MIN_NORMAL_YEARS of history.
+NORMAL_YEARS = 10
+MIN_NORMAL_YEARS = 5
+
 # Quality gate: only companies above this return on capital employed and below this
 # leverage are ranked by the value screen.
 MIN_ROCE = 0.10

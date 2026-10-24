@@ -1,14 +1,16 @@
-"""Universe selection, valuation metrics and the composite value score."""
+"""Universe selection, valuation metrics and the value score, relative to the sector."""
 
 import polars as pl
 
 from ridash.config import MAJOR_EXCHANGES, MAX_NET_DEBT_EBITDA, MIN_ROCE
 
-# (price metric, higher is better) — each contributes a 0-100 percentile to the value score.
-# Return on capital and leverage are not scored: they are a gate (see `quality`), so that a
-# high return on capital cannot make up for a higher price.
+# (price metric, higher is better) — each contributes a 0-100 percentile within the sector to
+# the value score: the price against the last twelve months' earnings, against normal
+# earnings, and against free cash flow. Return on capital and leverage are not scored: they are
+# a gate (see `quality`), so that a high return on capital cannot make up for a higher price.
 SCORED_METRICS = {
     "ev_ebit": False,
+    "ev_normal_ebit": False,
     "fcf_yield": True,
 }
 
@@ -133,14 +135,20 @@ def metrics(df: pl.DataFrame) -> pl.DataFrame:
     fcf = (
         pl.col("operating_cash_flow") - pl.col("capex") - pl.col("stock_compensation").fill_null(0)
     )
-    return df.with_columns(ev=ev).with_columns(
-        ev_ebit=pl.when((pl.col("ebit") > 0) & (pl.col("ev") > 0)).then(
-            pl.col("ev") / pl.col("ebit")
-        ),
+    normal_ebit = pl.col("revenue") * pl.col("normal_margin")
+    return df.with_columns(ev=ev, normal_ebit=normal_ebit).with_columns(
+        ev_ebit=_multiple("ebit"),
+        ev_normal_ebit=_multiple("normal_ebit"),
         fcf_yield=fcf / pl.col("market_cap"),
         roce=pl.when(capital_employed > 0).then(pl.col("ebit") / capital_employed),
         net_debt_ebitda=pl.when(ebitda > 0).then(net_debt / ebitda),
     )
+
+
+def _multiple(earnings: str) -> pl.Expr:
+    """EV / earnings, only when both are positive: a loss has no meaningful multiple."""
+    positive = (pl.col(earnings) > 0) & (pl.col("ev") > 0)
+    return pl.when(positive).then(pl.col("ev") / pl.col(earnings))
 
 
 def quality(df: pl.DataFrame) -> pl.DataFrame:
@@ -156,14 +164,18 @@ def quality(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def score(df: pl.DataFrame) -> pl.DataFrame:
-    """Percentiles of the price metrics, averaged into a 0-100 value score (higher = cheaper).
-    A company gets a score only when every price metric can be computed, rather than being
-    judged on part of them; only those passing the quality gate are ranked."""
+    """Percentiles of the price metrics within the sector, averaged into a 0-100 value score
+    (higher = cheaper): a company is compared with businesses priced on similar economics,
+    not with whole industries that the market always values lower. A company gets a score
+    only when it has a sector and every price metric can be computed, rather than being judged
+    on part of them; only those passing the quality gate are ranked."""
+    complete = pl.col("sector").is_not_null() & pl.all_horizontal(
+        pl.col(name).is_not_null() for name in SCORED_METRICS
+    )
     percentiles = {
-        f"pct_{name}": _percentile(name, higher_is_better)
+        f"pct_{name}": _percentile(name, higher_is_better, complete)
         for name, higher_is_better in SCORED_METRICS.items()
     }
-    complete = pl.all_horizontal(pl.col(name).is_not_null() for name in SCORED_METRICS)
     value_score = pl.when(complete).then(pl.mean_horizontal(*percentiles))
     ranked = pl.when(pl.col("quality_pass")).then(pl.col("value_score"))
     return (
@@ -175,7 +187,7 @@ def score(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _percentile(column: str, higher_is_better: bool) -> pl.Expr:
-    values = pl.col(column) if higher_is_better else -pl.col(column)
-    values = pl.when(pl.col("ev_ebit").is_not_null()).then(values)
-    return values.rank("average") / values.count() * 100
+def _percentile(column: str, higher_is_better: bool, among: pl.Expr) -> pl.Expr:
+    """Share of the sector's scored companies that are dearer or as dear, from 0 to 100."""
+    values = pl.when(among).then(pl.col(column) if higher_is_better else -pl.col(column))
+    return (values.rank("average") / values.count() * 100).over("sector")

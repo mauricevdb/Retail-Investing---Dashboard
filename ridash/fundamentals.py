@@ -7,6 +7,9 @@ start of the fiscal year, so the twelve months are rebuilt as
 
     last fiscal year + year to date − same period of the year before
 
+Normal earnings put the twelve months' revenue at the median operating margin of the last ten
+fiscal years, so that a margin at a cyclical peak or trough does not set the price of a stock.
+
 Only facts filed on or before the snapshot date are used, so a snapshot never sees a filing
 published after it, and a figure restated later is read as it was known at the time.
 """
@@ -17,20 +20,31 @@ from pathlib import Path
 
 import polars as pl
 
-from ridash.config import DEBT_FREE_MAX_INTEREST_TO_EBIT
+from ridash.config import DEBT_FREE_MAX_INTEREST_TO_EBIT, MIN_NORMAL_YEARS, NORMAL_YEARS
 from ridash.sources.sec import FACT_SCHEMA, Sec
 
 # A company whose latest report ended longer ago than this is left out: it files late or
 # no longer files (a year plus the four months foreign issuers have to file a 20-F).
 MAX_PERIOD_AGE = timedelta(days=500)
-# Facts kept per company: enough to rebuild twelve months ending up to MAX_PERIOD_AGE ago.
-FACT_HISTORY = timedelta(days=3 * 365)
+# Facts kept per company: the NORMAL_YEARS fiscal years before a period ending up to
+# MAX_PERIOD_AGE ago.
+FACT_HISTORY = MAX_PERIOD_AGE + timedelta(days=(NORMAL_YEARS + 1) * 365)
 # Without a new report, a company's facts are downloaded again after this delay anyway.
 FACT_MAX_AGE = timedelta(days=30)
 
-# Output column -> us-gaap tags, most specific first. The facts cache only holds these tags:
-# after adding one, delete data/facts.parquet so that every company is downloaded again.
+# Output column -> us-gaap tags, most specific first. The facts cache only holds these tags
+# over FACT_HISTORY: after changing either, delete data/facts.parquet so that every company is
+# downloaded again.
+# Revenue is the larger of the first two (see `_revenue`), else the first of the others.
+REVENUE_TAGS = [
+    "Revenues",
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "RevenueFromContractWithCustomerIncludingAssessedTax",
+    "SalesRevenueNet",
+    "SalesRevenueGoodsNet",
+]
 FLOW_TAGS = {
+    "revenue": REVENUE_TAGS,
     "operating_income": ["OperatingIncomeLoss"],
     "pretax_income": [
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
@@ -97,6 +111,7 @@ DEBT_DEFINITIONS = [
 NO_DEBT_REPORTED = "none reported, no material interest"
 
 _EBIT_TAGS = FLOW_TAGS["operating_income"] + FLOW_TAGS["pretax_income"]
+_EBIT_PARTS = ("operating_income", "pretax_income", "interest_expense")
 FLOW_TAG_LIST = sorted({t for tags in FLOW_TAGS.values() for t in tags})
 BALANCE_SHEET_TAG_LIST = sorted(
     {t for tags in BALANCE_TAGS.values() for t in tags}
@@ -179,13 +194,15 @@ def trailing(facts: pl.DataFrame, as_of: date) -> pl.DataFrame:
         periods, left_on=["cik", "end"], right_on=["cik", "period_end"]
     )
     long = pl.concat([twelve_months(flows, periods), balances.select("cik", "tag", "value")])
-    wide = long.pivot(on="tag", index="cik", values="value", aggregate_function="first")
-    absent = [tag for tag in FLOW_TAG_LIST + BALANCE_SHEET_TAG_LIST if tag not in wide.columns]
-    wide = wide.with_columns(pl.lit(None, pl.Float64).alias(tag) for tag in absent)
+    wide = _with_every_tag(
+        long.pivot(on="tag", index="cik", values="value", aggregate_function="first")
+    )
 
     columns = {name: pl.coalesce(tags) for name, tags in {**FLOW_TAGS, **BALANCE_TAGS}.items()}
+    columns["revenue"] = _revenue()
     return (
         periods.join(wide, on="cik")
+        .join(normal_margin(flows, periods), on="cik", how="left")
         .with_columns(**columns)
         .with_columns(ebit=_ebit(), ebit_source=_ebit_source())
         .with_columns(debt=_debt(), debt_source=_debt_source())
@@ -199,8 +216,42 @@ def trailing(facts: pl.DataFrame, as_of: date) -> pl.DataFrame:
             *(name for name in columns if name not in ("operating_income", "pretax_income")),
             "debt",
             "debt_source",
+            "normal_margin",
+            "margin_years",
         )
     )
+
+
+def normal_margin(flows: pl.DataFrame, periods: pl.DataFrame) -> pl.DataFrame:
+    """Median operating margin (EBIT / revenue) over the last NORMAL_YEARS fiscal years ending
+    by each company's period end, given only from MIN_NORMAL_YEARS years: the margin of an
+    ordinary year rather than of the last one."""
+    years = (
+        flows.filter(pl.col("days").is_between(350, 380))
+        .join(periods.select("cik", "period_end"), on="cik")
+        .filter(pl.col("end") <= pl.col("period_end"))
+        .pivot(on="tag", index=["cik", "end"], values="value", aggregate_function="first")
+        .pipe(_with_every_tag)
+        .with_columns(
+            revenue=_revenue(),
+            **{name: pl.coalesce(FLOW_TAGS[name]) for name in _EBIT_PARTS},
+        )
+        .with_columns(margin=pl.when(pl.col("revenue") > 0).then(_ebit() / pl.col("revenue")))
+        .filter(pl.col("margin").is_not_null())
+        .sort("end", descending=True)
+        .group_by("cik")
+        .head(NORMAL_YEARS)
+    )
+    return years.group_by("cik").agg(
+        normal_margin=pl.when(pl.len() >= MIN_NORMAL_YEARS).then(pl.col("margin").median()),
+        margin_years=pl.len().cast(pl.Int32),
+    )
+
+
+def _with_every_tag(wide: pl.DataFrame) -> pl.DataFrame:
+    """Add the tags nobody reported, as empty columns, so that every expression can name them."""
+    absent = [tag for tag in FLOW_TAG_LIST + BALANCE_SHEET_TAG_LIST if tag not in wide.columns]
+    return wide.with_columns(pl.lit(None, pl.Float64).alias(tag) for tag in absent)
 
 
 def twelve_months(flows: pl.DataFrame, periods: pl.DataFrame) -> pl.DataFrame:
@@ -234,6 +285,14 @@ def twelve_months(flows: pl.DataFrame, periods: pl.DataFrame) -> pl.DataFrame:
         .select("cik", "tag", value=pl.col("fy") + pl.col("ytd") - pl.col("prior"))
     )
     return pl.concat([full_year, rebuilt])
+
+
+def _revenue() -> pl.Expr:
+    # Total revenue includes the lease and other income that the contract-revenue tag leaves
+    # out (equipment renters, commodity traders); a few filers report a partial or zero total,
+    # so the larger of the two is taken.
+    total = pl.max_horizontal(REVENUE_TAGS[:2])
+    return pl.coalesce(total, *REVENUE_TAGS[2:])
 
 
 def _ebit() -> pl.Expr:

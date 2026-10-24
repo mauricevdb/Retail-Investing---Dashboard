@@ -5,7 +5,7 @@ import streamlit as st
 
 from ridash.config import SNAPSHOT_DIR
 
-CURRENT_COLUMNS = {"period_end", "country", "quality_pass", "stock_compensation"}
+CURRENT_COLUMNS = {"period_end", "country", "quality_pass", "stock_compensation", "ev_normal_ebit"}
 
 
 @st.cache_data

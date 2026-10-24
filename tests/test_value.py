@@ -77,11 +77,14 @@ def test_specific_sic_ranges_take_precedence(sic, sector):
 
 def company(**overrides):
     base = {
+        "sector": "Industrials",
         "market_cap": 1000.0,
         "debt": 300.0,
         "cash": 100.0,
         "minority_interest": None,
         "ebit": 120.0,
+        "revenue": 1000.0,
+        "normal_margin": 0.10,
         "depreciation": 30.0,
         "operating_cash_flow": 150.0,
         "capex": 50.0,
@@ -95,6 +98,7 @@ def test_metrics_formulas():
     result = metrics(pl.DataFrame([company(minority_interest=40.0)])).row(0, named=True)
     assert result["ev"] == pytest.approx(1240.0)  # 1000 + 300 - 100 + 40
     assert result["ev_ebit"] == pytest.approx(1240.0 / 120.0)
+    assert result["ev_normal_ebit"] == pytest.approx(1240.0 / 100.0)  # revenue × normal margin
     assert result["fcf_yield"] == pytest.approx(0.08)  # (150 - 50 - 20) / 1000
     assert result["roce"] == pytest.approx(120.0 / 800.0)  # EBIT / (equity + net debt)
     assert result["net_debt_ebitda"] == pytest.approx(200.0 / 150.0)
@@ -156,3 +160,51 @@ def test_company_missing_a_price_metric_is_not_scored_on_the_other_alone():
     result = score(df)
     assert result["value_score"].null_count() == 1
     assert result.filter(pl.col("fcf_yield").is_null())["rank"].item() is None
+
+
+def test_normal_earnings_without_enough_history_or_with_a_normal_loss_give_no_multiple():
+    result = metrics(pl.DataFrame([company(normal_margin=None), company(normal_margin=-0.02)]))
+    assert result["ev_normal_ebit"].to_list() == [None, None]
+
+
+def test_companies_are_compared_within_their_sector():
+    """A software company at 15 times EBIT is cheap among software companies at 30, even though
+    a retailer at 10 is cheaper in absolute terms: the retailer is the dearest of retailers."""
+    rows = [
+        {"ticker": f"{sector[:4]}{multiple}", **company(sector=sector, market_cap=cap)}
+        for sector, caps in {
+            "Information Technology": (1600.0, 3400.0, 3400.0),  # EV/EBIT 15, 30, 30
+            "Consumer Discretionary": (1000.0, 600.0, 600.0),  # EV/EBIT 10, 6.7, 6.7
+        }.items()
+        for multiple, cap in enumerate(caps)
+    ]
+    result = {r["ticker"]: r for r in score(metrics(pl.DataFrame(rows))).iter_rows(named=True)}
+    assert result["Info0"]["pct_ev_ebit"] == 100.0
+    assert result["Cons0"]["pct_ev_ebit"] == pytest.approx(100 / 3)
+    assert result["Info0"]["value_score"] > result["Cons0"]["value_score"]
+
+
+def test_peak_margin_ranks_below_the_same_multiple_on_normal_earnings():
+    df = metrics(
+        pl.DataFrame(
+            [
+                {"ticker": "STEADY", **company()},
+                {"ticker": "PEAK", **company(revenue=600.0, normal_margin=0.05)},  # EBIT 120 vs 30
+            ]
+        )
+    )
+    assert score(df)["ticker"].to_list() == ["STEADY", "PEAK"]
+
+
+def test_company_without_sector_or_normal_earnings_is_not_scored():
+    df = metrics(
+        pl.DataFrame(
+            [
+                {"ticker": "SCORED", **company()},
+                {"ticker": "NO_SECTOR", **company(sector=None)},
+                {"ticker": "YOUNG", **company(normal_margin=None)},
+            ]
+        )
+    )
+    result = score(df)
+    assert result.filter(pl.col("value_score").is_not_null())["ticker"].to_list() == ["SCORED"]

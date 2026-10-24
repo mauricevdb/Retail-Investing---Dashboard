@@ -2,7 +2,7 @@ import polars as pl
 import streamlit as st
 
 from app.common import latest_snapshot, pct, ratio, usd
-from ridash.config import MAX_NET_DEBT_EBITDA, MIN_ROCE
+from ridash.config import MAX_NET_DEBT_EBITDA, MIN_NORMAL_YEARS, MIN_ROCE, NORMAL_YEARS
 from ridash.fundamentals import NO_DEBT_REPORTED
 
 
@@ -14,12 +14,15 @@ snapshot = latest_snapshot()
 as_of = snapshot["date"][0]
 scored = snapshot.filter(pl.col("value_score").is_not_null())
 ranked = scored.filter(pl.col("rank").is_not_null())
+sector_medians = scored.group_by("sector").agg(
+    pl.col("ev_ebit", "ev_normal_ebit", "fcf_yield").median().name.prefix("sector_")
+)
 
 st.title("Actions américaines en décote")
 st.caption(
     f"Données au {as_of:%d/%m/%Y} · {scored.height} sociétés valorisées sur {snapshot.height}, "
-    f"dont {ranked.height} classées (filtres de qualité) · Fondamentaux : SEC EDGAR, 12 mois "
-    "glissants · Cours : EODHD"
+    f"dont {ranked.height} classées (filtres de qualité) · Prix comparé au secteur · "
+    "Fondamentaux : SEC EDGAR, 12 mois glissants et 10 exercices · Cours : EODHD"
 )
 
 with st.sidebar:
@@ -56,7 +59,7 @@ if max_ev_ebit:
     view = view.filter(pl.col("ev_ebit") <= max_ev_ebit)
 if positive_fcf:
     view = view.filter(pl.col("fcf_yield") > 0)
-view = view.head(top_n)
+view = view.head(top_n).join(sector_medians, on="sector", how="left", maintain_order="left")
 
 table = view.select(
     "rank",
@@ -65,6 +68,7 @@ table = view.select(
     "sector",
     (pl.col("market_cap") / 1e9).alias("market_cap_bn"),
     "ev_ebit",
+    "ev_normal_ebit",
     (pl.col("fcf_yield") * 100).alias("fcf_yield_pct"),
     (pl.col("roce") * 100).alias("roce_pct"),
     "net_debt_ebitda",
@@ -86,6 +90,11 @@ event = st.dataframe(
         "sector": "Secteur",
         "market_cap_bn": st.column_config.NumberColumn("Capi. (Md$)", format="%.1f"),
         "ev_ebit": st.column_config.NumberColumn("EV/EBIT", format="%.1f"),
+        "ev_normal_ebit": st.column_config.NumberColumn(
+            "EV/EBIT normal",
+            format="%.1f",
+            help=f"EBIT à la marge opérationnelle médiane des {NORMAL_YEARS} derniers exercices.",
+        ),
         "fcf_yield_pct": st.column_config.NumberColumn("Rdt FCF", format="%.1f %%"),
         "roce_pct": st.column_config.NumberColumn("ROCE", format="%.1f %%"),
         "net_debt_ebitda": st.column_config.NumberColumn("Dette nette/EBITDA", format="%.1f"),
@@ -111,7 +120,7 @@ if event.selection.rows:
         f"au {c['period_end']:%d/%m/%Y} · [dernier rapport ({c['form']}) déposé à la SEC]"
         f"({filing_url(c['cik'], c['accn'])})"
     )
-    valuation, cash_flow, quality = st.columns(3)
+    valuation, normal, cash_flow, quality = st.columns(4)
     with valuation:
         st.markdown("**Valeur d'entreprise**")
         st.markdown(
@@ -122,6 +131,16 @@ if event.selection.rows:
             f"= **EV {usd(c['ev'])}**  \n"
             f"EBIT {usd(c['ebit'])} *({c['ebit_source']})*  \n"
             f"→ **EV/EBIT {ratio(c['ev_ebit'])}**"
+        )
+    with normal:
+        st.markdown("**Résultat normal**")
+        st.markdown(
+            f"Chiffre d'affaires 12 mois {usd(c['revenue'])}  \n"
+            f"× marge médiane {pct(c['normal_margin'])} "
+            f"*({c['margin_years'] or 0} exercices)*  \n"
+            f"= **EBIT normal {usd(c['normal_ebit'])}**  \n"
+            f"Marge des 12 mois : {pct(c['ebit'] / c['revenue'] if c['revenue'] else None)}  \n"
+            f"→ **EV/EBIT normal {ratio(c['ev_normal_ebit'])}**"
         )
     with cash_flow:
         sbc = c["stock_compensation"]
@@ -155,15 +174,33 @@ if event.selection.rows:
             f"Dette nette / EBITDA → **{ratio(c['net_debt_ebitda'])}** "
             f"(plafond {MAX_NET_DEBT_EBITDA:g})"
         )
-    st.caption(
-        "Percentiles dans l'univers valorisé (100 = le moins cher) : "
-        f"EV/EBIT {ratio(c['pct_ev_ebit'], '{:.0f}')} · "
-        f"FCF {ratio(c['pct_fcf_yield'], '{:.0f}')}"
+    st.markdown(f"**Face au secteur** ({c['sector']})")
+    st.dataframe(
+        pl.DataFrame(
+            {
+                "Mesure": ["EV/EBIT", "EV/EBIT normal", "Rendement FCF"],
+                "Société": [
+                    ratio(c["ev_ebit"]),
+                    ratio(c["ev_normal_ebit"]),
+                    pct(c["fcf_yield"]),
+                ],
+                "Médiane du secteur": [
+                    ratio(c["sector_ev_ebit"]),
+                    ratio(c["sector_ev_normal_ebit"]),
+                    pct(c["sector_fcf_yield"]),
+                ],
+                "Percentile (100 = le moins cher)": [
+                    ratio(c[f"pct_{name}"], "{:.0f}")
+                    for name in ("ev_ebit", "ev_normal_ebit", "fcf_yield")
+                ],
+            }
+        ),
+        hide_index=True,
     )
 
 with st.expander("Méthodologie"):
     st.markdown(
-        """
+        f"""
 - **Univers** : actions ordinaires cotées au NYSE, NASDAQ ou NYSE American, en dollars,
   capitalisation ≥ 2 Md$. Finance, assurance et immobilier (SIC 6000-6799) sont exclus :
   l'EBIT et la dette n'y ont pas le même sens.
@@ -181,9 +218,16 @@ with st.expander("Méthodologie"):
   elle n'est pas notée.
 - **Free cash flow** : flux opérationnel − investissements − rémunération en actions (un coût
   réel que le flux opérationnel réintègre ; comptée 0 quand elle n'est pas déclarée).
-- **Score** : moyenne des percentiles de deux mesures du prix (EV/EBIT bas, rendement FCF
-  élevé), parmi les sociétés à EBIT et EV positifs. Une société dont l'une des deux mesures est
-  incalculable n'est pas notée, plutôt que notée sur l'autre seule.
+- **Résultat normal** : chiffre d'affaires des 12 mois × marge opérationnelle médiane des
+  {NORMAL_YEARS} derniers exercices (au moins {MIN_NORMAL_YEARS} exercices). Une marge au sommet
+  ou au creux du cycle ne fixe donc pas seule le prix : une société cyclique au pic paraît chère
+  sur son résultat normal.
+- **Score** : moyenne des percentiles de trois mesures du prix (EV/EBIT bas, EV/EBIT normal
+  bas, rendement FCF élevé), calculés **au sein du secteur** : une société est comparée à des
+  entreprises au modèle économique proche, pas à des industries que le marché valorise
+  toujours moins cher (distribution, énergie) ou plus cher (logiciel). Une société dont l'une
+  des mesures est incalculable (perte, moins de {MIN_NORMAL_YEARS} exercices d'historique,
+  secteur inconnu) n'est pas notée, plutôt que notée sur les autres seules.
 - **Filtres de qualité** : seules les sociétés au ROCE supérieur à 10 % et à la dette nette
   inférieure à 3 × l'EBITDA sont classées : la rentabilité ne compense donc pas un prix plus
   élevé. Un ratio incalculable n'écarte pas la société, qui est signalée.
@@ -194,7 +238,17 @@ with st.expander("Méthodologie"):
 unscored = snapshot.filter(pl.col("value_score").is_null())
 with st.expander(f"Sociétés non notées ({unscored.height})"):
     st.dataframe(
-        unscored.select("ticker", "name", "sector", "ebit", "debt", "cash", "period_end"),
+        unscored.select(
+            "ticker",
+            "name",
+            "sector",
+            "ebit",
+            "debt",
+            "cash",
+            "normal_margin",
+            "margin_years",
+            "period_end",
+        ),
         hide_index=True,
         width="stretch",
     )

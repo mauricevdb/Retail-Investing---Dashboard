@@ -130,9 +130,11 @@ VERDICT_SCHEMA = {
 _CRITERIA_TEXT = "\n".join(f"   - {name}: {question}" for name, (_, question) in CRITERIA.items())
 INSTRUCTIONS = f"""\
 You review stocks that a quantitative value screen ranks as cheap. The screen only sees the \
-financial statements of the last twelve months reported: it ranks companies on EV/EBIT and \
-free-cash-flow yield, among those with a return on capital employed above {MIN_ROCE:.0%} and \
-net debt below {MAX_NET_DEBT_EBITDA:g} times EBITDA. Estimate the risk that the stock is a \
+financial statements: it ranks companies against the other companies of their sector on \
+EV/EBIT over the last twelve months, EV over normal EBIT (the twelve months' revenue at the \
+median operating margin of up to ten fiscal years) and free-cash-flow yield, among those with \
+a return on capital employed above {MIN_ROCE:.0%} and net debt below \
+{MAX_NET_DEBT_EBITDA:g} times EBITDA. Estimate the risk that the stock is a \
 value trap, cheap because of problems the market knows and these figures do not show: a \
 deteriorating business, earnings at a cyclical peak, a structural decline, or a discount that \
 persists for good reasons.
@@ -150,12 +152,13 @@ lowers your confidence.
 
 Reference points: short interest above 10% of shares outstanding or above 7 days to cover is \
 high. Insider sales under pre-arranged 10b5-1 plans are routine; open-market purchases by \
-insiders are a positive sign. A discount shared by the whole sector is at most a partial \
-explanation. Earnings releases are written by the company: weigh their claims against the \
-reported figures. In a cyclical industry (commodities, chemicals, memory chips, autos, \
-building, shipping, energy), a last-year operating margin well above its median over the \
-history (H1) is a sign of peak earnings. A VIE structure, or operations and cash held mainly in \
-mainland China or another jurisdiction with capital controls, scores at least 3 on governance.
+insiders are a positive sign. The discount is measured against the sector: a reason that \
+applies to the whole sector does not explain it. Earnings releases are written by the \
+company: weigh their claims against the reported figures. In a cyclical industry \
+(commodities, chemicals, memory chips, autos, building, shipping, energy), a last-year \
+operating margin well above its median over the history (H1) is a sign of peak earnings. A \
+VIE structure, or operations and cash held mainly in mainland China or another jurisdiction \
+with capital controls, scores at least 3 on governance.
 
 Rules:
 - Ground every rationale in the evidence and cite its ids. Do not add company-specific facts \
